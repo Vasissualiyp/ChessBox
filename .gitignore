@@ -1,0 +1,13 @@
+build/
+result
+result-*
+.direnv/
+.cache/
+compile_commands.json
+*.gcda
+*.gcno
+coverage/
+perf.data*
+*.rdc
+.idea/
+.vscode/
