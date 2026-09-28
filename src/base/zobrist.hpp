@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+
+#include <cstdint>
+#include <vector>
+
+#include "base/rng.hpp"
+
+namespace cb {
+
+/// Incremental position hashing. Keys are derived from (seed, variantId) so a
+/// hash is reproducible across runs and hosts - multiplayer desync detection and
+/// the replay corpus both rely on that (ARCH section 11).
+class Zobrist {
+ public:
+  void init(std::uint64_t seed, std::uint32_t cellCount, std::uint32_t pieceCodes,
+            std::uint32_t extraSlots);
+
+  [[nodiscard]] std::uint64_t piece(std::uint32_t cell, std::uint32_t code) const {
+    return pieceKeys_[static_cast<std::size_t>(cell) * pieceCodes_ + code];
+  }
+  [[nodiscard]] std::uint64_t side() const { return sideKey_; }
+  /// Key for "en-passant target is this cell". Index cellCount means "none".
+  [[nodiscard]] std::uint64_t epTarget(std::uint32_t cellOrNone) const {
+    return epKeys_[cellOrNone];
+  }
+  [[nodiscard]] std::uint64_t castleRights(std::uint32_t mask) const {
+    return castleKeys_[mask & 0xFFu];
+  }
+  /// Generic slot, used by hashed custom field columns (M5).
+  [[nodiscard]] std::uint64_t extra(std::uint32_t slot) const { return extraKeys_[slot]; }
+
+  [[nodiscard]] bool initialized() const noexcept { return pieceCodes_ != 0; }
+  [[nodiscard]] std::uint32_t pieceCodes() const noexcept { return pieceCodes_; }
+
+ private:
+  std::vector<std::uint64_t> pieceKeys_;
+  std::vector<std::uint64_t> epKeys_;
+  std::vector<std::uint64_t> castleKeys_;
+  std::vector<std::uint64_t> extraKeys_;
+  std::uint64_t sideKey_{0};
+  std::uint32_t pieceCodes_{0};
+};
+
+}  // namespace cb

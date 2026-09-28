@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+BasedOnStyle: Google
+ColumnLimit: 90
+IndentWidth: 2
+DerivePointerAlignment: false
+PointerAlignment: Left
+AllowShortFunctionsOnASingleLine: Inline
+IncludeBlocks: Preserve

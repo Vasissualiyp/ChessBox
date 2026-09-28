@@ -15,8 +15,11 @@ users. Two traps: (1) a piece crossing an orientation-reversing seam must have i
   coordinate transform. The action on direction vectors is *derived* from the
   transform's linear part, so authors cannot get transport wrong.
 - The identification set generates a finite transition group, validated at load.
-- Hot path: an interior test (precomputed per-direction margins) plus a plain
-  integer stride addition. Only boundary-crossing steps consult transport.
+- Hot path: a ray walk carries the flat cell index *and* the decoded coordinate,
+  so the interior test is a range comparison on the one to three axes in the
+  direction's support, and the step itself is a single integer add. Only
+  boundary-crossing steps consult transport. (Neither a per-direction interior
+  bitset nor a padded mailbox board is affordable past ~4 dimensions; ARCH §4.2.)
 - Transport is a table built for boundary cells only, with an analytic fallback
   when a variant would exceed the memory budget. Both paths are differentially
   tested against each other.

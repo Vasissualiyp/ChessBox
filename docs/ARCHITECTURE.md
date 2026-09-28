@@ -125,29 +125,53 @@ diagonal survives an axis swap. Transporting the direction, not just the
 position, is what makes non-orientable boards actually correct rather than
 merely non-crashing. **[INVARIANT]**
 
-### 4.2 The hot path: interior stride + boundary transport
+### 4.2 The hot path: coordinate-carrying walk + boundary transport
+
+A ray walk carries **both** the flat `CellId` and the decoded `Coord`. The
+coordinate is decoded once per piece (cheap, amortised over the whole ray) and
+then updated incrementally, so the interior test costs only a range comparison on
+the axes in the direction's *support* — typically one to three axes, never a
+decode, never a modulo:
 
 ```cpp
-// Step one unit of direction d from cell c. O(1), branch-predictable.
-inline StepResult step(CellId c, DirId d) const {
-  if (interior_.test(c, d))                  // precomputed margins, one test
-      return { CellId(c + dir_[d].delta), d };// pure integer add: no wrap math
-  return transport_.lookup(c, d);            // boundary: table or analytic
+struct Walker { CellId cell; Coord coord; };
+
+// Step one atom-length of direction d. O(|support|), no decode, no division.
+inline bool stepInterior(Walker& w, const DirEntry& d) const {
+  for (int k = 0; k < d.nsup; ++k) {              // usually 1..3 iterations
+    const int a = d.sup[k];
+    const int nv = w.coord.c[a] + d.v[a];
+    if (nv < 0 || nv >= extent_[a]) return false; // check all before mutating
+  }
+  for (int k = 0; k < d.nsup; ++k) {
+    const int a = d.sup[k];
+    w.coord.c[a] = static_cast<int16_t>(w.coord.c[a] + d.v[a]);
+  }
+  w.cell += d.delta;                              // one integer add
+  return true;
 }
 ```
 
-- Interior cells (the overwhelming majority for any interesting board) cost one
-  add. No modulo, no coordinate decode, no branch misprediction in the common
-  case.
-- Boundary cells consult a transport table keyed by `(cell, dir)`, built lazily
-  and only for boundary cells — memory is `O(boundaryCells × dirs)`, not
-  `O(cells × dirs)`. For a 7-D board this is the difference between megabytes
-  and gigabytes.
-- If a variant's boundary table would exceed a configured budget, the loader
-  falls back to the analytic transform path (slower, always correct). Both paths
-  are verified against each other by a differential test. **[INVARIANT]**
+Returning `false` means the step leaves the box; the geometry layer then consults
+the boundary transport (§4.1) to find where — and in which direction — the ray
+continues, or terminates the ray for an open face.
 
-Open (non-identified) faces produce `kInvalidCell`, which terminates a ray.
+Why not the obvious alternatives:
+
+- **A per-direction interior bitset** (`cells × dirs` bits) is the textbook trick
+  and is wrong here: a 7-axis board with 2688 directions would need hundreds of
+  megabytes.
+- **A padded mailbox board** (sentinel border, the classic chess technique) costs
+  `∏(extent+2p)` cells — a 17× blowup at D=7. Fine in 2-D, unaffordable in 7-D.
+- Carrying the coordinate has neither problem and keeps the inner loop
+  branch-predictable.
+
+Boundary transport itself is a table keyed by `(cell, dir)`, built for boundary
+cells only — memory is `O(boundaryCells × dirs)`, not `O(cells × dirs)` — with an
+analytic fallback when a variant exceeds the configured budget. Both paths are
+verified against each other by a differential test. **[INVARIANT]**
+
+Open (non-identified) faces terminate the ray.
 
 ### 4.3 Degenerate geometry
 

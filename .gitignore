@@ -11,3 +11,4 @@ perf.data*
 *.rdc
 .idea/
 .vscode/
+.claude/settings.local.json
