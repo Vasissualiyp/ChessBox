@@ -213,9 +213,9 @@ UiRequest Ui::buildPauseQuitConfirm(app::Shell& shell) {
   auto* mono = static_cast<ImFont*>(fontMono_);
 
   // The pause section's own quit prompt, a step back from the game rather than the main
-  // menu's. Same frame and pane as its neighbours, so it belongs where it is.
+  // menu's. Same board-over-scrim frame and pane as its neighbours, so it belongs here.
   ImVec2 menuMin, menuMax;
-  drawShellFrame(shell, menuMin, menuMax);
+  pauseFrame(request, menuMin, menuMax);
   const PaneMove move = paneMove();
   beginPane("##pausequit", menuMin, menuMax, move.scale, move.alpha, px(46.0f),
             !ghosting_);
@@ -591,6 +591,9 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
           }
         }
         ImGui::SameLine();
+        // How many step sizes this move has, so -/+ read as "one fewer/more".
+        ImGui::Text("%zu", list[i].mags.size());
+        ImGui::SameLine();
         if (ImGui::SmallButton("+")) {
           if (list[i].mags.size() < kMaxDims) {
             list[i].mags.push(1);
@@ -715,11 +718,16 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   app::Settings& s = shell.settings();
   const app::Settings before = s;
 
-  // Settings is a shell menu wherever it is opened from: same frame, pane and field as
-  // the main menu. Opened from pause it is a step further back from the game, not a card
-  // on top of it.
+  // From the main menu, Settings is a shell screen with the field and a deco; opened over
+  // a game it keeps the position behind it, like the rest of the pause section, and only
+  // takes the right of the frame.
+  const bool overBoard = shell.showsBoard();
   ImVec2 menuMin, menuMax;
-  drawShellFrame(shell, menuMin, menuMax);
+  if (overBoard) {
+    pauseFrame(request, menuMin, menuMax);
+  } else {
+    drawShellFrame(shell, menuMin, menuMax);
+  }
   const PaneMove move = paneMove();
   beginPane("##settings", menuMin, menuMax, move.scale, move.alpha, px(46.0f),
             !ghosting_);
@@ -912,8 +920,9 @@ UiRequest Ui::buildGameInfo(app::Shell& shell) {
   }
   const VariantSpec& v = session->variant();
 
+  // Over the position, like pause: the board keeps the left of the frame.
   ImVec2 menuMin, menuMax;
-  drawShellFrame(shell, menuMin, menuMax);
+  pauseFrame(request, menuMin, menuMax);
   const PaneMove move = paneMove();
   beginPane("##gameinfo", menuMin, menuMax, move.scale, move.alpha, px(46.0f),
             !ghosting_);
@@ -999,8 +1008,10 @@ UiRequest Ui::buildPieceMoves(app::Shell& shell) {
   }
   const VariantSpec& v = session->variant();
 
+  // Over the position, like pause: the board keeps the left of the frame, and the move
+  // diagram is drawn on top of it there.
   ImVec2 menuMin, menuMax;
-  drawShellFrame(shell, menuMin, menuMax);
+  pauseFrame(request, menuMin, menuMax);
   if (v.pieces.size() <= 1) {
     pieceMovesPick_ = 0;
   } else if (pieceMovesPick_ < 1 ||
@@ -1008,9 +1019,8 @@ UiRequest Ui::buildPieceMoves(app::Shell& shell) {
     pieceMovesPick_ = 1;
   }
 
-  // The left half is the screen's object: the move diagram of whichever piece the menu on
-  // the right has selected. Drawing it where a deco would go is what makes the reference
-  // look like every other shell menu.
+  // The left half is the move diagram of whichever piece the menu on the right has
+  // selected, on a soft card of its own so it reads over the blurred position behind.
   {
     ImGui::SetNextWindowPos(decoMin_);
     ImGui::SetNextWindowSize(ImVec2(decoMax_.x - decoMin_.x, decoMax_.y - decoMin_.y));
@@ -1044,6 +1054,13 @@ UiRequest Ui::buildPieceMoves(app::Shell& shell) {
     ImGui::SetCursorPos(
         ImVec2(ImGui::GetCursorPosX() + std::max(0.0f, (avail.x - side) * 0.5f),
                ImGui::GetCursorPosY() + std::max(0.0f, (avail.y - side) * 0.5f)));
+    // A soft card just behind the grid, so the blurred board does not show through the
+    // squares and turn the diagram to noise.
+    const ImVec2 gridAt = ImGui::GetCursorScreenPos();
+    ImGui::GetWindowDrawList()->AddRectFilled(
+        ImVec2(gridAt.x - px(10.0f), gridAt.y - px(10.0f)),
+        ImVec2(gridAt.x + side + px(10.0f), gridAt.y + side + px(10.0f)),
+        u32(t.soot, 0.82f), px(10.0f));
     drawMoveDiagram(v, piece, t, cell);
     ImGui::End();
     ImGui::PopStyleVar();
