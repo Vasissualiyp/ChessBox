@@ -257,6 +257,18 @@ bool& currentPaneRemember() {
   return remember;
 }
 
+/// The transition scale a pane's finished drawing is transformed by at endPane, and the
+/// point it is transformed about. One pane is built at a time (a departing ghost first,
+/// then the arriving screen), so a single slot is enough.
+float& paneTransitionScale() {
+  static float k = 1.0f;
+  return k;
+}
+ImVec2& paneTransitionCentre() {
+  static ImVec2 c{0, 0};
+  return c;
+}
+
 }  // namespace
 
 void beginPane(const char* id, ImVec2 min, ImVec2 max, float scale, float alpha,
@@ -264,7 +276,11 @@ void beginPane(const char* id, ImVec2 min, ImVec2 max, float scale, float alpha,
   const float k = std::max(0.05f, scale);
   const float a = std::clamp(alpha, 0.0f, 1.0f);
   const ImVec2 centre((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
-  const ImVec2 size((max.x - min.x - pad * 2.0f) * k, (max.y - min.y - pad * 2.0f) * k);
+  // The pane is always laid out at its settled size and position. The transition scale is
+  // applied at endPane to the *finished* drawing, about this centre, so the whole pane -
+  // card, rows and type together - zooms. Laying it out small and growing it instead
+  // anchors the type to the top-left corner, which reads as a slide rather than a zoom.
+  const ImVec2 size(max.x - min.x - pad * 2.0f, max.y - min.y - pad * 2.0f);
 
   ImGui::SetNextWindowPos(centre, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
   ImGui::SetNextWindowSize(size);
@@ -277,8 +293,14 @@ void beginPane(const char* id, ImVec2 min, ImVec2 max, float scale, float alpha,
                    ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar |
                    ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings |
                    ImGuiWindowFlags_NoBackground);
-  // Text has to travel with the pane or only the boxes move.
-  ImGui::SetWindowFontScale(k);
+  // Draw without the window's own clip, so a pane scaled up past its settled edge is not
+  // cut off there.
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  ImGui::PushClipRect(
+      vp->WorkPos, ImVec2(vp->WorkPos.x + vp->WorkSize.x, vp->WorkPos.y + vp->WorkSize.y),
+      false);
+  paneTransitionScale() = k;
+  paneTransitionCentre() = centre;
 
   currentPane() = id;
   currentPaneRemember() = remember;
@@ -294,7 +316,19 @@ void endPane() {
   if (currentPaneRemember()) {
     paneHeights()[currentPane()] = ImGui::GetCursorPosY() - currentPaneTop();
   }
-  ImGui::SetWindowFontScale(1.0f);
+  // Scale the pane's finished drawing about its centre. The clip pushed at beginPane is
+  // the whole viewport, so a pane that grows past its settled edge stays drawn.
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  const float k = paneTransitionScale();
+  if (k != 1.0f) {
+    const ImVec2 c = paneTransitionCentre();
+    for (int i = 0; i < dl->VtxBuffer.Size; ++i) {
+      ImVec2& p = dl->VtxBuffer[i].pos;
+      p.x = c.x + (p.x - c.x) * k;
+      p.y = c.y + (p.y - c.y) * k;
+    }
+  }
+  ImGui::PopClipRect();
   ImGui::End();
   ImGui::PopStyleColor(2);
   ImGui::PopStyleVar(2);

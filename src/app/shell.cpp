@@ -26,6 +26,7 @@ std::string_view screenName(Screen s) noexcept {
     case Screen::PieceMoves:
       return "piece moves";
     case Screen::QuitConfirm:
+    case Screen::PauseQuitConfirm:
       return "quit";
   }
   return "?";
@@ -42,12 +43,13 @@ int screenDepth(Screen s) noexcept {
       return 1;
     case Screen::Game:
       return 2;
-    // Pause and the reference screens sit over the game rather than beyond it: they are
-    // a step further in, and the board behind them stays where it is.
+    // Pause and the reference screens are one rung off the game, still in its context
+    // rather than out at the shell's own menus.
     case Screen::Paused:
     case Screen::GameInfo:
     case Screen::PieceMoves:
-      return 3;
+    case Screen::PauseQuitConfirm:
+      return 2;
   }
   return 0;
 }
@@ -64,18 +66,37 @@ std::unique_ptr<Shell> Shell::create(std::vector<std::string> library,
 }
 
 bool Shell::showsBoard() const noexcept {
-  // The pause and reference screens are overlays: seeing the position behind them is
-  // most of the reason to open them at all.
+  // The pause and reference screens sit over the position: the board stays behind them,
+  // pulled back and blurred, which is the whole look of stepping away from a game.
   switch (screen_) {
     case Screen::Game:
     case Screen::Paused:
     case Screen::GameInfo:
     case Screen::PieceMoves:
+    case Screen::PauseQuitConfirm:
       return session_ != nullptr;
     case Screen::Settings:
       return session_ != nullptr && previous_ != Screen::MainMenu;
     default:
       return false;
+  }
+}
+
+float Shell::boardPullBack() const noexcept {
+  if (session_ == nullptr) return 0.0f;
+  switch (screen_) {
+    case Screen::Game:
+      return 0.0f;
+    case Screen::Paused:
+      return 1.0f;
+    case Screen::GameInfo:
+    case Screen::PieceMoves:
+    case Screen::PauseQuitConfirm:
+      return 2.0f;
+    case Screen::Settings:
+      return previous_ != Screen::MainMenu ? 2.0f : 0.0f;
+    default:
+      return 0.0f;
   }
 }
 
@@ -102,6 +123,7 @@ void Shell::back() {
     case Screen::Editor:
     case Screen::NewGame:
     case Screen::QuitConfirm:
+    case Screen::PauseQuitConfirm:
       screen_ = previous_;
       break;
     case Screen::GameInfo:

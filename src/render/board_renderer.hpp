@@ -30,8 +30,10 @@ struct Instance {
   /// of a timeline connector - be placed in any of the four quadrants without four
   /// copies of the geometry.
   float roll{0};
+  /// 1 for a mirror face, which is shaded as polished metal; 0 for everything else.
+  float metal{0};
 };
-static_assert(sizeof(Instance) == 64);
+static_assert(sizeof(Instance) == 68);
 
 /// The sub-rectangle of the target the board is drawn into, in pixels. Zero width means
 /// the whole target. At namespace scope because a nested class's default member

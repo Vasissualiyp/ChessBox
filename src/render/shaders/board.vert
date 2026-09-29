@@ -17,6 +17,7 @@ layout(location = 6) in vec4 instEdge;    // seam colour; alpha 0 means no seam 
 layout(location = 7) in float instEdgeMask;
 
 layout(location = 8) in float instRoll;     // rotation about the mesh's own Z, radians
+layout(location = 9) in float instMetal;    // 1 for a mirror face, shaded as metal
 
 layout(push_constant) uniform Push {
     mat4 viewProj;
@@ -30,6 +31,7 @@ layout(location = 3) out vec4 fragEdge;
 layout(location = 4) out float fragEdgeMask;
 layout(location = 5) out float fragHeight;
 layout(location = 6) out vec2 fragEdgeInset;
+layout(location = 7) out float fragMetal;
 
 void main() {
     // Spin the mesh in its own plane before scaling, so one quarter-round corner can be
@@ -49,6 +51,7 @@ void main() {
     fragEdge = instEdge;
     fragEdgeMask = instEdgeMask;
     fragHeight = inHeight;
+    fragMetal = instMetal;
 
     // Where the seam band begins, in the box's own coordinates. Derived from the
     // instance's scale so the band is a constant *world* width: without this a large

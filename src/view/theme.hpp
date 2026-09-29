@@ -66,8 +66,9 @@ struct Theme {
   float seamHueEnd{0.88f};
   float seamSaturation{0.72f};
   float seamValue{0.95f};
-  /// A reflecting wall has nothing on the other side, so it gets no hue at all.
-  Rgba mirrorEdge{Rgba::hex(0xCBD2DC)};
+  /// A reflecting wall has nothing on the other side, so it gets no hue at all: it is
+  /// drawn as bright metal instead, a silvered mirror rather than a coloured portal.
+  Rgba mirrorEdge{Rgba::hex(0xFFFFFF)};
 
   // Semantic, deliberately separate from the accent.
   Rgba moss{Rgba::hex(0x8FB65C)};
@@ -137,7 +138,7 @@ struct Theme {
     // A light page needs darker seams than a dark one, or the ramp burns out against it.
     t.seamValue = 0.74f;
     t.seamSaturation = 0.80f;
-    t.mirrorEdge = Rgba::hex(0x8C96A8);
+    t.mirrorEdge = Rgba::hex(0xFFFFFF);
 
     t.moss = Rgba::hex(0x17937A);
     t.blood = Rgba::hex(0xD24A6A);

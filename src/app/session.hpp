@@ -62,7 +62,9 @@ class Session {
 
   /// How far the view has stepped back off the board, 0 to 1. Pause is the player
   /// looking up from the position, not a panel landing on top of it.
-  void setPullBack(float t) noexcept { pullBack_ = std::clamp(t, 0.0f, 1.0f); }
+  /// Camera pull-back, 0 at the board and growing as the shell steps away from it: 1 at
+  /// pause, 2 one step further into a pause panel.
+  void setPullBack(float t) noexcept { pullBack_ = std::clamp(t, 0.0f, 2.0f); }
   [[nodiscard]] float pullBack() const noexcept { return pullBack_; }
   /// Where the board is glued to itself, and in what colour. Built once per variant.
   [[nodiscard]] const view::SeamMap& seams() const noexcept { return seams_; }

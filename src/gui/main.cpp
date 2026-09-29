@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -456,12 +457,14 @@ int main(int argc, char** argv) {
     // board, the flat board's pieces and the picking ray cannot disagree about where
     // the camera is.
     if (shell->hasGame()) {
-      const float want = shell->screen() == app::Screen::Game ? 0.0f : 1.0f;
+      // The target comes from the shell: the board recedes at pause, and recedes again
+      // one step further in at a pause panel. Stepping back to the board brings it in.
+      const float want = shell->boardPullBack();
       steppedBack += std::clamp(want - steppedBack, -dt * 3.4f, dt * 3.4f);
       shell->session()->setPullBack(steppedBack);
       // Out of focus by the same amount the camera has stepped back, so the two read as
-      // one movement rather than as two effects that happen to coincide.
-      renderer->setBlur(steppedBack);
+      // one movement. Past the pause it is already fully soft.
+      renderer->setBlur(std::min(steppedBack, 1.0f));
     }
 
 #ifdef CB_HAVE_IMGUI
@@ -471,11 +474,11 @@ int main(int argc, char** argv) {
     (*ui)->endFrame();
 
     if (request.quit) running = false;
-    // Start when asked, unless it is already the game on screen. With nothing loaded,
-    // "the current variant" is only the remembered name, so a request that happens to
-    // match it must still start - otherwise picking the last-played variant does nothing.
-    if (!request.loadVariant.empty() &&
-        (!shell->hasGame() || request.loadVariant != shell->currentVariant())) {
+    // Start whenever the library asks, even for the variant that is already loaded:
+    // leaving a game and picking the same one again means "start over", and skipping it
+    // because the name matched left the button dead. A request is one-shot - the library
+    // is only built on its own screen - so this cannot restart a running game by itself.
+    if (!request.loadVariant.empty()) {
       (void)shell->startGame(request.loadVariant);
       renderer->setOptions(optionsFrom(shell->settings()));
     }
@@ -488,8 +491,19 @@ int main(int argc, char** argv) {
       SDL_SetWindowFullscreen(window->handle(), shell->settings().fullscreen);
     }
     if (request.boardRect[2] > 0) {
-      boardRect = render::BoardRect{request.boardRect[0], request.boardRect[1],
-                                    request.boardRect[2], request.boardRect[3]};
+      const render::BoardRect wanted{request.boardRect[0], request.boardRect[1],
+                                     request.boardRect[2], request.boardRect[3]};
+      // Ease the board's rectangle towards where the screen says it belongs, so opening
+      // or closing the pause menu slides the board aside instead of teleporting it.
+      const float k = std::clamp(dt * 8.0f, 0.0f, 1.0f);
+      const auto approach = [k](float& v, float to) {
+        v += (to - v) * k;
+        if (std::abs(to - v) < 0.5f) v = to;
+      };
+      approach(boardRect.x, wanted.x);
+      approach(boardRect.y, wanted.y);
+      approach(boardRect.width, wanted.width);
+      approach(boardRect.height, wanted.height);
     }
 #else
     const render::UiRequest request{};

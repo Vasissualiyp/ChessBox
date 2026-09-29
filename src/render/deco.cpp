@@ -459,8 +459,13 @@ Deco decoForScreen(int screen) noexcept {
       return Deco::Tesseract;
     case app::Screen::Editor:
       return Deco::Atom;
+    // The pause section and the quit prompts sit over the position, which is their
+    // object; there is nothing to draw beside them.
     case app::Screen::QuitConfirm:
-      // Nothing beside the prompt: the question is the whole screen.
+    case app::Screen::PauseQuitConfirm:
+    case app::Screen::Paused:
+    case app::Screen::GameInfo:
+    case app::Screen::PieceMoves:
       return Deco::None;
     default:
       return Deco::None;

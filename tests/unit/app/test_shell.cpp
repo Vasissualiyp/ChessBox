@@ -95,6 +95,20 @@ TEST_CASE("the game opens on the main menu with nothing loaded", "[unit][app]") 
   REQUIRE_FALSE(shell->quitRequested());
 }
 
+TEST_CASE("starting the same variant again begins a fresh game", "[unit][app]") {
+  // Leaving a game and picking the same variant from the library is "start over", not a
+  // no-op: the main loop used to skip the request when the name matched the running game.
+  auto shell = makeShell(tempSettings("restart.conf"));
+  REQUIRE(shell->startGame("standard").has_value());
+  REQUIRE(shell->session()->applyScript("click e2\nclick e4").has_value());
+  REQUIRE(shell->session()->game().plyCount() == 1);
+
+  shell->go(Screen::MainMenu);
+  REQUIRE(shell->startGame("standard").has_value());
+  REQUIRE(shell->screen() == Screen::Game);
+  REQUIRE(shell->session()->game().plyCount() == 0);  // a new game, not the old one
+}
+
 TEST_CASE("starting a game puts you in it", "[unit][app]") {
   auto shell = makeShell(tempSettings("start.conf"));
   REQUIRE(shell->startGame("standard").has_value());
@@ -140,11 +154,12 @@ TEST_CASE("quitting asks first, and backing out is free", "[unit][app]") {
 }
 
 TEST_CASE("pausing keeps the game and the board", "[unit][app]") {
-  // The pause screen is an overlay: losing sight of the position while paused would
-  // make "gamemode info" and "piece moves" much less useful than they should be.
+  // The pause screen sits over the position: losing sight of it while paused would make
+  // "game mode" and "piece moves" much less useful than they should be.
   auto shell = makeShell(tempSettings("pause.conf"));
   REQUIRE(shell->startGame("standard").has_value());
   REQUIRE(shell->session()->applyScript("click e2\nclick e4").has_value());
+  REQUIRE(shell->showsBoard());
 
   shell->pause();
   REQUIRE(shell->screen() == Screen::Paused);
@@ -158,7 +173,43 @@ TEST_CASE("pausing keeps the game and the board", "[unit][app]") {
 
   shell->resume();
   REQUIRE(shell->screen() == Screen::Game);
+  REQUIRE(shell->showsBoard());
   REQUIRE(shell->session()->game().plyCount() == 1);  // the position survived
+}
+
+TEST_CASE("the board recedes a step at each pause level", "[unit][app]") {
+  // The main loop animates the camera toward this: 0 on the board, 1 at pause, 2 one
+  // step further in at a pause panel.
+  auto shell = makeShell(tempSettings("pullback.conf"));
+  REQUIRE(shell->boardPullBack() == 0.0f);  // no game loaded
+  REQUIRE(shell->startGame("standard").has_value());
+  REQUIRE(shell->boardPullBack() == 0.0f);  // on the board
+
+  shell->pause();
+  REQUIRE(shell->boardPullBack() == 1.0f);
+  shell->go(Screen::GameInfo);
+  REQUIRE(shell->boardPullBack() == 2.0f);
+  shell->back();
+  REQUIRE(shell->screen() == Screen::Paused);
+  REQUIRE(shell->boardPullBack() == 1.0f);  // back to pause
+  shell->go(Screen::PieceMoves);
+  REQUIRE(shell->boardPullBack() == 2.0f);
+  shell->back();
+  REQUIRE(shell->boardPullBack() == 1.0f);
+  shell->resume();
+  REQUIRE(shell->boardPullBack() == 0.0f);  // back on the board
+}
+
+TEST_CASE("quitting from the pause menu uses its own prompt", "[unit][app]") {
+  auto shell = makeShell(tempSettings("pausequit.conf"));
+  REQUIRE(shell->startGame("standard").has_value());
+  shell->pause();
+  shell->go(Screen::PauseQuitConfirm);
+  REQUIRE(shell->screen() == Screen::PauseQuitConfirm);
+  REQUIRE_FALSE(shell->quitRequested());
+  shell->back();
+  REQUIRE(shell->screen() == Screen::Paused);
+  REQUIRE(shell->hasGame());
 }
 
 TEST_CASE("pausing with no game loaded does nothing", "[unit][app]") {

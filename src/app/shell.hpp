@@ -19,19 +19,16 @@ enum class Screen : std::uint8_t {
   Game,
   Paused,
   Settings,
-  Editor,       ///< board and piece designers, not built yet
-  GameInfo,     ///< what the loaded variant's rules actually are
-  PieceMoves,   ///< how each piece in the loaded variant moves
-  QuitConfirm,  ///< the "are you sure?" step before the window closes
+  Editor,            ///< board and piece designers, not built yet
+  GameInfo,          ///< what the loaded variant's rules actually are
+  PieceMoves,        ///< how each piece in the loaded variant moves
+  QuitConfirm,       ///< the "are you sure?" step before the window closes
+  PauseQuitConfirm,  ///< the same question, asked from the pause menu
 };
 
 std::string_view screenName(Screen s) noexcept;
 
-/// How far in from the front door a screen is.
-///
-/// The shell uses it for two things at once: the camera pushes forward when the depth
-/// increases and back when it decreases, and the decoration changes sides on every
-/// step. Both fall out of this number, so neither needs per-screen authoring.
+/// How far in from the front door a screen is - the rung the shell's ladder lights.
 int screenDepth(Screen s) noexcept;
 
 /// The application around the game: menus, settings, and the game itself.
@@ -61,9 +58,14 @@ class Shell {
   [[nodiscard]] const Session* session() const noexcept { return session_.get(); }
   [[nodiscard]] bool hasGame() const noexcept { return session_ != nullptr; }
 
-  /// True while the board should be drawn behind whatever screen is showing - the
-  /// pause and reference screens sit over the game rather than replacing it.
+  /// True while the board should be drawn behind whatever screen is showing - the pause
+  /// and reference screens sit over the game rather than replacing it.
   [[nodiscard]] bool showsBoard() const noexcept;
+
+  /// How far the board should be pulled back for the screen it is on: 0 on the board
+  /// itself, 1 at pause, 2 one step further in at a pause panel. Stepping away from the
+  /// game recedes it; the shell reports the target and the main loop animates towards it.
+  [[nodiscard]] float boardPullBack() const noexcept;
 
   void go(Screen s);
   void back();

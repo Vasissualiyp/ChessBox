@@ -126,7 +126,7 @@ Result<void> BoardRenderer::buildPipeline() {
   const VkVertexInputBindingDescription bindings[2]{
       {0, sizeof(MeshVertex), VK_VERTEX_INPUT_RATE_VERTEX},
       {1, sizeof(Instance), VK_VERTEX_INPUT_RATE_INSTANCE}};
-  const VkVertexInputAttributeDescription attrs[9]{
+  const VkVertexInputAttributeDescription attrs[10]{
       {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, pos)},
       {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, normal)},
       {2, 0, VK_FORMAT_R32_SFLOAT, offsetof(MeshVertex, height)},
@@ -135,13 +135,14 @@ Result<void> BoardRenderer::buildPipeline() {
       {5, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, color)},
       {6, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, edge)},
       {7, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, edgeMask)},
-      {8, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, roll)}};
+      {8, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, roll)},
+      {9, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, metal)}};
 
   VkPipelineVertexInputStateCreateInfo vi{};
   vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
   vi.vertexBindingDescriptionCount = 2;
   vi.pVertexBindingDescriptions = bindings;
-  vi.vertexAttributeDescriptionCount = 9;
+  vi.vertexAttributeDescriptionCount = 10;
   vi.pVertexAttributeDescriptions = attrs;
 
   VkPipelineInputAssemblyStateCreateInfo ia{};
@@ -651,6 +652,8 @@ InstanceSet BoardRenderer::buildInstances(
         rail.scale[1] = (f.screenAxis == 1 ? 0.07f : 0.5f) / half.y;
         rail.scale[2] = 0.055f / half.z;
         toFloat4(f.color, rail.color);
+        // A mirror is drawn as metal; a glued portal keeps the matte seam colour.
+        rail.metal = f.kind == view::SeamKind::Mirror ? 1.0f : 0.0f;
         byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(rail);
       }
     }
