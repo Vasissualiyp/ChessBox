@@ -17,7 +17,7 @@ may rebuild and redistribute. **Two issues to handle explicitly:**
 1. Linking the proprietary Steamworks SDK into GPL code needs an additional
    permission (a linking exception) from the copyright holders, or Steam support
    must live in a separate, optional, non-GPL-linked component. Addressed in
-   `docs/LICENSING.md` during M8; the M8 plan already isolates Steam behind an
+   `docs/LICENSING.md` during M9; the M9 plan already isolates Steam behind an
    interface with a working Steam-absent path, which keeps both options open.
 2. GPL (unlike AGPL) does not reach the hosted server case; accepted knowingly.
 

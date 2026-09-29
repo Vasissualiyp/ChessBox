@@ -7,7 +7,7 @@ Read this first. It is the map. Design rationale is in
 
 **Status: M0-M6 complete.** A playable, perft-exact engine with N-dimensional boards,
 non-trivial boundary topology, a Vulkan interface, a rule VM, and 5D-chess-style time
-travel. Next: M7 (multiplayer), M8 (Workshop), M9 (AI).
+travel. Next: M7 (the GUI editors), M8 (multiplayer), M9 (Workshop), M10 (AI).
 See [`docs/plan/00-roadmap.md`](docs/plan/00-roadmap.md); each milestone plan ends with
 a status section recording what was built, what was deferred, and why.
 

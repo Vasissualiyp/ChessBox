@@ -1,4 +1,4 @@
-# M7 — Client–Server Multiplayer
+# M8 — Client–Server Multiplayer
 
 **Goal:** authoritative server, thin clients, determinism-verified. Turn-based
 games do not need rollback netcode; they need airtight validation and
@@ -7,7 +7,7 @@ reconnection.
 **Exit condition:** two clients play every shipped variant class across a lossy
 link, with server-side validation and full replay reproduction.
 
-## M7.1 Architecture
+## M8.1 Architecture
 
 - Authoritative server owns the `Game`; clients send *intents*, receive
   validated state deltas. A client never advances state on its own authority
@@ -19,7 +19,7 @@ link, with server-side validation and full replay reproduction.
   hand-written against a schema test; forward/backward compatibility rules
   documented and tested.
 
-## M7.2 Determinism and identity
+## M8.2 Determinism and identity
 
 - Clients and server must agree on `VariantId` (ARCH §11) before a game starts;
   mismatch is a clean, explained refusal, never a desync.
@@ -28,16 +28,16 @@ link, with server-side validation and full replay reproduction.
   loudly rather than silently diverging. **[INVARIANT]**
 - The replay corpus runs in CI through the network layer, not just in-process.
 
-## M7.3 Features
+## M8.3 Features
 
 - Lobby, matchmaking-lite (direct challenge + public list), spectators,
   reconnection with full state resync, per-player clocks (integer milliseconds;
   no floats), resign/draw offers/takebacks as protocol actions, server-side
   game persistence and replay export.
 - Variant transfer: a client missing a variant receives the (hashed, validated)
-  variant package from the server, subject to M8's validation rules.
+  variant package from the server, subject to M9's validation rules.
 
-## M7.4 Testing
+## M8.4 Testing
 
 - In-process transport fake for deterministic protocol tests (the default; fast).
 - A network harness injecting latency, loss, reordering, truncation, and

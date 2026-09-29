@@ -121,7 +121,7 @@ Recorded 2026-09-28.
 ADR-0006 named the Vulkan Memory Allocator. The renderer makes about five allocations -
 two images, three buffers - so a sub-allocator would be a dependency carrying no weight.
 Allocation goes through one helper and `VulkanContext::findMemoryType`, so introducing
-VMA later is a change in one place. Revisit when assets arrive (M8) and the allocation
+VMA later is a change in one place. Revisit when assets arrive (M9) and the allocation
 count stops being a handful.
 
 ### Deviation 2: CPU picking rather than instance-id readback

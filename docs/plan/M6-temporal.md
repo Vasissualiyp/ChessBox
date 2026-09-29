@@ -57,7 +57,7 @@ time-travel rules subtly wrong, which is the dominant risk of this milestone.
   does not rescan the multiverse.
 - Incremental attack maps become mandatory here rather than optional; introduced
   behind the oracle differential test as always.
-- Move submission is the search unit for M9, so the API is designed for batched
+- Move submission is the search unit for M10, so the API is designed for batched
   make/unmake of move *sets* with exact reversibility.
 - **Bench:** node throughput on the reference presets; a documented target and a
   regression gate.

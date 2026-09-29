@@ -19,16 +19,17 @@ the next variant, dimension, or topology should be data, not code.
 
 ## Status
 
-**Pre-implementation.** The design and plan are complete and are the current
-deliverable:
+**M0–M6 complete.** The engine, the Vulkan interface, the rule VM and the temporal /
+multiverse model all ship; the game plays N-dimensional and time-travel variants. Next
+is M7, the GUI editors. The design and plan are the reference:
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the design
-- [`docs/plan/00-roadmap.md`](docs/plan/00-roadmap.md) — milestones M0–M9, each
+- [`docs/plan/00-roadmap.md`](docs/plan/00-roadmap.md) — milestones M0–M10, each
   with its own detailed plan
 - [`docs/adr/`](docs/adr/README.md) — decisions and why
 - [`AGENTS.md`](AGENTS.md) — the map, for humans and agents alike
 
-## Quickstart (once M0 lands)
+## Quickstart
 
 ```bash
 nix develop                    # reproducible toolchain

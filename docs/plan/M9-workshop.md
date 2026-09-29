@@ -1,9 +1,9 @@
-# M8 — Steam Workshop & Packaging
+# M9 — Steam Workshop & Packaging
 
 **Goal:** users publish and consume variants safely. The sandboxed data-only
 design (ADR-0005) is what makes this tractable — there is no code to sandbox.
 
-## M8.1 Variant package format
+## M9.1 Variant package format
 
 - A package is a directory/zip: `variant.toml`, optional assets (piece sprites,
   models, board textures), `README.md`, a manifest with name, version, author,
@@ -13,7 +13,7 @@ design (ADR-0005) is what makes this tractable — there is no code to sandbox.
 - Deterministic packaging: the same inputs produce a byte-identical package, so
   the hash is meaningful.
 
-## M8.2 Validator (the security boundary) **[INVARIANT]**
+## M9.2 Validator (the security boundary) **[INVARIANT]**
 
 A single `chessbox validate <package>` used by the publish flow, the client on
 install, and CI. Checks: schema validity, typed rule signatures, resource budgets
@@ -21,7 +21,7 @@ install, and CI. Checks: schema validity, typed rule signatures, resource budget
 whitelist, path-traversal safety, and a smoke play-out of N random games to prove
 the variant does not deadlock or explode. Hostile-input corpus + fuzzing.
 
-## M8.3 Steam integration
+## M9.3 Steam integration
 
 - Steamworks SDK behind a thin interface with a working offline/no-Steam fallback
   path, so the game and its tests never require Steam. **[INVARIANT]**
@@ -31,7 +31,7 @@ the variant does not deadlock or explode. Hostile-input corpus + fuzzing.
   with a documented licensing note (GPL + Steamworks interaction addressed in
   `docs/LICENSING.md`) — flagged now because it is a real issue, not a detail.
 
-## M8.4 Distribution
+## M9.4 Distribution
 
 - Reproducible Linux build from the flake; Windows and macOS builds; a
   self-contained CLI tarball for server operators.

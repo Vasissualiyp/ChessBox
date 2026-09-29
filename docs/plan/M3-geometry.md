@@ -71,7 +71,7 @@ becomes an explicit, documented, per-variant policy with tests for every option:
 - **En passant** when the passed cell is reached by two different transported
   paths.
 - **Bishop colour-binding** loss, which changes material evaluation — recorded
-  for M9, and surfaced in the variant docs.
+  for M10, and surfaced in the variant docs.
 
 ## M3.5 Renderer metadata
 

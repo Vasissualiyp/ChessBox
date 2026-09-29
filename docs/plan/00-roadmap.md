@@ -30,9 +30,10 @@ directory. Read `docs/ARCHITECTURE.md` first.
 | M4 | Vulkan renderer + interaction | playable 2D/3D/4D+ board on screen | **done**, three deviations recorded | [M4](M4-renderer.md) |
 | M5 | Variant VM + custom fields | explosive, checkers, regional variants; quantum design | **done**, variant catalogue partial | [M5](M5-variant-vm.md) |
 | M6 | Temporal / multiverse (5D chess) | faithful 5D chess, generalized extra axes | **done**; two axis generalizations planned, not required | [M6](M6-temporal.md) |
-| M7 | Client–server multiplayer | authoritative server, lockstep-verified replay | not started | [M7](M7-net.md) |
-| M8 | Steam Workshop + packaging | variant packages, validation, signing, distribution | not started | [M8](M8-workshop.md) |
-| M9 | Trainable per-variant AI | search + learned eval, self-play harness | not started | [M9](M9-ai.md) |
+| M7 | GUI authoring: piece editor, then game editor | author pieces and whole variants in the GUI: vector moves, fields, rules, 3-D and 2-D models | next | [M7](M7-editors.md) |
+| M8 | Client–server multiplayer | authoritative server, lockstep-verified replay | not started | [M8](M8-net.md) |
+| M9 | Steam Workshop + packaging | variant packages, validation, signing, distribution | not started | [M9](M9-workshop.md) |
+| M10 | Trainable per-variant AI | search + learned eval, self-play harness | not started | [M10](M10-ai.md) |
 
 Each completed milestone's plan file ends with a **Status** section recording what was
 built, what was deferred, and why - including the places where the plan turned out to
@@ -54,6 +55,10 @@ be wrong. Read those before trusting the plan text above them.
   in terms of regions and neighbourhoods, which are geometry concepts.
 - **Time travel late (M6).** It is the most rule-dense subsystem and it sits on
   top of everything else; it is also where an unproven core hurts most.
+- **Authoring before distribution (M7).** The whole point of the sandbox is that
+  someone can make a game without touching C++; the Workshop (M9) exists to move
+  that authored content, so the editors have to exist first. Multiplayer (M8) is
+  independent and could swap with M7 without loss.
 - **Escape hatch:** if visible progress is needed sooner than M4, M2 ends with a
   terminal (TUI) multi-slice viewer — cheap, testable, and enough to play 3D/4D
   boards by hand. The Vulkan work stays where it is.
@@ -87,6 +92,8 @@ checked by `nix flake check`, which is the single source of truth. **[INVARIANT]
 | Vulkan complexity delaying everything | M4 | strict scope: one pipeline, instanced quads/cubes, no PBR, no shadows in M4 |
 | Determinism drift (float, iteration order, hash) | all | no floats in engine core **[INVARIANT]**; canonical iteration orders; replay corpus in CI |
 | Quantum chess may not fit the model | M5 | scoped as a design study with an interface hook, not promised as delivered |
+| Canonical variant serialization drifts from `VariantId` | M7 | pin a load→save→load round-trip with an unchanged `VariantId` before any writer ships |
+| User-defined piece geometry is open-ended | M7 | ship the radial revolve + mirror subset first; the primitive fallback keeps any piece playable |
 
 ## Definition of "generalizable" used throughout
 
