@@ -20,3 +20,4 @@ Template: [`template.md`](template.md).
 | [0007](0007-temporal-model.md) | Time travel as policies over extra axes | Accepted |
 | [0008](0008-license.md) | GPL-3.0-or-later | Accepted |
 | [0009](0009-tdd-and-oracle.md) | Naive oracle + differential/property testing | Accepted |
+| [0010](0010-closed-surface-ray-semantics.md) | Ray termination, dedup, and attack queries on glued boards | Accepted |

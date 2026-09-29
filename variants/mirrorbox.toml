@@ -1,0 +1,125 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# mirrorbox - a board whose file walls reflect instead of stopping.
+#
+# A ray reaching the a-file or the h-file bounces and continues in the mirrored
+# direction, exactly as light would. Unlike every other geometry here nothing is
+# glued: the board still has 64 distinct cells, and it stays orientable, so pawns and
+# promotion are kept.
+
+name = "mirrorbox"
+side_to_move = "white"
+en_passant = true
+stalemate = "draw"
+halfmove_draw_limit = 100
+orientation_axis = "rank"
+
+[[axis]]
+name = "file"
+extent = 8
+
+[[axis]]
+name = "rank"
+extent = 8
+
+[[geometry.identify]]
+axis = "file"
+side = "max"
+kind = "mirror"
+
+[[geometry.identify]]
+axis = "file"
+side = "min"
+kind = "mirror"
+
+[promotion]
+rank = 7
+
+[[piece]]
+name = "pawn"
+symbol = "P"
+resets_draw_clock = true
+promotes_to = ["knight", "bishop", "rook", "queen"]
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+  capture = "cannot"
+  forward = true
+
+  [[piece.move]]
+  vector = [1]
+  min = 2
+  max = 2
+  mode = "slide"
+  capture = "cannot"
+  forward = true
+  from_rank = 1
+  leaves_en_passant = true
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+  capture = "must"
+  forward = true
+
+[[piece]]
+name = "knight"
+symbol = "N"
+
+  [[piece.move]]
+  vector = [1, 2]
+  max = 1
+  mode = "leap"
+
+[[piece]]
+name = "bishop"
+symbol = "B"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "rook"
+symbol = "R"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "queen"
+symbol = "Q"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "king"
+symbol = "K"
+royal = true
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+
+[start]
+board = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"

@@ -1,0 +1,128 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# torus - standard chess on a board with no edges at all.
+#
+# Both axes are glued, so every cell has exactly eight neighbours and no piece can
+# ever be cornered. A rook's rank is a closed loop of eight cells; a bishop's
+# diagonal closes after eight steps.
+#
+# Pawns survive, because a torus is orientable and "forward" therefore still has a
+# consistent global meaning. Promotion does not: there is no last rank to reach, so
+# no [promotion] block is declared and pawns simply never promote. Castling is also
+# gone - with the files glued, "between the king and the rook" is ambiguous. Both are
+# per-variant policy decisions, not engine behaviour (docs/plan/M3-geometry.md 3.4).
+
+name = "torus"
+side_to_move = "white"
+en_passant = true
+stalemate = "draw"
+halfmove_draw_limit = 100
+orientation_axis = "rank"
+
+[[axis]]
+name = "file"
+extent = 8
+
+[[axis]]
+name = "rank"
+extent = 8
+
+[[geometry.identify]]
+axis = "file"
+kind = "periodic"
+
+[[geometry.identify]]
+axis = "rank"
+kind = "periodic"
+
+[[piece]]
+name = "pawn"
+symbol = "P"
+resets_draw_clock = true
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+  capture = "cannot"
+  forward = true
+
+  [[piece.move]]
+  vector = [1]
+  min = 2
+  max = 2
+  mode = "slide"
+  capture = "cannot"
+  forward = true
+  from_rank = 1
+  leaves_en_passant = true
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+  capture = "must"
+  forward = true
+
+[[piece]]
+name = "knight"
+symbol = "N"
+
+  [[piece.move]]
+  vector = [1, 2]
+  max = 1
+  mode = "leap"
+
+[[piece]]
+name = "bishop"
+symbol = "B"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "rook"
+symbol = "R"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "queen"
+symbol = "Q"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "king"
+symbol = "K"
+royal = true
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+
+# The armies are placed four ranks apart rather than in the usual array. On a torus
+# the usual array is unplayable: rank 1 and rank 8 are *adjacent*, so the two back
+# rows start in mutual contact and White is already in an inescapable check. The
+# board having no edges changes what a sensible opening setup is.
+[start]
+board = "8/8/8/rnbqkbnr/pppppppp/8/PPPPPPPP/RNBQKBNR"

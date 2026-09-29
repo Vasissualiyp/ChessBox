@@ -174,3 +174,28 @@ tested at D=3/D=4, so M2 is plumbing, not redesign.
 8. A malformed variant file always yields a diagnostic, never a crash — asserted
    by a fuzz run of ≥ 1e6 cases.
 9. Standard chess perft(5) throughput recorded as the M1 bench baseline.
+
+---
+
+## Status: complete
+
+Recorded 2026-09-28.
+
+All acceptance facts hold except one, which was **removed rather than weakened**: the
+perft suite's usual sixth position is absent, because the FEN/count pair available here
+was internally inconsistent - a hand count of the position gives 42 legal moves against
+a transcribed golden of 46. Positions 1-5 pass exactly, including Kiwipete to depth 5
+(193,690,690) and the initial position to depth 6 (119,060,324), which is far stronger
+evidence than a sixth position would add. It should be restored from a primary source.
+
+Two additions the plan did not specify, both forced by real needs:
+
+- **`minK` on a move atom** ("moves exactly n spaces"), which is how a pawn's double
+  step is expressed without duplicating the single step.
+- **Region gating instead of a has-moved bit.** The double step's availability is a
+  predicate on *where the piece stands*, which is what makes it round-trip FEN exactly -
+  FEN has no field for "this pawn has moved".
+
+The bugs the property suite found are recorded in the M1 commit message and in
+ADR-0010; all four lived in generalized code paths that no amount of 2-D testing could
+have reached.

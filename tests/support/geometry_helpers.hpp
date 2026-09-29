@@ -37,7 +37,8 @@ struct Orbit {
   bool orientationFlipped{false};
 };
 
-inline Orbit walk(const Geometry& g, CellId from, const Direction& d, int maxSteps = 4096) {
+inline Orbit walk(const Geometry& g, CellId from, const Direction& d,
+                  int maxSteps = 4096) {
   Orbit out;
   Walker w = g.start(from, d);
   const Direction startDir = d;

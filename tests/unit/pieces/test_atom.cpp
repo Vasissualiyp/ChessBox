@@ -57,8 +57,9 @@ TEST_CASE("atom expansion matches the closed form for every atom and dimension",
   // Enumeration and formula are computed independently; agreement over the whole
   // small-atom space is what catches duplicate-magnitude double counting.
   const std::vector<std::vector<int>> atoms{
-      {1}, {2}, {3}, {1, 1}, {1, 2}, {2, 2}, {1, 3}, {1, 1, 1}, {1, 1, 2},
-      {1, 2, 2}, {1, 2, 3}, {1, 1, 1, 1}, {1, 1, 2, 2}, {1, 2, 3, 4}};
+      {1},       {2},          {3},          {1, 1},      {1, 2},
+      {2, 2},    {1, 3},       {1, 1, 1},    {1, 1, 2},   {1, 2, 2},
+      {1, 2, 3}, {1, 1, 1, 1}, {1, 1, 2, 2}, {1, 2, 3, 4}};
   for (const auto& a : atoms) {
     for (int d = 1; d <= kMaxDims; ++d) {
       const auto m = mags({});

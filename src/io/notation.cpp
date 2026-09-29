@@ -30,7 +30,8 @@ Result<CellId> parseCell(const DimSpec& d, std::string_view text) {
 
   if (text.front() == '(') {
     if (text.back() != ')') {
-      return fail(ErrorCode::ParseError, "cell '" + std::string(text) + "' is missing its ')'");
+      return fail(ErrorCode::ParseError,
+                  "cell '" + std::string(text) + "' is missing its ')'");
     }
     Coord p(d.dims());
     std::size_t axis = 0;
@@ -48,15 +49,15 @@ Result<CellId> parseCell(const DimSpec& d, std::string_view text) {
       }
       if (axis >= d.dims()) {
         return fail(ErrorCode::ParseError,
-                    "cell '" + std::string(text) + "' has more coordinates than the board has axes");
+                    "cell '" + std::string(text) +
+                        "' has more coordinates than the board has axes");
       }
       p.c[axis++] = static_cast<std::int16_t>(value);
       i = j + 1;
     }
     if (axis != d.dims()) {
-      return fail(ErrorCode::ParseError,
-                  "cell '" + std::string(text) + "' needs " + std::to_string(d.dims()) +
-                      " coordinates");
+      return fail(ErrorCode::ParseError, "cell '" + std::string(text) + "' needs " +
+                                             std::to_string(d.dims()) + " coordinates");
     }
     if (!d.inRange(p)) {
       return fail(ErrorCode::OutOfRange, "cell " + p.toString() + " is off the board");
@@ -65,8 +66,9 @@ Result<CellId> parseCell(const DimSpec& d, std::string_view text) {
   }
 
   if (!algebraic(d)) {
-    return fail(ErrorCode::ParseError,
-                "this board needs the '(x,y,...)' cell form, not '" + std::string(text) + "'");
+    return fail(
+        ErrorCode::ParseError,
+        "this board needs the '(x,y,...)' cell form, not '" + std::string(text) + "'");
   }
   if (text.size() != 2 || text[0] < 'a' || text[1] < '1') {
     return fail(ErrorCode::ParseError, "'" + std::string(text) + "' is not a cell name");
@@ -75,7 +77,8 @@ Result<CellId> parseCell(const DimSpec& d, std::string_view text) {
   p.c[0] = static_cast<std::int16_t>(text[0] - 'a');
   p.c[1] = static_cast<std::int16_t>(text[1] - '1');
   if (!d.inRange(p)) {
-    return fail(ErrorCode::OutOfRange, "cell '" + std::string(text) + "' is off the board");
+    return fail(ErrorCode::OutOfRange,
+                "cell '" + std::string(text) + "' is off the board");
   }
   return d.toCell(p);
 }

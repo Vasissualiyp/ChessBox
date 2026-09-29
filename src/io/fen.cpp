@@ -31,9 +31,8 @@ std::string toFen(const Position& p) {
         }
         flush();
         const char sym = v.pieces[piece.type].symbol;
-        board += piece.colorOf() == Color::White
-                     ? static_cast<char>(std::toupper(sym))
-                     : static_cast<char>(std::tolower(sym));
+        board += piece.colorOf() == Color::White ? static_cast<char>(std::toupper(sym))
+                                                 : static_cast<char>(std::tolower(sym));
       },
       [&](std::uint8_t axis) {
         if (axis >= d.dims()) return;  // the final rollover writes no separator
@@ -49,8 +48,9 @@ std::string toFen(const Position& p) {
   if (castling.empty()) castling = "-";
 
   std::ostringstream out;
-  out << board << ' ' << (p.sideToMove() == Color::White ? 'w' : 'b') << ' ' << castling << ' '
-      << cellName(d, p.epTarget()) << ' ' << p.halfmoveClock() << ' ' << p.fullmoveNumber();
+  out << board << ' ' << (p.sideToMove() == Color::White ? 'w' : 'b') << ' ' << castling
+      << ' ' << cellName(d, p.epTarget()) << ' ' << p.halfmoveClock() << ' '
+      << p.fullmoveNumber();
   return out.str();
 }
 
@@ -83,7 +83,8 @@ Result<Position> fromFen(const VariantSpec& v, std::string_view fen) {
     if (ch == '/' || ch == '|') continue;  // separators carry no cells
     if (std::isdigit(static_cast<unsigned char>(ch)) != 0) {
       std::size_t j = i;
-      while (j < board.size() && std::isdigit(static_cast<unsigned char>(board[j])) != 0) ++j;
+      while (j < board.size() && std::isdigit(static_cast<unsigned char>(board[j])) != 0)
+        ++j;
       int skip = 0;
       std::from_chars(board.data() + i, board.data() + j, skip);
       idx += static_cast<std::size_t>(skip);
@@ -93,22 +94,23 @@ Result<Position> fromFen(const VariantSpec& v, std::string_view fen) {
     const char upper = static_cast<char>(std::toupper(ch));
     const PieceTypeId type = v.findPieceBySymbol(upper);
     if (type == kNoPiece) {
-      return fail(ErrorCode::ParseError,
-                  std::string("no piece in variant '") + v.name + "' has the symbol '" + ch + "'");
+      return fail(ErrorCode::ParseError, std::string("no piece in variant '") + v.name +
+                                             "' has the symbol '" + ch + "'");
     }
     if (idx >= order.size()) {
       return fail(ErrorCode::ParseError,
                   "the board section describes more cells than the board has (" +
                       std::to_string(d.cellCount()) + ")");
     }
-    const Color color = std::isupper(static_cast<unsigned char>(ch)) != 0 ? Color::White : Color::Black;
+    const Color color =
+        std::isupper(static_cast<unsigned char>(ch)) != 0 ? Color::White : Color::Black;
     p.place(order[idx], type, color);
     ++idx;
   }
   if (idx != order.size()) {
     return fail(ErrorCode::ParseError,
-                "the board section describes " + std::to_string(idx) + " cells but the board has " +
-                    std::to_string(order.size()));
+                "the board section describes " + std::to_string(idx) +
+                    " cells but the board has " + std::to_string(order.size()));
   }
 
   // ---- side to move --------------------------------------------------------
@@ -117,7 +119,8 @@ Result<Position> fromFen(const VariantSpec& v, std::string_view fen) {
   } else if (fields[1] == "b") {
     p.setSideToMove(Color::Black);
   } else {
-    return fail(ErrorCode::ParseError, "side to move must be 'w' or 'b', not '" + fields[1] + "'");
+    return fail(ErrorCode::ParseError,
+                "side to move must be 'w' or 'b', not '" + fields[1] + "'");
   }
 
   // ---- castling rights -----------------------------------------------------
@@ -133,9 +136,8 @@ Result<Position> fromFen(const VariantSpec& v, std::string_view fen) {
         }
       }
       if (!found) {
-        return fail(ErrorCode::ParseError,
-                    std::string("castling field mentions '") + ch +
-                        "', which this variant does not declare");
+        return fail(ErrorCode::ParseError, std::string("castling field mentions '") + ch +
+                                               "', which this variant does not declare");
       }
     }
     p.setCastleRights(mask);
@@ -149,11 +151,13 @@ Result<Position> fromFen(const VariantSpec& v, std::string_view fen) {
     // mover's forward direction. Found through the geometry so that a wrapped
     // board gives the right answer rather than an arithmetic one.
     if (v.orientationAxis < 0) {
-      return fail(ErrorCode::ValidationError,
-                  "this variant has no orientation axis, so an en-passant target is meaningless");
+      return fail(
+          ErrorCode::ValidationError,
+          "this variant has no orientation axis, so an en-passant target is meaningless");
     }
     std::array<std::int16_t, kMaxDims> back{};
-    back[static_cast<std::size_t>(v.orientationAxis)] = p.sideToMove() == Color::White ? -1 : 1;
+    back[static_cast<std::size_t>(v.orientationAxis)] =
+        p.sideToMove() == Color::White ? -1 : 1;
     Walker w = v.geom.start(*target, Direction::make(back, d.dims()));
     if (!v.geom.step(w)) {
       return fail(ErrorCode::ValidationError,
@@ -165,8 +169,10 @@ Result<Position> fromFen(const VariantSpec& v, std::string_view fen) {
   // ---- clocks --------------------------------------------------------------
   int halfmove = 0;
   int fullmove = 1;
-  if (fields.size() > 4) std::from_chars(fields[4].data(), fields[4].data() + fields[4].size(), halfmove);
-  if (fields.size() > 5) std::from_chars(fields[5].data(), fields[5].data() + fields[5].size(), fullmove);
+  if (fields.size() > 4)
+    std::from_chars(fields[4].data(), fields[4].data() + fields[4].size(), halfmove);
+  if (fields.size() > 5)
+    std::from_chars(fields[5].data(), fields[5].data() + fields[5].size(), fullmove);
   p.setClocks(halfmove, fullmove);
 
   return p;

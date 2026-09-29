@@ -1,0 +1,143 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# cube5 - a 5x5x5 three-dimensional variant.
+#
+# The piece set follows Raumschach (Maack, 1907), whose movement rules are
+# historically settled: the unicorn travels the triagonals, the bishop the planar
+# diagonals, and the queen combines rook, bishop and unicorn. The *pawn* rules and
+# promotion conditions below are ChessBox's own choice, plainly stated rather than
+# presented as a reconstruction - see docs/variants/cube5.md. A faithful Raumschach
+# needs its pawn rules taken from a primary source first.
+#
+# What this variant is really for: it is the smallest board on which the vector-move
+# algebra's third-order atoms ([1,1,1]) mean anything, and it shows that a piece set
+# for three dimensions is a data file rather than engine code.
+
+name = "cube5"
+side_to_move = "white"
+en_passant = false
+stalemate = "draw"
+halfmove_draw_limit = 100
+orientation_axis = "rank"
+
+[[axis]]
+name = "file"
+extent = 5
+
+[[axis]]
+name = "rank"
+extent = 5
+
+[[axis]]
+name = "level"
+extent = 5
+
+[promotion]
+rank = 4
+
+[[piece]]
+name = "pawn"
+symbol = "P"
+resets_draw_clock = true
+promotes_to = ["queen", "rook", "bishop", "knight", "unicorn"]
+
+  # One step along the rank axis. No double step: on a five-rank board it would
+  # reach the middle of the board on move one.
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+  capture = "cannot"
+  forward = true
+
+  # Captures on the forward diagonals. In three dimensions the same [1,1] atom
+  # gives four of them - two within the level and two between levels - without any
+  # extra declaration. This is the generalization doing its job.
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+  capture = "must"
+  forward = true
+
+[[piece]]
+name = "knight"
+symbol = "N"
+
+  [[piece.move]]
+  vector = [1, 2]
+  max = 1
+  mode = "leap"
+
+[[piece]]
+name = "bishop"
+symbol = "B"
+
+  # Planar diagonals: 12 directions in three dimensions.
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "unicorn"
+symbol = "U"
+
+  # Triagonals: the piece that exists only once there is a third dimension.
+  [[piece.move]]
+  vector = [1, 1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "rook"
+symbol = "R"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "queen"
+symbol = "Q"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+  [[piece.move]]
+  vector = [1, 1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "king"
+symbol = "K"
+royal = true
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+
+  [[piece.move]]
+  vector = [1, 1, 1]
+  max = 1
+  mode = "leap"
+
+# Levels are separated by "|", ranks by "/". White occupies levels 0 and 1, Black
+# levels 3 and 4; level 2 starts empty.
+[start]
+board = "5/5/5/PPPPP/RNKNR|5/5/5/PPPPP/BUQUB|5/5/5/5/5|buqub/ppppp/5/5/5|rnknr/ppppp/5/5/5"

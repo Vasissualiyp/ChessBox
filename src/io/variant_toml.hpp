@@ -17,7 +17,8 @@ namespace cb {
 ///
 /// Errors carry the source line, because the first audience for a validation
 /// message is a variant author who is not a programmer.
-Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sourceName = "<memory>");
+Result<VariantSpec> loadVariantToml(std::string_view text,
+                                    std::string_view sourceName = "<memory>");
 Result<VariantSpec> loadVariantFile(const std::filesystem::path& path);
 
 /// Parse a FEN-style board section (the first FEN field only) into starting

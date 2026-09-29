@@ -20,9 +20,11 @@ Result<VariantSpec> makeStandardChessLifted(int extraDims) {
   }
 
   VariantSpec v;
-  v.name = extraDims == 0 ? "standard" : "standard-lifted-" + std::to_string(2 + extraDims);
+  v.name =
+      extraDims == 0 ? "standard" : "standard-lifted-" + std::to_string(2 + extraDims);
 
-  std::vector<AxisDecl> axes{{8, AxisKind::Spatial, "file"}, {8, AxisKind::Spatial, "rank"}};
+  std::vector<AxisDecl> axes{{8, AxisKind::Spatial, "file"},
+                             {8, AxisKind::Spatial, "rank"}};
   for (int i = 0; i < extraDims; ++i) {
     axes.push_back(AxisDecl{1, AxisKind::Spatial, "w" + std::to_string(i)});
   }
@@ -138,7 +140,8 @@ Result<VariantSpec> makeStandardChessLifted(int extraDims) {
   // Cell lists rather than "two squares to the right", so the same template
   // shape works in any dimension and on any topology.
   const auto makeCastle = [&](const char* fenLetter, Color c, int rank, int kingToFile,
-                              int rookFromFile, int rookToFile, std::initializer_list<int> empty,
+                              int rookFromFile, int rookToFile,
+                              std::initializer_list<int> empty,
                               std::initializer_list<int> safe, std::uint8_t bit) {
     CastleTemplate ct;
     ct.name = fenLetter;
@@ -162,6 +165,8 @@ Result<VariantSpec> makeStandardChessLifted(int extraDims) {
   return v;
 }
 
-Result<VariantSpec> makeStandardChess() { return makeStandardChessLifted(0); }
+Result<VariantSpec> makeStandardChess() {
+  return makeStandardChessLifted(0);
+}
 
 }  // namespace cb

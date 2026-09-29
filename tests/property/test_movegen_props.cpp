@@ -20,7 +20,8 @@ namespace {
 
 std::string describe(const VariantSpec& v) {
   std::string s = v.name + "  axes:";
-  for (std::uint8_t a = 0; a < v.dims.dims(); ++a) s += " " + std::to_string(v.dims.extent(a));
+  for (std::uint8_t a = 0; a < v.dims.dims(); ++a)
+    s += " " + std::to_string(v.dims.extent(a));
   s += v.geom.isBox() ? "  box" : "  identified";
   if (!v.geom.isOrientable()) s += " NON-ORIENTABLE";
   s += "  pieces:";
@@ -67,7 +68,8 @@ TEST_CASE("the optimised generator agrees with the naive oracle", "[property][mo
     INFO("position: " << pos.hash() << " side " << static_cast<int>(pos.sideToMove()));
     REQUIRE(fast.size() == slow.size());
     for (std::size_t i = 0; i < fast.size(); ++i) {
-      INFO("move " << i << " fast " << moveText(v, fast[i]) << " slow " << moveText(v, slow[i]));
+      INFO("move " << i << " fast " << moveText(v, fast[i]) << " slow "
+                   << moveText(v, slow[i]));
       REQUIRE(fast[i] == slow[i]);
     }
   });
@@ -140,8 +142,9 @@ TEST_CASE("make and unmake are exactly reversible", "[property][position]") {
       REQUIRE(pos.validate(&why));
       INFO(why);
       REQUIRE(pos.hash() == hashBefore);
-      REQUIRE(std::to_string(pos.halfmoveClock()) + "/" + std::to_string(pos.castleRights()) +
-                  "/" + std::to_string(pos.epTarget()) ==
+      REQUIRE(std::to_string(pos.halfmoveClock()) + "/" +
+                  std::to_string(pos.castleRights()) + "/" +
+                  std::to_string(pos.epTarget()) ==
               fenLikeBefore);
     }
   });

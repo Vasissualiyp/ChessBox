@@ -98,7 +98,8 @@ std::string Transform::toString() const {
 bool operator==(const Transform& a, const Transform& b) {
   if (a.n != b.n) return false;
   for (std::uint8_t i = 0; i < a.n; ++i) {
-    if (a.src[i] != b.src[i] || a.sign[i] != b.sign[i] || a.off[i] != b.off[i]) return false;
+    if (a.src[i] != b.src[i] || a.sign[i] != b.sign[i] || a.off[i] != b.off[i])
+      return false;
   }
   return true;
 }

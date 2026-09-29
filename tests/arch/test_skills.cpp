@@ -75,15 +75,16 @@ TEST_CASE("every skill has valid frontmatter naming itself", "[arch]") {
     const std::string name = frontmatterField(text, "name");
     const std::string desc = frontmatterField(text, "description");
     REQUIRE(name == dirName);
-    REQUIRE(desc.size() > 40);           // a description that says nothing helps nobody
-    REQUIRE(dirName.starts_with("cb-")); // the prefix convention (docs/plan/skills.md)
+    REQUIRE(desc.size() > 40);            // a description that says nothing helps nobody
+    REQUIRE(dirName.starts_with("cb-"));  // the prefix convention (docs/plan/skills.md)
   }
 }
 
 TEST_CASE("every repo path a skill names actually exists", "[arch]") {
   // The failure mode this prevents: a skill confidently telling its reader to
   // edit a file that was renamed six commits ago.
-  const std::regex pathRe(R"((?:src|tests|tools|docs|bench|variants|cmake)/[A-Za-z0-9_./-]+)");
+  const std::regex pathRe(
+      R"((?:src|tests|tools|docs|bench|variants|cmake)/[A-Za-z0-9_./-]+)");
   std::vector<std::string> missing;
   for (const fs::path& f : skillFiles()) {
     const std::string text = readFile(f);

@@ -97,13 +97,15 @@ class MoveGen {
   /// Making the fold provably order-independent (or rejecting gluings where it is
   /// not) would let the fast path run everywhere; that is M3 follow-up work, and
   /// tests/unit/geometry documents the ambiguity so it cannot be forgotten.
-  [[nodiscard]] bool isAttackedByForwardScan(const Position& p, CellId target, Color by) const;
+  [[nodiscard]] bool isAttackedByForwardScan(const Position& p, CellId target,
+                                             Color by) const;
 
   /// A ray ends when it returns to the state it started in. The step map is a
   /// bijection on (cell, direction), so every orbit is a cycle through the start -
   /// and being a cycle is exactly what makes forward and backward walks cover the
   /// same cells.
-  [[nodiscard]] static bool rayClosed(const Walker& w, CellId from, const Direction& startDir) {
+  [[nodiscard]] static bool rayClosed(const Walker& w, CellId from,
+                                      const Direction& startDir) {
     return w.cell == from && w.dir == startDir;
   }
 

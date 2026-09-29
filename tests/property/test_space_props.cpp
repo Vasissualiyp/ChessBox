@@ -84,8 +84,7 @@ TEST_CASE("delta equals the difference of encoded cells for interior steps",
   }
 }
 
-TEST_CASE("a lifted lattice preserves cell count and coordinates",
-          "[property][space]") {
+TEST_CASE("a lifted lattice preserves cell count and coordinates", "[property][space]") {
   // Dimension-lift invariance at the lattice level: adding an axis of extent 1
   // must change nothing observable. The full game-level version of this is the
   // backbone of M2.

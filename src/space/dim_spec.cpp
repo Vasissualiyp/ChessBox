@@ -5,9 +5,12 @@ namespace cb {
 
 std::string_view toString(AxisKind k) noexcept {
   switch (k) {
-    case AxisKind::Spatial: return "spatial";
-    case AxisKind::Temporal: return "temporal";
-    case AxisKind::Multiverse: return "multiverse";
+    case AxisKind::Spatial:
+      return "spatial";
+    case AxisKind::Temporal:
+      return "temporal";
+    case AxisKind::Multiverse:
+      return "multiverse";
   }
   return "?";
 }
@@ -17,9 +20,10 @@ Result<DimSpec> DimSpec::create(std::span<const AxisDecl> axes) {
     return fail(ErrorCode::ValidationError, "a board needs at least one axis");
   }
   if (axes.size() > static_cast<std::size_t>(kMaxDims)) {
-    return fail(ErrorCode::BudgetExceeded,
-                "board has " + std::to_string(axes.size()) + " axes but this build supports " +
-                    std::to_string(kMaxDims) + " (see kMaxDims in src/space/dims.hpp)");
+    return fail(ErrorCode::BudgetExceeded, "board has " + std::to_string(axes.size()) +
+                                               " axes but this build supports " +
+                                               std::to_string(kMaxDims) +
+                                               " (see kMaxDims in src/space/dims.hpp)");
   }
 
   DimSpec out;
@@ -31,13 +35,14 @@ Result<DimSpec> DimSpec::create(std::span<const AxisDecl> axes) {
   for (std::size_t i = 0; i < axes.size(); ++i) {
     const AxisDecl& a = axes[i];
     if (a.extent <= 0) {
-      return fail(ErrorCode::ValidationError,
-                  "axis '" + a.name + "' has non-positive extent " + std::to_string(a.extent));
+      return fail(
+          ErrorCode::ValidationError,
+          "axis '" + a.name + "' has non-positive extent " + std::to_string(a.extent));
     }
     if (a.extent > 0x7FFF) {
-      return fail(ErrorCode::ValidationError,
-                  "axis '" + a.name + "' extent " + std::to_string(a.extent) +
-                      " exceeds the 32767 coordinate limit");
+      return fail(ErrorCode::ValidationError, "axis '" + a.name + "' extent " +
+                                                  std::to_string(a.extent) +
+                                                  " exceeds the 32767 coordinate limit");
     }
     for (std::size_t j = 0; j < i; ++j) {
       if (!axes[j].name.empty() && axes[j].name == a.name) {

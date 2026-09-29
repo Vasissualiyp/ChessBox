@@ -42,11 +42,16 @@
   ],
   "testPresets": [
     { "name": "base", "hidden": true, "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error" } },
+      "execution": { "noTestsAction": "error" },
+      "filter": { "exclude": { "label": "slow" } } },
     { "name": "dev", "inherits": "base", "configurePreset": "dev" },
     { "name": "release", "inherits": "base", "configurePreset": "release" },
     { "name": "asan", "inherits": "base", "configurePreset": "asan" },
     { "name": "coverage", "inherits": "base", "configurePreset": "coverage" },
-    { "name": "clang-dev", "inherits": "base", "configurePreset": "clang-dev" }
+    { "name": "clang-dev", "inherits": "base", "configurePreset": "clang-dev" },
+    { "name": "dev-slow", "configurePreset": "dev", "output": { "outputOnFailure": true },
+      "filter": { "include": { "label": "slow" } } },
+    { "name": "release-slow", "configurePreset": "release", "output": { "outputOnFailure": true },
+      "filter": { "include": { "label": "slow" } } }
   ]
 }

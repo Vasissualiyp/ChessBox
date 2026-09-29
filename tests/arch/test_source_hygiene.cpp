@@ -45,34 +45,52 @@ std::string stripNonCode(const std::string& src) {
     const char n = i + 1 < src.size() ? src[i + 1] : '\0';
     switch (s) {
       case S::Code:
-        if (c == '/' && n == '/') { s = S::Line; ++i; }
-        else if (c == '/' && n == '*') { s = S::Block; ++i; }
-        else if (c == '"') { s = S::Str; }
-        else if (c == '\'' && !(!out.empty() &&
-                               (std::isalnum(static_cast<unsigned char>(out.back())) != 0 ||
-                                out.back() == '_'))) {
+        if (c == '/' && n == '/') {
+          s = S::Line;
+          ++i;
+        } else if (c == '/' && n == '*') {
+          s = S::Block;
+          ++i;
+        } else if (c == '"') {
+          s = S::Str;
+        } else if (c == '\'' &&
+                   !(!out.empty() &&
+                     (std::isalnum(static_cast<unsigned char>(out.back())) != 0 ||
+                      out.back() == '_'))) {
           // A quote directly after an alphanumeric is a digit separator
           // (0xFFFF'FFFFu), not the start of a character literal. Treating it as
           // one desynchronizes the scanner and makes later comment text look like
           // code - which is exactly how this test produced a false positive.
           s = S::Chr;
+        } else {
+          out += c;
         }
-        else { out += c; }
         break;
       case S::Line:
-        if (c == '\n') { s = S::Code; out += '\n'; }
+        if (c == '\n') {
+          s = S::Code;
+          out += '\n';
+        }
         break;
       case S::Block:
-        if (c == '*' && n == '/') { s = S::Code; ++i; }
-        else if (c == '\n') { out += '\n'; }
+        if (c == '*' && n == '/') {
+          s = S::Code;
+          ++i;
+        } else if (c == '\n') {
+          out += '\n';
+        }
         break;
       case S::Str:
-        if (c == '\\') ++i;
-        else if (c == '"') s = S::Code;
+        if (c == '\\')
+          ++i;
+        else if (c == '"')
+          s = S::Code;
         break;
       case S::Chr:
-        if (c == '\\') ++i;
-        else if (c == '\'') s = S::Code;
+        if (c == '\\')
+          ++i;
+        else if (c == '\'')
+          s = S::Code;
         break;
     }
   }
@@ -82,11 +100,13 @@ std::string stripNonCode(const std::string& src) {
 bool containsWord(const std::string& hay, const std::string& word) {
   std::size_t pos = 0;
   while ((pos = hay.find(word, pos)) != std::string::npos) {
-    const bool leftOk = pos == 0 || (!std::isalnum(static_cast<unsigned char>(hay[pos - 1])) &&
-                                     hay[pos - 1] != '_');
+    const bool leftOk =
+        pos == 0 ||
+        (!std::isalnum(static_cast<unsigned char>(hay[pos - 1])) && hay[pos - 1] != '_');
     const std::size_t end = pos + word.size();
-    const bool rightOk = end >= hay.size() ||
-                         (!std::isalnum(static_cast<unsigned char>(hay[end])) && hay[end] != '_');
+    const bool rightOk =
+        end >= hay.size() ||
+        (!std::isalnum(static_cast<unsigned char>(hay[end])) && hay[end] != '_');
     if (leftOk && rightOk) return true;
     pos = end;
   }
@@ -99,8 +119,8 @@ TEST_CASE("the engine core contains no floating-point arithmetic", "[arch]") {
   // Determinism is a hard requirement: multiplayer desync detection, the replay
   // corpus and later self-play all compare hashes bit for bit. Floats are the
   // classic way to lose that silently (ARCH section 12, AGENTS.md rule 5).
-  const std::vector<std::string> coreDirs{"base",     "diag",    "space",  "geometry",
-                                          "position", "pieces",  "variant", "movegen",
+  const std::vector<std::string> coreDirs{"base",     "diag",     "space",   "geometry",
+                                          "position", "pieces",   "variant", "movegen",
                                           "rules",    "temporal", "game"};
   std::vector<std::string> offenders;
   for (const std::string& d : coreDirs) {
@@ -164,7 +184,7 @@ TEST_CASE("every test source is registered under a CTest label", "[arch]") {
   for (const fs::path& f : sourcesUnder(kRoot / "tests")) {
     const std::string rel = fs::relative(f, kRoot / "tests").string();
     const std::string top = rel.substr(0, rel.find(fs::path::preferred_separator));
-    const std::set<std::string> known{"unit",  "property", "golden", "perft",
+    const std::set<std::string> known{"unit", "property", "golden", "perft",
                                       "arch", "support",  "oracle"};
     CAPTURE(rel);
     REQUIRE(known.contains(top));

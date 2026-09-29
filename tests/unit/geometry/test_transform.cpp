@@ -6,7 +6,9 @@
 using namespace cb;
 
 namespace {
-Coord c3(int x, int y, int z) { return Coord::of({x, y, z}); }
+Coord c3(int x, int y, int z) {
+  return Coord::of({x, y, z});
+}
 Direction d3(int x, int y, int z) {
   return Direction::make({static_cast<std::int16_t>(x), static_cast<std::int16_t>(y),
                           static_cast<std::int16_t>(z), 0, 0, 0, 0, 0},
@@ -72,7 +74,8 @@ TEST_CASE("transform composition agrees with sequential application",
   for (int x = 0; x < 4; ++x) {
     for (int y = 0; y < 4; ++y) {
       for (int z = 0; z < 4; ++z) {
-        REQUIRE(ab.applyToCoord(c3(x, y, z)) == a.applyToCoord(b.applyToCoord(c3(x, y, z))));
+        REQUIRE(ab.applyToCoord(c3(x, y, z)) ==
+                a.applyToCoord(b.applyToCoord(c3(x, y, z))));
         REQUIRE(ab.applyToDir(d3(x, y, z)) == a.applyToDir(b.applyToDir(d3(x, y, z))));
       }
     }

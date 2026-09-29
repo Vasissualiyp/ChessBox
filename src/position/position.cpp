@@ -120,7 +120,8 @@ void Position::make(const Move& m, Undo& u) {
   }
 
   removePiece(m.from);
-  const PieceTypeId landing = has(m.flags, MoveFlag::Promotion) ? m.promoteTo : mover.type;
+  const PieceTypeId landing =
+      has(m.flags, MoveFlag::Promotion) ? m.promoteTo : mover.type;
   addPiece(m.to, Piece{landing, mover.color, mover.flags});
 
   if (has(m.flags, MoveFlag::Castle)) {
@@ -167,19 +168,17 @@ void Position::unmake(const Move& m, const Undo& u) {
 
   const Piece landed = cells_[m.to];
   removePiece(m.to);
-  const PieceTypeId original =
-      has(m.flags, MoveFlag::Promotion)
-          ? [&] {
-              // The mover was whatever promotes into m.promoteTo; in every variant
-              // so far that is unique per colour, and the move records enough.
-              for (std::size_t i = 1; i < v_->pieces.size(); ++i) {
-                for (PieceTypeId to : v_->pieces[i].promotesTo) {
-                  if (to == m.promoteTo) return static_cast<PieceTypeId>(i);
-                }
-              }
-              return landed.type;
-            }()
-          : landed.type;
+  const PieceTypeId original = has(m.flags, MoveFlag::Promotion) ? [&] {
+    // The mover was whatever promotes into m.promoteTo; in every variant
+    // so far that is unique per colour, and the move records enough.
+    for (std::size_t i = 1; i < v_->pieces.size(); ++i) {
+      for (PieceTypeId to : v_->pieces[i].promotesTo) {
+        if (to == m.promoteTo) return static_cast<PieceTypeId>(i);
+      }
+    }
+    return landed.type;
+  }()
+                                                                 : landed.type;
   addPiece(m.from, Piece{original, landed.color, landed.flags});
 
   if (m.captureCell != kInvalidCell) addPiece(m.captureCell, u.captured);
@@ -213,16 +212,20 @@ bool Position::validate(std::string* why) const {
   for (CellId c = 0; c < cells_.size(); ++c) {
     const Piece p = cells_[c];
     if (p.empty()) continue;
-    if (p.type >= v_->pieces.size()) return bad("cell " + std::to_string(c) + " holds an unknown piece type");
-    if (p.color >= kNumColors) return bad("cell " + std::to_string(c) + " holds an unknown colour");
+    if (p.type >= v_->pieces.size())
+      return bad("cell " + std::to_string(c) + " holds an unknown piece type");
+    if (p.color >= kNumColors)
+      return bad("cell " + std::to_string(c) + " holds an unknown colour");
     all.set(c);
     per[p.color].set(c);
   }
   if (!(all == occAll_)) return bad("occupancy disagrees with the cell array");
   for (int i = 0; i < kNumColors; ++i) {
-    if (!(per[i] == occ_[i])) return bad("colour occupancy disagrees with the cell array");
+    if (!(per[i] == occ_[i]))
+      return bad("colour occupancy disagrees with the cell array");
   }
-  if (hash_ != computeHash()) return bad("incremental hash disagrees with a fresh computation");
+  if (hash_ != computeHash())
+    return bad("incremental hash disagrees with a fresh computation");
   return true;
 }
 

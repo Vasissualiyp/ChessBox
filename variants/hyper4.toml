@@ -1,0 +1,96 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# hyper4 - a 4x4x4x4 four-dimensional variant.
+#
+# Both armies start on a single two-dimensional face of the hypercube, so the
+# opening looks like a tiny game of chess - and then pieces can leave the plane
+# entirely. A knight here has 48 destinations rather than 8, and a rook has eight
+# directions rather than four, all from the same one-line atom declarations.
+#
+# Rules are ChessBox's own and fully stated here. The board is deliberately small:
+# 256 cells keeps perft depths meaningful.
+
+name = "hyper4"
+side_to_move = "white"
+en_passant = false
+stalemate = "draw"
+halfmove_draw_limit = 100
+orientation_axis = "rank"
+
+[[axis]]
+name = "file"
+extent = 4
+
+[[axis]]
+name = "rank"
+extent = 4
+
+[[axis]]
+name = "level"
+extent = 4
+
+[[axis]]
+name = "aeon"
+extent = 4
+
+[promotion]
+rank = 3
+
+[[piece]]
+name = "pawn"
+symbol = "P"
+resets_draw_clock = true
+promotes_to = ["rook", "knight"]
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+  capture = "cannot"
+  forward = true
+
+  # In four dimensions this single atom yields six forward capture directions.
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+  capture = "must"
+  forward = true
+
+[[piece]]
+name = "knight"
+symbol = "N"
+
+  # 48 directions at four axes: P(4,2) * 2^2 = 12 * 4.
+  [[piece.move]]
+  vector = [1, 2]
+  max = 1
+  mode = "leap"
+
+[[piece]]
+name = "rook"
+symbol = "R"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "king"
+symbol = "K"
+royal = true
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+
+# Ranks are separated by "/", levels by "|", and the fourth axis by "||".
+[start]
+board = "rnkr/pppp/PPPP/RNKR|4/4/4/4|4/4/4/4|4/4/4/4||4/4/4/4|4/4/4/4|4/4/4/4|4/4/4/4||4/4/4/4|4/4/4/4|4/4/4/4|4/4/4/4||4/4/4/4|4/4/4/4|4/4/4/4|4/4/4/4"

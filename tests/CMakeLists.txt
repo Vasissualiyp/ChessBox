@@ -27,8 +27,9 @@ foreach(label unit property golden perft arch)
   set_tests_properties(${label} PROPERTIES LABELS ${label})
 endforeach()
 
-# The deep node counts are minutes of work, so they are their own label rather
-# than a tax on every `ctest --preset dev`. CI runs them; the fast loop does not.
+# The deep node counts are minutes of work in Release and over an hour in Debug, so
+# they are their own `slow` label rather than a tax on every `ctest --preset dev`. The
+# test presets exclude that label; ask for it with `ctest --preset release-slow`.
 add_test(NAME perft-slow COMMAND chessbox_tests "[perft][slow]")
 set_tests_properties(perft-slow PROPERTIES LABELS "slow;perft" TIMEOUT 3600)
 add_test(NAME property-slow COMMAND chessbox_tests "[property][slow]")

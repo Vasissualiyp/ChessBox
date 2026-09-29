@@ -48,7 +48,8 @@ void measure(const std::string& name, int repeats, F&& f) {
 int main() {
   const auto standard = makeStandardChess();
   if (!standard.has_value()) {
-    std::fprintf(stderr, "cannot build standard chess: %s\n", standard.error().format().c_str());
+    std::fprintf(stderr, "cannot build standard chess: %s\n",
+                 standard.error().format().c_str());
     return 1;
   }
   const MoveGen gen(*standard);
@@ -61,7 +62,9 @@ int main() {
     measure("perft(4) initial", 3, [&] { return gen.perft(p, 4); });
   }
   {
-    auto p = fromFen(*standard, "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
+    auto p =
+        fromFen(*standard,
+                "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
     measure("perft(4) kiwipete", 3, [&] { return gen.perft(*p, 4); });
   }
   {
@@ -90,7 +93,8 @@ int main() {
     });
   }
 
-  std::printf("\nRecord these with the cb-bench-baseline skill, including CPU model and\n"
-              "governor; a number without its machine is not comparable.\n");
+  std::printf(
+      "\nRecord these with the cb-bench-baseline skill, including CPU model and\n"
+      "governor; a number without its machine is not comparable.\n");
   return 0;
 }

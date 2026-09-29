@@ -124,8 +124,7 @@ TEST_CASE("a torus gives every cell the same neighbourhood", "[unit][geometry]")
   }
 }
 
-TEST_CASE("a diagonal step across a torus corner crosses two seams",
-          "[unit][geometry]") {
+TEST_CASE("a diagonal step across a torus corner crosses two seams", "[unit][geometry]") {
   const DimSpec d = makeDims({5, 5});
   const Geometry g = make(d, {periodic(0), periodic(1)});
   Walker w = g.start(d.toCell(Coord::of({4, 4})), dir(d, {1, 1}));
@@ -133,8 +132,7 @@ TEST_CASE("a diagonal step across a torus corner crosses two seams",
   REQUIRE(w.coord == Coord::of({0, 0}));
 }
 
-TEST_CASE("an N-dimensional torus is uniform in every dimension",
-          "[unit][geometry]") {
+TEST_CASE("an N-dimensional torus is uniform in every dimension", "[unit][geometry]") {
   for (int n = 3; n <= 6; ++n) {
     std::vector<AxisDecl> axes;
     for (int i = 0; i < n; ++i) {
@@ -160,10 +158,14 @@ TEST_CASE("an N-dimensional torus is uniform in every dimension",
 // Mirrors
 // --------------------------------------------------------------------------
 
-TEST_CASE("a mirror wall reflects the ray and flips its direction",
-          "[unit][geometry]") {
+TEST_CASE("a mirror wall reflects the ray and flips its direction", "[unit][geometry]") {
   const DimSpec d = makeDims({8, 8});
   const Geometry g = make(d, {mirror(0, Side::Max)});
+
+  // A reflection reverses handedness but glues nothing, so the surface stays
+  // orientable - the two notions are deliberately separate.
+  REQUIRE(g.isOrientable());
+  REQUIRE(g.hasOrientationReversingFace());
 
   Walker w = g.start(d.toCell(Coord::of({7, 3})), dir(d, {1, 0}));
   REQUIRE(g.step(w));
@@ -178,8 +180,7 @@ TEST_CASE("a mirror wall reflects the ray and flips its direction",
   REQUIRE(o.cells[8] == d.toCell(Coord::of({6, 3})));
 }
 
-TEST_CASE("a diagonal ray in a mirrored box bounces like light",
-          "[unit][geometry]") {
+TEST_CASE("a diagonal ray in a mirrored box bounces like light", "[unit][geometry]") {
   const DimSpec d = makeDims({4, 4});
   const Geometry g = make(d, {mirror(0, Side::Max), mirror(0, Side::Min)});
   // Starting at (0,0) going north-east, the ray bounces off x=3 and continues.
@@ -194,8 +195,7 @@ TEST_CASE("a diagonal ray in a mirrored box bounces like light",
 // Non-orientable surfaces - the sharp tests
 // --------------------------------------------------------------------------
 
-TEST_CASE("a Moebius band reverses orientation after one circuit",
-          "[unit][geometry]") {
+TEST_CASE("a Moebius band reverses orientation after one circuit", "[unit][geometry]") {
   const DimSpec d = makeDims({8, 4});
   // x is periodic, and crossing that seam flips y: the classic Moebius gluing.
   const Geometry g = make(d, {periodicWithFlip(0, 1)});

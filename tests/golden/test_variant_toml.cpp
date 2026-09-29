@@ -52,9 +52,11 @@ TEST_CASE("a malformed variant file yields a diagnostic, never a crash", "[golde
       {"name = \"x\"\n", "[[axis]]"},
       {"name = \"x\"\n[[axis]]\nname=\"a\"\nextent=0\n", "non-positive"},
       {"name = \"x\"\n[[axis]]\nname=\"a\"\nextent=8\n", "[[piece]]"},
-      {"name=\"x\"\n[[axis]]\nname=\"a\"\nextent=8\n[[piece]]\nname=\"p\"\nsymbol=\"P\"\n",
+      {"name=\"x\"\n[[axis]]\nname=\"a\"\nextent=8\n[[piece]]\nname=\"p\"\nsymbol="
+       "\"P\"\n",
        "[[piece.move]]"},
-      {"name=\"x\"\n[[axis]]\nname=\"a\"\nextent=8\n[[piece]]\nname=\"p\"\nsymbol=\"PP\"\n"
+      {"name=\"x\"\n[[axis]]\nname=\"a\"\nextent=8\n[[piece]]\nname=\"p\"\nsymbol="
+       "\"PP\"\n"
        "[[piece.move]]\nvector=[1]\n",
        "single-character"},
       {"name=\"x\"\n[[axis]]\nname=\"a\"\nextent=8\n[[piece]]\nname=\"p\"\nsymbol=\"P\"\n"
@@ -66,7 +68,8 @@ TEST_CASE("a malformed variant file yields a diagnostic, never a crash", "[golde
       {"name=\"x\"\n[[axis]]\nname=\"a\"\nextent=8\n[[piece]]\nname=\"p\"\nsymbol=\"P\"\n"
        "[[piece.move]]\nvector=[0]\n",
        "positive"},
-      {"name=\"x\"\n[[axis]]\nname=\"a\"\nextent=4\n[[geometry.identify]]\naxis=\"nope\"\n"
+      {"name=\"x\"\n[[axis]]\nname=\"a\"\nextent=4\n[[geometry.identify]]\naxis="
+       "\"nope\"\n"
        "[[piece]]\nname=\"p\"\nsymbol=\"P\"\n[[piece.move]]\nvector=[1]\n",
        "not declared"},
       {"name=\"x\" this is not toml", "\n"},

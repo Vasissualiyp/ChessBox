@@ -13,7 +13,8 @@ std::string Coord::toString() const {
   return out;
 }
 
-Direction Direction::make(const std::array<std::int16_t, kMaxDims>& vec, std::uint8_t dims) {
+Direction Direction::make(const std::array<std::int16_t, kMaxDims>& vec,
+                          std::uint8_t dims) {
   Direction d;
   d.n = dims;
   d.v = vec;

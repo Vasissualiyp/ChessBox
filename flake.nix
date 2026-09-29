@@ -53,7 +53,11 @@
           buildInputs = with pkgs; [ catch2_3 tomlplusplus ];
           cmakeBuildType = "Release";
           doCheck = true;
-          checkPhase = "ctest --output-on-failure -L 'unit|property|arch'";
+          # The deep perft counts and the wide property sweep are tagged [slow] and
+          # run as their own labels; a hermetic build checks everything else.
+          checkPhase = ''
+            ctest --output-on-failure -L 'unit|property|golden|arch' -E '^slow'
+          '';
           meta = with pkgs.lib; {
             description = "Generalizable FOSS sandbox for chess-like variants";
             license = licenses.gpl3Plus;

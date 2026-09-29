@@ -36,7 +36,8 @@ void MoveGen::emit(const Position& p, Move m, PieceTypeId type, Color side,
     // (a torus has no last rank) simply never reaches this branch.
     for (PieceTypeId to : def.promotesTo) {
       Move pm = m;
-      pm.flags = static_cast<std::uint8_t>(pm.flags | static_cast<std::uint8_t>(MoveFlag::Promotion));
+      pm.flags = static_cast<std::uint8_t>(
+          pm.flags | static_cast<std::uint8_t>(MoveFlag::Promotion));
       pm.promoteTo = to;
       out.push(pm);
     }
@@ -46,8 +47,9 @@ void MoveGen::emit(const Position& p, Move m, PieceTypeId type, Color side,
   out.push(m);
 }
 
-void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoord, Color side,
-                           PieceTypeId type, const MoveAtom& atom, MoveList& out) const {
+void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoord,
+                           Color side, PieceTypeId type, const MoveAtom& atom,
+                           MoveList& out) const {
   const std::size_t ci = static_cast<std::size_t>(side);
   const Region& gate = atom.fromRegion[ci];
   if (gate.active() && !gate.contains(fromCoord)) return;
@@ -197,9 +199,8 @@ void MoveGen::generatePseudoLegal(const Position& p, MoveList& out) const {
 
 void MoveGen::generatePseudoLegalFor(const Position& p, Color side, bool includeCastles,
                                      MoveList& out) const {
-  p.occupancy(side).forEach([&](std::size_t cell) {
-    generateForPiece(p, static_cast<CellId>(cell), out);
-  });
+  p.occupancy(side).forEach(
+      [&](std::size_t cell) { generateForPiece(p, static_cast<CellId>(cell), out); });
   if (includeCastles) generateCastles(p, side, out);
   // On a box board a move can only be discovered once, so this costs nothing
   // there and is skipped entirely.

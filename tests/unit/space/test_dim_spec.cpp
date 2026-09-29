@@ -10,7 +10,8 @@ std::vector<AxisDecl> box(std::initializer_list<int> extents) {
   std::vector<AxisDecl> out;
   int i = 0;
   for (int e : extents) {
-    out.push_back(AxisDecl{e, AxisKind::Spatial, std::string(1, static_cast<char>('x' + i++))});
+    out.push_back(
+        AxisDecl{e, AxisKind::Spatial, std::string(1, static_cast<char>('x' + i++))});
   }
   return out;
 }

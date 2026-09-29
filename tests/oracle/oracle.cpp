@@ -66,20 +66,22 @@ const std::vector<Direction>& directionsFor(const VariantSpec& v, const MoveAtom
   if (it != cache.end()) return it->second;
 
   std::vector<Direction> dirs =
-      atom.oriented ? expandAtomOriented(atom.mags, v.dims.dims(),
-                                         static_cast<std::uint8_t>(v.orientationAxis), side)
-                    : expandAtom(atom.mags, v.dims.dims());
+      atom.oriented
+          ? expandAtomOriented(atom.mags, v.dims.dims(),
+                               static_cast<std::uint8_t>(v.orientationAxis), side)
+          : expandAtom(atom.mags, v.dims.dims());
   return cache.emplace(key, std::move(dirs)).first->second;
 }
 
-void appendPromotions(const VariantSpec& v, const Move& base, PieceTypeId type, Color side,
-                      const Coord& toCoord, std::vector<Move>& out) {
+void appendPromotions(const VariantSpec& v, const Move& base, PieceTypeId type,
+                      Color side, const Coord& toCoord, std::vector<Move>& out) {
   const PieceTypeDef& def = v.pieces[type];
   const Region& promo = v.promotion[static_cast<std::size_t>(side)];
   if (!def.promotesTo.empty() && promo.contains(toCoord)) {
     for (PieceTypeId to : def.promotesTo) {
       Move m = base;
-      m.flags = static_cast<std::uint8_t>(m.flags | static_cast<std::uint8_t>(MoveFlag::Promotion));
+      m.flags = static_cast<std::uint8_t>(m.flags |
+                                          static_cast<std::uint8_t>(MoveFlag::Promotion));
       m.promoteTo = to;
       out.push_back(m);
     }
@@ -125,14 +127,16 @@ std::vector<Move> pseudoLegal(const Position& p) {
             }
             if (own) break;
             if (target.empty() && atom.capture != CapturePolicy::Must) {
-              appendPromotions(v, Move{.from = from, .to = to}, piece.type, side, toCoord, out);
+              appendPromotions(v, Move{.from = from, .to = to}, piece.type, side, toCoord,
+                               out);
             } else if (enemy && atom.capture != CapturePolicy::Cannot) {
-              appendPromotions(v,
-                               Move{.from = from,
-                                    .to = to,
-                                    .captureCell = to,
-                                    .flags = static_cast<std::uint8_t>(MoveFlag::Capture)},
-                               piece.type, side, toCoord, out);
+              appendPromotions(
+                  v,
+                  Move{.from = from,
+                       .to = to,
+                       .captureCell = to,
+                       .flags = static_cast<std::uint8_t>(MoveFlag::Capture)},
+                  piece.type, side, toCoord, out);
             }
             break;
           }
@@ -144,12 +148,13 @@ std::vector<Move> pseudoLegal(const Position& p) {
           }
           if (enemy) {
             if (longEnough && atom.capture != CapturePolicy::Cannot) {
-              appendPromotions(v,
-                               Move{.from = from,
-                                    .to = to,
-                                    .captureCell = to,
-                                    .flags = static_cast<std::uint8_t>(MoveFlag::Capture)},
-                               piece.type, side, toCoord, out);
+              appendPromotions(
+                  v,
+                  Move{.from = from,
+                       .to = to,
+                       .captureCell = to,
+                       .flags = static_cast<std::uint8_t>(MoveFlag::Capture)},
+                  piece.type, side, toCoord, out);
             }
             if (atom.mode == MoveMode::Slide) break;
             prev = to;
@@ -166,7 +171,8 @@ std::vector<Move> pseudoLegal(const Position& p) {
                 m.epVictim = to;
               }
               appendPromotions(v, m, piece.type, side, toCoord, out);
-            } else if (v.enPassant && to == p.epTarget() && p.epVictim() != kInvalidCell) {
+            } else if (v.enPassant && to == p.epTarget() &&
+                       p.epVictim() != kInvalidCell) {
               appendPromotions(v,
                                Move{.from = from,
                                     .to = to,
@@ -194,7 +200,8 @@ std::vector<Move> pseudoLegal(const Position& p) {
     if (ct.color != side) continue;
     if ((p.castleRights() & (1u << ct.rightsBit)) == 0) continue;
     if (p.at(ct.kingFrom).empty() || p.at(ct.rookFrom).empty()) continue;
-    if (p.at(ct.kingFrom).colorOf() != side || p.at(ct.rookFrom).colorOf() != side) continue;
+    if (p.at(ct.kingFrom).colorOf() != side || p.at(ct.rookFrom).colorOf() != side)
+      continue;
     bool ok = true;
     for (CellId c : ct.mustBeEmpty) ok = ok && p.at(c).empty();
     for (CellId c : ct.mustBeSafe) ok = ok && !isAttacked(p, c, opponent(side));
@@ -243,7 +250,8 @@ bool isAttacked(const Position& p, CellId target, Color by) {
               if (!occupant.empty()) hurdleFound = true;
               continue;
             }
-            if (to == target && !occupant.empty() && occupant.colorOf() != by) return true;
+            if (to == target && !occupant.empty() && occupant.colorOf() != by)
+              return true;
             break;
           }
           if (!occupant.empty()) {

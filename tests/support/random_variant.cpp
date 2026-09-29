@@ -8,8 +8,8 @@ namespace {
 
 MoveAtom randomAtom(Rng& rng, int dims, bool allowOriented) {
   MoveAtom a;
-  const int order = 1 + static_cast<int>(rng.below(static_cast<std::uint32_t>(
-                            std::min(dims, 3))));
+  const int order =
+      1 + static_cast<int>(rng.below(static_cast<std::uint32_t>(std::min(dims, 3))));
   for (int i = 0; i < order; ++i) {
     a.mags.push(static_cast<std::int16_t>(1 + rng.below(2)));  // magnitudes 1..2
   }
@@ -28,9 +28,15 @@ MoveAtom randomAtom(Rng& rng, int dims, bool allowOriented) {
       break;
   }
   switch (rng.below(6)) {
-    case 0: a.capture = CapturePolicy::Cannot; break;
-    case 1: a.capture = CapturePolicy::Must; break;
-    default: a.capture = CapturePolicy::May; break;
+    case 0:
+      a.capture = CapturePolicy::Cannot;
+      break;
+    case 1:
+      a.capture = CapturePolicy::Must;
+      break;
+    default:
+      a.capture = CapturePolicy::May;
+      break;
   }
   if (allowOriented && rng.below(4) == 0) a.oriented = true;
   return a;
@@ -45,9 +51,8 @@ VariantSpec randomVariant(std::uint64_t seed, const RandomVariantOptions& opts) 
     VariantSpec v;
     v.name = "random-" + std::to_string(seed);
 
-    const int dims =
-        opts.minDims + static_cast<int>(rng.below(
-                           static_cast<std::uint32_t>(opts.maxDims - opts.minDims + 1)));
+    const int dims = opts.minDims + static_cast<int>(rng.below(static_cast<std::uint32_t>(
+                                        opts.maxDims - opts.minDims + 1)));
     std::vector<AxisDecl> axes;
     std::uint64_t cells = 1;
     for (int i = 0; i < dims; ++i) {
@@ -94,31 +99,36 @@ VariantSpec randomVariant(std::uint64_t seed, const RandomVariantOptions& opts) 
 
     v.pieces.clear();
     v.pieces.emplace_back();
-    const int types = 1 + static_cast<int>(rng.below(static_cast<std::uint32_t>(
-                              opts.maxPieceTypes)));
+    const int types =
+        1 + static_cast<int>(rng.below(static_cast<std::uint32_t>(opts.maxPieceTypes)));
     for (int t = 0; t < types; ++t) {
       PieceTypeDef p;
       p.name = "p" + std::to_string(t);
       p.symbol = static_cast<char>('A' + t);
-      const int atoms = 1 + static_cast<int>(rng.below(static_cast<std::uint32_t>(
-                                opts.maxAtomsPerPiece)));
+      const int atoms =
+          1 +
+          static_cast<int>(rng.below(static_cast<std::uint32_t>(opts.maxAtomsPerPiece)));
       for (int i = 0; i < atoms; ++i) {
         auto a = MoveAtom::canonicalize(randomAtom(rng, dims, opts.allowOriented));
         if (a.has_value()) p.atoms.push_back(*a);
       }
-      if (p.atoms.empty()) p.atoms.push_back(*MoveAtom::canonicalize(MoveAtom{.mags = {1}}));
+      if (p.atoms.empty())
+        p.atoms.push_back(*MoveAtom::canonicalize(MoveAtom{.mags = {1}}));
       v.pieces.push_back(std::move(p));
     }
     if (opts.requireRoyal) v.pieces.back().royal = true;
 
     // Scatter pieces, leaving most of the board empty so rays actually run.
     std::set<CellId> used;
-    const auto count = 2 + rng.below(static_cast<std::uint32_t>(v.dims.cellCount() / 4 + 1));
+    const auto count =
+        2 + rng.below(static_cast<std::uint32_t>(v.dims.cellCount() / 4 + 1));
     for (std::uint32_t i = 0; i < count; ++i) {
       const CellId c = rng.below(v.dims.cellCount());
       if (!used.insert(c).second) continue;
-      const auto type = static_cast<PieceTypeId>(1 + rng.below(static_cast<std::uint32_t>(types)));
-      v.start.push_back(StartPiece{v.dims.toCoord(c), type, rng.coin() ? Color::White : Color::Black});
+      const auto type =
+          static_cast<PieceTypeId>(1 + rng.below(static_cast<std::uint32_t>(types)));
+      v.start.push_back(
+          StartPiece{v.dims.toCoord(c), type, rng.coin() ? Color::White : Color::Black});
     }
     if (opts.requireRoyal) {
       // Give each side exactly one royal, so the legality rule is exercised.

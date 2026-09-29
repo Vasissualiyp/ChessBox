@@ -5,7 +5,10 @@ Read this first. It is the map. Design rationale is in
 [`docs/plan/00-roadmap.md`](docs/plan/00-roadmap.md); decisions are in
 [`docs/adr/`](docs/adr/README.md).
 
-**Status: pre-implementation.** Only planning documents exist. M0 is next.
+**Status: M0-M3 complete.** A headless, perft-exact engine with N-dimensional boards
+and non-trivial boundary topology. Next: M4, the Vulkan renderer.
+See [`docs/plan/00-roadmap.md`](docs/plan/00-roadmap.md); each milestone plan ends with
+a status section recording what was built, what was deferred, and why.
 
 ## What this project is
 
@@ -21,11 +24,21 @@ Performance and extensibility are the two hard constraints.
 nix develop                      # core dev shell (no graphics deps)
 nix develop .#gfx                # adds SDL3 + Vulkan (M4+)
 cmake --preset dev && cmake --build build/dev
-ctest --preset dev               # all tests
-ctest --preset dev -L unit       # fast loop (labels: unit property golden perft arch)
+ctest --preset dev               # fast suite; the slow label is excluded by the preset
+ctest --preset dev -L unit       # the tightest loop; labels: unit property golden perft arch
+ctest --preset release-slow      # deep perft + wide property sweep - RELEASE, it is ~10 min
+                                 # (the same in Debug is over an hour: depth-5 perft at -O0)
 tools/precommit.sh               # format + tidy + fast tests — run before every commit
 nix flake check                  # THE gate: both compilers, sanitizers, coverage, goldens, bench
+
+./build/dev/src/cli/chessbox                          # interactive
+./build/dev/src/cli/chessbox "load torus" board moves  # batch; nonzero exit on error
+./build/release/bench/chessbox_bench                   # release only
 ```
+
+The CLI is the fastest way to inspect anything: `info` prints a variant's axes,
+geometry and canonicalised atoms; `board` renders N-D boards as labelled slices;
+`divide <n>` splits perft by first move.
 
 ## The rules (non-negotiable)
 
@@ -73,10 +86,15 @@ Each layer is a CMake target linking only to lower layers, so a violation is a
 | New piece | `variants/*.toml` (data only) | `cb-new-piece` |
 | New variant | `variants/`, goldens, `docs/variants/` | `cb-new-variant` |
 | New topology | `variants/*.toml` geometry block | `cb-new-geometry` |
-| New rule mechanic | `src/rules/` opcode + tests + docs table | `cb-new-effect` |
+| New rule mechanic | `src/rules/` opcode + tests + docs table (M5) | `cb-new-effect` |
 | New module in a layer | that layer's dir + CMake edge + test + this table | `cb-new-module` |
 | A decision | `docs/adr/` | `cb-adr` |
-| Perft mismatch | bisect with `perft-divide` against the oracle | `cb-perft-golden` |
+| Perft mismatch | bisect with `divide` against the oracle | `cb-perft-golden` |
+| Performance work | `bench/baselines/` first, then the hot path | `cb-bench-baseline` |
+
+Nine variants ship, all as data: `standard`, `cylinder`, `torus`, `mobius`, `klein`,
+`mirrorbox`, `cube5` (3-D), `hyper4` (4-D), `torus3d`. See
+[`docs/variants/README.md`](docs/variants/README.md).
 
 Skills live in `.claude/skills/` and are catalogued in
 [`docs/plan/skills.md`](docs/plan/skills.md). Prefer them: the procedures are
@@ -93,11 +111,31 @@ long, multi-directory, and identical every time.
 
 ## Gotchas
 
-- Direction counts explode with dimension (`[1,2,3]` at D=8 → 2688 directions).
-  There is a load-time budget; respect it.
+These are the ones that have actually cost time here, not hypotheticals.
+
+- **A VariantSpec must outlive, and must not move under, every `Position` and
+  `MoveGen` that refers to it.** They hold a pointer to it. Own it somewhere stable;
+  the CLI's `Session` is non-movable and heap-held for exactly this reason.
+- **Direction transport, not just position.** A piece crossing a seam has its
+  *direction* mapped too, or non-orientable boards are silently wrong. The transform's
+  action on directions is derived, never authored, so it cannot be declared wrongly.
+- **Ray semantics on glued boards are subtle — read ADR-0010 before touching them.**
+  Rays end on orbit closure (`cell` *and* `direction` back to the start), duplicates
+  are removed from the move list rather than by cutting the ray short, and
+  `isAttacked` uses a forward scan on glued boards because the fast backward walk is
+  unsound there. Each of those was a real bug first.
+- **An oriented atom's direction span is not closed under transport.** A Klein seam
+  turns "forward" into "backward", so backward attack search uses the *unoriented*
+  expansion, per colour, and checks the arrival direction.
+- Direction counts explode with dimension (`[1,2,3]` at D=8 → 2688). There is a
+  load-time budget; respect it.
 - An atom of order `r > D` expands to *nothing* — deliberate, tested, not an error.
-- On non-orientable boards, direction vectors must be **transported** through
-  seams, not just positions. This is the #1 source of silent wrongness.
-- "Forward", "last rank", and bishop colour-binding are meaningless on some
-  topologies. They are per-variant policies; never hardcode them.
+- "Forward", "the last rank", castling and bishop colour-binding are meaningless on
+  some topologies. Per-variant policy; never hardcode. A glued board also needs a
+  different *opening array* — the usual one starts in check on a torus.
+- **Do not specialize on dimension count.** The ray walk iterates a direction's
+  support (1–3 axes), not the dimension count; `docs/plan/M2-nd-generalization.md`
+  records the measurement reasoning.
 - `kMaxDims = 8` lives in `src/space/dims.hpp` and nowhere else.
+- Debug is pinned to `-O0` because nix injects `-O2`; a Catch2 `[.]`-hidden test still
+  runs if a filter matches any of its other tags.

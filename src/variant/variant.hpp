@@ -20,8 +20,8 @@ constexpr PieceTypeId kNoPiece = 0;  ///< type 0 means "empty cell"
 /// in `atoms`; nothing about movement is hardcoded anywhere else.
 struct PieceTypeDef {
   std::string name;
-  char symbol{'?'};  ///< upper case; lower case denotes Black in notation
-  bool royal{false}; ///< losing or exposing it ends the game, per the variant
+  char symbol{'?'};   ///< upper case; lower case denotes Black in notation
+  bool royal{false};  ///< losing or exposing it ends the game, per the variant
   std::vector<MoveAtom> atoms;
   std::vector<PieceTypeId> promotesTo;  ///< empty means this piece never promotes
   /// Whether moving this piece resets the draw clock. Declared rather than

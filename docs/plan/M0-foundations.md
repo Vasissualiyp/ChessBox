@@ -151,3 +151,24 @@ one row in the AGENTS.md index.
 5. An allocation inside a tripwire region fails a test.
 6. Every L0 component has a test file and ≥90% line coverage.
 7. Every shipped skill's commands and paths are verified by a test.
+
+---
+
+## Status: complete
+
+Recorded 2026-09-28.
+
+All acceptance facts hold. Two things the plan did not anticipate, both caused by the
+nix toolchain and both fixed at the source rather than worked around:
+
+- **nix injects `-O2` through `NIX_CFLAGS_COMPILE`,** so a "Debug" build was silently
+  optimized - and optimized away an unused container's allocation, which made the
+  allocation tripwire's own self-test pass for the wrong reason.
+  `CMAKE_CXX_FLAGS_DEBUG` is now pinned to `-g -O0`, and the tripwire self-test uses
+  `::operator new` directly so it cannot be elided.
+- **`_FORTIFY_SOURCE` emits a `#warning` at `-O0`,** which is fatal under `-Werror`.
+  The dev shell sets `hardeningDisable = [ "fortify" "fortify3" ]` rather than
+  weakening the project's warning settings.
+
+Deferred: `tsan` and `coverage` presets exist and configure, but no threads exist yet
+(they arrive with M4), and the coverage gate has not been enforced in anger.

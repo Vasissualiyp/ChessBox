@@ -34,7 +34,9 @@ class DimSpec {
   [[nodiscard]] std::uint8_t dims() const noexcept { return n_; }
   [[nodiscard]] std::int16_t extent(std::size_t a) const noexcept { return extent_[a]; }
   [[nodiscard]] AxisKind kind(std::size_t a) const noexcept { return kind_[a]; }
-  [[nodiscard]] const std::string& name(std::size_t a) const noexcept { return names_[a]; }
+  [[nodiscard]] const std::string& name(std::size_t a) const noexcept {
+    return names_[a];
+  }
   [[nodiscard]] std::uint32_t stride(std::size_t a) const noexcept { return stride_[a]; }
   [[nodiscard]] std::uint32_t cellCount() const noexcept { return cellCount_; }
 

@@ -9,8 +9,9 @@ namespace cb {
 namespace {
 
 /// Recursively assign each magnitude to an unused axis, then fan out over signs.
-void enumerate(const SmallVec<std::int16_t, kMaxDims>& mags, std::uint8_t dims, std::size_t idx,
-               std::array<std::int16_t, kMaxDims>& vec, std::uint32_t usedAxes,
+void enumerate(const SmallVec<std::int16_t, kMaxDims>& mags, std::uint8_t dims,
+               std::size_t idx, std::array<std::int16_t, kMaxDims>& vec,
+               std::uint32_t usedAxes,
                std::set<std::array<std::int16_t, kMaxDims>>& out) {
   if (idx == mags.size()) {
     out.insert(vec);
@@ -42,26 +43,30 @@ Result<MoveAtom> MoveAtom::canonicalize(MoveAtom a) {
   for (std::size_t i = 0; i < a.mags.size(); ++i) {
     if (a.mags[i] <= 0) {
       return fail(ErrorCode::ValidationError,
-                  "move atom magnitudes must be positive; got " + std::to_string(a.mags[i]) +
+                  "move atom magnitudes must be positive; got " +
+                      std::to_string(a.mags[i]) +
                       " (a zero component is implied by omission, not written)");
     }
   }
   std::sort(a.mags.begin(), a.mags.end());
   if (a.maxK == 0 || a.minK == 0) {
-    return fail(ErrorCode::ValidationError, "a move atom with a zero step count can never move");
+    return fail(ErrorCode::ValidationError,
+                "a move atom with a zero step count can never move");
   }
   if (a.minK > a.maxK) {
-    return fail(ErrorCode::ValidationError,
-                "move atom has minK " + std::to_string(a.minK) + " above maxK " +
-                    std::to_string(a.maxK));
+    return fail(ErrorCode::ValidationError, "move atom has minK " +
+                                                std::to_string(a.minK) + " above maxK " +
+                                                std::to_string(a.maxK));
   }
   if (a.minK > 1 && a.mode == MoveMode::Leap) {
-    return fail(ErrorCode::ValidationError,
-                "an atom with minK > 1 must slide or hop; a leap has nothing to skip over");
+    return fail(
+        ErrorCode::ValidationError,
+        "an atom with minK > 1 must slide or hop; a leap has nothing to skip over");
   }
   if (a.mode == MoveMode::Hop && a.maxK != 1) {
-    return fail(ErrorCode::Unsupported,
-                "hop atoms are single-step for now; a repeating hopper needs its own rule");
+    return fail(
+        ErrorCode::Unsupported,
+        "hop atoms are single-step for now; a repeating hopper needs its own rule");
   }
   return a;
 }
@@ -79,9 +84,15 @@ std::string MoveAtom::toString() const {
   if (minK > 1) out += std::to_string(minK) + "..";
   out += maxK == kUnlimited ? "inf" : std::to_string(maxK);
   switch (mode) {
-    case MoveMode::Slide: out += " slide"; break;
-    case MoveMode::Leap: out += " leap"; break;
-    case MoveMode::Hop: out += " hop"; break;
+    case MoveMode::Slide:
+      out += " slide";
+      break;
+    case MoveMode::Leap:
+      out += " leap";
+      break;
+    case MoveMode::Hop:
+      out += " hop";
+      break;
   }
   if (capture == CapturePolicy::Must) out += " capture-only";
   if (capture == CapturePolicy::Cannot) out += " no-capture";

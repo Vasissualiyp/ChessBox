@@ -41,7 +41,8 @@ TEST_CASE("standard FEN round-trips byte for byte", "[golden][io]") {
 
 TEST_CASE("the en-passant victim is recovered from a FEN", "[golden][io]") {
   const auto v = makeStandardChess();
-  const auto p = fromFen(*v, "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3");
+  const auto p =
+      fromFen(*v, "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3");
   REQUIRE(p.has_value());
   REQUIRE(cellName(v->dims, p->epTarget()) == "f6");
   // The vulnerable pawn sits one step back along the mover's forward direction.

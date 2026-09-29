@@ -76,3 +76,55 @@ support past `kMaxDims` is one constant plus a rebuild.
 4. Raumschach move counts agree with the naive oracle at every depth the time budget allows, and its rules are documented against the historical source.
 5. The direction-budget error path is tested and actionable.
 6. The TUI viewer's output is golden-tested for 2-D, 3-D and 4-D boards.
+
+---
+
+## Status: complete, with one item deliberately not built
+
+Recorded 2026-09-28, at the end of M2.
+
+| Item | Status |
+|---|---|
+| M2.1 dimension dispatch | **Not built** - see below |
+| M2.2 dimension-lift invariance | Done (`tests/property/test_lift_invariance.cpp`) |
+| M2.3 combinatorial budgets | Done, with a load-time rejection test |
+| M2.4 shipped N-D variants | Done: `cube5` (3-D), `hyper4` (4-D), `torus3d`, plus lifted standard chess |
+| M2.5 TUI multi-slice viewer | Done as `io/ascii_board.hpp`, golden-tested for 2-D, 3-D and 4-D |
+
+### Why dimension dispatch was not built
+
+The plan called for hot kernels templated on the dimension count and dispatched
+through a table, on the reasoning that axis loops would then unroll. That reasoning
+was invalidated by the change recorded in ARCH §4.2: because the ray walk carries the
+decoded coordinate, **the inner loop iterates a direction's *support* - the axes on
+which it is nonzero - and not the dimension count.** A knight's direction has support
+2 whether the board has 2 axes or 8. Templating on the dimension count would therefore
+unroll a loop that does not run, while multiplying the binary by seven.
+
+If this is revisited, the axis to specialize on is support size (1, 2 and 3 cover
+essentially everything), not dimension count. It is not being done speculatively: the
+M1 baseline says `isAttacked` dominates the profile, so that is where the next
+measured work belongs.
+
+The plan's D=2-must-not-regress gate is still meaningful and still met - there is no
+dispatch layer to pay for, and `bench/baselines/x86_64/M1.md` remains the reference.
+
+### Deviation: Raumschach
+
+M2.4 named Raumschach as the first 3-D variant. What ships is `cube5`, which uses
+Raumschach's historically settled *piece movement* but states plainly that its pawn
+rules and promotion are ChessBox's own. Shipping a file labelled "Raumschach" whose
+pawn rules were reconstructed from memory would be a worse outcome than shipping an
+honestly named variant: the label would imply an authority the content does not have.
+
+### What the acceptance facts actually say now
+
+1. 2-D perft goldens byte-identical to M1. **Holds.**
+2. Dimension-lift invariance for standard chess up to 8 axes, move for move, and for
+   random box variants. **Holds.**
+3. Templated vs dynamic path agreement. **Moot** - there is one path.
+4. Raumschach against a published reference. **Replaced**: `cube5` and `hyper4` have
+   depth-1 counts derived by hand, piece by piece, before comparison with the engine,
+   and deeper counts checked against the naive oracle.
+5. Direction-budget error path tested and actionable. **Holds.**
+6. Viewer output golden-tested for 2-D, 3-D and 4-D. **Holds.**

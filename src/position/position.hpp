@@ -12,6 +12,11 @@ namespace cb {
 /// A position: a flat cell array plus per-colour occupancy plus the small amount
 /// of state that is not on the board. One allocation per position, no nested
 /// containers, no per-piece objects (ARCH section 5).
+/// A position holds a pointer to its variant, so **the VariantSpec must outlive
+/// every Position and MoveGen that refers to it, and must not be moved while they
+/// exist.** Own the spec somewhere stable (a unique_ptr, or a member constructed
+/// before the objects that reference it) rather than passing it around by value.
+/// **[INVARIANT]**
 class Position {
  public:
   explicit Position(const VariantSpec& v);

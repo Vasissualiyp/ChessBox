@@ -12,7 +12,8 @@ staged version below is what to run locally, cheapest first.
 # 1. fast loop (seconds)
 cmake --preset dev && cmake --build build/dev && ctest --preset dev -L unit
 
-# 2. full dev suite (includes property tests; minutes)
+# 2. full dev suite (includes property tests; minutes). The `slow` label is excluded
+#    by the preset - deep perft at -O0 is over an hour.
 ctest --preset dev
 
 # 3. the other compiler - catches UB-dependent and iteration-order bugs
@@ -28,7 +29,10 @@ cmake --preset release && cmake --build build/release && ctest --preset release
 cmake --preset coverage && cmake --build build/coverage && ctest --preset coverage
 gcovr --root . --filter 'src/' --print-summary
 
-# 7. everything, hermetically
+# 7. the deep counts and the wide property sweep - in RELEASE, roughly ten minutes
+cmake --preset release && cmake --build build/release && ctest --preset release-slow
+
+# 8. everything, hermetically
 nix flake check
 ```
 

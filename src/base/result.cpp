@@ -5,12 +5,18 @@ namespace cb {
 
 std::string_view toString(ErrorCode c) noexcept {
   switch (c) {
-    case ErrorCode::ParseError: return "parse error";
-    case ErrorCode::ValidationError: return "validation error";
-    case ErrorCode::OutOfRange: return "out of range";
-    case ErrorCode::Unsupported: return "unsupported";
-    case ErrorCode::BudgetExceeded: return "budget exceeded";
-    case ErrorCode::Internal: return "internal error";
+    case ErrorCode::ParseError:
+      return "parse error";
+    case ErrorCode::ValidationError:
+      return "validation error";
+    case ErrorCode::OutOfRange:
+      return "out of range";
+    case ErrorCode::Unsupported:
+      return "unsupported";
+    case ErrorCode::BudgetExceeded:
+      return "budget exceeded";
+    case ErrorCode::Internal:
+      return "internal error";
   }
   return "unknown error";
 }

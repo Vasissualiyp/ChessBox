@@ -54,10 +54,12 @@ void forEachInFenOrder(const DimSpec& d, Visit visit, Boundary boundary) {
       reset(a);
       pending.push(static_cast<std::uint8_t>(a + 1));
     }
-    // Separators are flushed only once continuation is certain, which is what
-    // keeps a trailing '/' out of the output.
+    // Separators are flushed only once continuation is certain, which keeps a
+    // trailing '/' out of the output. When several axes roll over together only the
+    // outermost separator is written: a level boundary reads as "|", not "/|", and
+    // parsing is unaffected because separators carry no cells.
     if (done) return;
-    for (std::uint8_t axis : pending) boundary(axis);
+    if (!pending.empty()) boundary(pending.back());
   }
 }
 

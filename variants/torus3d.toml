@@ -1,0 +1,98 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# torus3d - a 4x4x4 three-dimensional torus.
+#
+# Every one of the three axes is glued, so all 26 of a king's directions are always
+# available and no cell is special. The point of shipping it is that it is the same
+# engine: three periodic identifications, no code.
+
+name = "torus3d"
+side_to_move = "white"
+stalemate = "draw"
+halfmove_draw_limit = 100
+
+[[axis]]
+name = "file"
+extent = 4
+
+[[axis]]
+name = "rank"
+extent = 4
+
+[[axis]]
+name = "level"
+extent = 4
+
+[[geometry.identify]]
+axis = "file"
+kind = "periodic"
+
+[[geometry.identify]]
+axis = "rank"
+kind = "periodic"
+
+[[geometry.identify]]
+axis = "level"
+kind = "periodic"
+
+[[piece]]
+name = "knight"
+symbol = "N"
+
+  [[piece.move]]
+  vector = [1, 2]
+  max = 1
+  mode = "leap"
+
+[[piece]]
+name = "bishop"
+symbol = "B"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "rook"
+symbol = "R"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "queen"
+symbol = "Q"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "king"
+symbol = "K"
+royal = true
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+
+# The armies are separated along the level axis, not the rank axis: with every axis
+# glued, a 4-cell axis puts opposite ends two steps apart, and facing each other
+# across the ranks would start the game in contact.
+[start]
+board = "4/4/4/RNKR|4/4/4/4|4/4/rnkr/4|4/4/4/4"

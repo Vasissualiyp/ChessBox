@@ -62,9 +62,23 @@ class Geometry {
   [[nodiscard]] bool isBox() const noexcept { return !hasIdents_; }
   [[nodiscard]] std::size_t identCount() const noexcept { return idents_.size(); }
 
-  /// Does any identification reverse orientation? Non-orientable boards lose
-  /// bishop colour binding and make "forward" ambiguous (M3.4).
+  /// Is the quotient surface orientable?
+  ///
+  /// Only *gluings* can make it otherwise: a Moebius or Klein seam identifies two
+  /// faces through an orientation-reversing map, and the resulting surface has no
+  /// consistent handedness - which is why "forward" stops being definable and a
+  /// bishop stops being colour-bound (M3.4).
+  ///
+  /// A reflecting wall is deliberately not counted. It glues nothing, so the board
+  /// remains an ordinary box of distinct cells; it merely turns rays around. Ask
+  /// hasOrientationReversingFace() if that is what you care about.
   [[nodiscard]] bool isOrientable() const noexcept { return orientable_; }
+
+  /// Does any boundary face - gluing or mirror - reverse handedness? Relevant to
+  /// anything reasoning about a ray's chirality rather than about the surface.
+  [[nodiscard]] bool hasOrientationReversingFace() const noexcept {
+    return reversingFace_;
+  }
 
   [[nodiscard]] Walker start(CellId cell, const Direction& d) const {
     Walker w;
@@ -113,6 +127,7 @@ class Geometry {
   std::array<std::array<bool, 2>, kMaxDims> faceSet_{};
   bool hasIdents_{false};
   bool orientable_{true};
+  bool reversingFace_{false};
 };
 
 }  // namespace cb

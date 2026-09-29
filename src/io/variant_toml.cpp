@@ -23,16 +23,18 @@ Result<MoveMode> parseMode(std::string_view s, int line) {
   if (s == "leap") return MoveMode::Leap;
   if (s == "hop") return MoveMode::Hop;
   return fail(ErrorCode::ValidationError,
-              "move mode must be 'slide', 'leap' or 'hop', not '" + std::string(s) + "'", line);
+              "move mode must be 'slide', 'leap' or 'hop', not '" + std::string(s) + "'",
+              line);
 }
 
 Result<CapturePolicy> parseCapture(std::string_view s, int line) {
   if (s == "may") return CapturePolicy::May;
   if (s == "must") return CapturePolicy::Must;
   if (s == "cannot") return CapturePolicy::Cannot;
-  return fail(ErrorCode::ValidationError,
-              "capture policy must be 'may', 'must' or 'cannot', not '" + std::string(s) + "'",
-              line);
+  return fail(
+      ErrorCode::ValidationError,
+      "capture policy must be 'may', 'must' or 'cannot', not '" + std::string(s) + "'",
+      line);
 }
 
 Result<Color> parseColor(std::string_view s, int line) {
@@ -47,8 +49,8 @@ Result<AxisKind> parseAxisKind(std::string_view s, int line) {
   if (s == "temporal") return AxisKind::Temporal;
   if (s == "multiverse") return AxisKind::Multiverse;
   return fail(ErrorCode::ValidationError,
-              "axis kind must be 'spatial', 'temporal' or 'multiverse', not '" + std::string(s) +
-                  "'",
+              "axis kind must be 'spatial', 'temporal' or 'multiverse', not '" +
+                  std::string(s) + "'",
               line);
 }
 
@@ -61,8 +63,8 @@ Result<std::vector<StartPiece>> parseBoardSection(const DimSpec& dims,
   // the serializer cannot disagree about what the board string means.
   std::vector<Coord> order;
   order.reserve(dims.cellCount());
-  forEachInFenOrder(dims, [&](CellId c) { order.push_back(dims.toCoord(c)); },
-                    [](std::uint8_t) {});
+  forEachInFenOrder(
+      dims, [&](CellId c) { order.push_back(dims.toCoord(c)); }, [](std::uint8_t) {});
 
   std::vector<StartPiece> out;
   std::size_t idx = 0;
@@ -72,7 +74,8 @@ Result<std::vector<StartPiece>> parseBoardSection(const DimSpec& dims,
     if (std::isdigit(static_cast<unsigned char>(ch)) != 0) {
       std::size_t j = i;
       int skip = 0;
-      while (j < board.size() && std::isdigit(static_cast<unsigned char>(board[j])) != 0) {
+      while (j < board.size() &&
+             std::isdigit(static_cast<unsigned char>(board[j])) != 0) {
         skip = skip * 10 + (board[j] - '0');
         ++j;
       }
@@ -104,8 +107,8 @@ Result<std::vector<StartPiece>> parseBoardSection(const DimSpec& dims,
   }
   if (idx != order.size()) {
     return fail(ErrorCode::ValidationError,
-                "the starting board describes " + std::to_string(idx) + " cells but the board has " +
-                    std::to_string(order.size()));
+                "the starting board describes " + std::to_string(idx) +
+                    " cells but the board has " + std::to_string(order.size()));
   }
   return out;
 }
@@ -133,12 +136,15 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
   std::vector<AxisDecl> axes;
   for (const auto& node : *axesNode) {
     const auto* t = node.as_table();
-    if (t == nullptr) return fail(ErrorCode::ValidationError, "[[axis]] must be a table", lineOf(node));
+    if (t == nullptr)
+      return fail(ErrorCode::ValidationError, "[[axis]] must be a table", lineOf(node));
     AxisDecl a;
     a.name = (*t)["name"].value_or(std::string{});
     a.extent = (*t)["extent"].value_or(0);
-    const auto kind = parseAxisKind((*t)["kind"].value_or(std::string{"spatial"}), lineOf(node));
-    if (!kind.has_value()) return fail(kind.error().code, kind.error().message, kind.error().line);
+    const auto kind =
+        parseAxisKind((*t)["kind"].value_or(std::string{"spatial"}), lineOf(node));
+    if (!kind.has_value())
+      return fail(kind.error().code, kind.error().message, kind.error().line);
     a.kind = *kind;
     if (a.name.empty()) {
       return fail(ErrorCode::ValidationError, "every axis needs a 'name'", lineOf(node));
@@ -157,7 +163,8 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
     for (const auto& node : *g) {
       const auto* t = node.as_table();
       if (t == nullptr) {
-        return fail(ErrorCode::ValidationError, "[[geometry.identify]] must be a table", lineOf(node));
+        return fail(ErrorCode::ValidationError, "[[geometry.identify]] must be a table",
+                    lineOf(node));
       }
       IdentDecl id;
       const std::string axisName = (*t)["axis"].value_or(std::string{});
@@ -185,7 +192,8 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
       } else if (side == "min") {
         id.side = Side::Min;
       } else {
-        return fail(ErrorCode::ValidationError, "side must be 'min' or 'max'", lineOf(node));
+        return fail(ErrorCode::ValidationError, "side must be 'min' or 'max'",
+                    lineOf(node));
       }
       if (const auto* flips = (*t)["flip"].as_array()) {
         for (const auto& f : *flips) {
@@ -207,7 +215,8 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
         id.swapA = axisByName((*swap)[0].value_or(std::string{}));
         id.swapB = axisByName((*swap)[1].value_or(std::string{}));
         if (id.swapA < 0 || id.swapB < 0) {
-          return fail(ErrorCode::ValidationError, "'swap' names an undeclared axis", lineOf(node));
+          return fail(ErrorCode::ValidationError, "'swap' names an undeclared axis",
+                      lineOf(node));
         }
       }
       idents.push_back(std::move(id));
@@ -236,7 +245,8 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
   std::map<std::string, std::vector<std::string>> promotesTo;
   for (const auto& node : *piecesNode) {
     const auto* t = node.as_table();
-    if (t == nullptr) return fail(ErrorCode::ValidationError, "[[piece]] must be a table", lineOf(node));
+    if (t == nullptr)
+      return fail(ErrorCode::ValidationError, "[[piece]] must be a table", lineOf(node));
     PieceTypeDef p;
     p.name = (*t)["name"].value_or(std::string{});
     if (p.name.empty()) {
@@ -245,7 +255,8 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
     const std::string sym = (*t)["symbol"].value_or(std::string{});
     if (sym.size() != 1) {
       return fail(ErrorCode::ValidationError,
-                  "piece '" + p.name + "' needs a single-character 'symbol'", lineOf(node));
+                  "piece '" + p.name + "' needs a single-character 'symbol'",
+                  lineOf(node));
     }
     p.symbol = static_cast<char>(std::toupper(sym[0]));
     p.royal = (*t)["royal"].value_or(false);
@@ -257,12 +268,14 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
     const auto* movesNode = (*t)["move"].as_array();
     if (movesNode == nullptr || movesNode->empty()) {
       return fail(ErrorCode::ValidationError,
-                  "piece '" + p.name + "' needs at least one [[piece.move]]", lineOf(node));
+                  "piece '" + p.name + "' needs at least one [[piece.move]]",
+                  lineOf(node));
     }
     for (const auto& mnode : *movesNode) {
       const auto* mt = mnode.as_table();
       if (mt == nullptr) {
-        return fail(ErrorCode::ValidationError, "[[piece.move]] must be a table", lineOf(mnode));
+        return fail(ErrorCode::ValidationError, "[[piece.move]] must be a table",
+                    lineOf(mnode));
       }
       MoveAtom atom;
       const auto* vec = (*mt)["vector"].as_array();
@@ -295,15 +308,20 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
         atom.maxK = static_cast<std::uint32_t>(*mk);
       } else if (!maxText.empty()) {
         return fail(ErrorCode::ValidationError,
-                    "piece '" + p.name + "': 'max' must be an integer or \"inf\"", lineOf(mnode));
+                    "piece '" + p.name + "': 'max' must be an integer or \"inf\"",
+                    lineOf(mnode));
       }
       atom.minK = static_cast<std::uint32_t>((*mt)["min"].value_or<std::int64_t>(1));
 
-      const auto mode = parseMode((*mt)["mode"].value_or(std::string{"leap"}), lineOf(mnode));
-      if (!mode.has_value()) return fail(mode.error().code, mode.error().message, mode.error().line);
+      const auto mode =
+          parseMode((*mt)["mode"].value_or(std::string{"leap"}), lineOf(mnode));
+      if (!mode.has_value())
+        return fail(mode.error().code, mode.error().message, mode.error().line);
       atom.mode = *mode;
-      const auto cap = parseCapture((*mt)["capture"].value_or(std::string{"may"}), lineOf(mnode));
-      if (!cap.has_value()) return fail(cap.error().code, cap.error().message, cap.error().line);
+      const auto cap =
+          parseCapture((*mt)["capture"].value_or(std::string{"may"}), lineOf(mnode));
+      if (!cap.has_value())
+        return fail(cap.error().code, cap.error().message, cap.error().line);
       atom.capture = *cap;
 
       atom.oriented = (*mt)["forward"].value_or(false);
@@ -319,23 +337,26 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
       atom.leavesEnPassant = (*mt)["leaves_en_passant"].value_or(false);
       if (const auto home = (*mt)["from_rank"].value<std::int64_t>()) {
         if (v.orientationAxis < 0) {
-          return fail(ErrorCode::ValidationError,
-                      "piece '" + p.name +
-                          "': 'from_rank' needs the variant to declare an orientation_axis",
-                      lineOf(mnode));
+          return fail(
+              ErrorCode::ValidationError,
+              "piece '" + p.name +
+                  "': 'from_rank' needs the variant to declare an orientation_axis",
+              lineOf(mnode));
         }
         const auto axis = static_cast<std::size_t>(v.orientationAxis);
         const auto white = static_cast<std::int16_t>(*home);
         const auto black = static_cast<std::int16_t>(v.dims.extent(axis) - 1 - white);
-        atom.fromRegion[static_cast<std::size_t>(Color::White)] = Region{v.orientationAxis, white};
-        atom.fromRegion[static_cast<std::size_t>(Color::Black)] = Region{v.orientationAxis, black};
+        atom.fromRegion[static_cast<std::size_t>(Color::White)] =
+            Region{v.orientationAxis, white};
+        atom.fromRegion[static_cast<std::size_t>(Color::Black)] =
+            Region{v.orientationAxis, black};
       }
       // Canonicalize here as well as in finalize(), so that a malformed magnitude
       // or step count is reported against the line that declared it.
       auto canon = MoveAtom::canonicalize(atom);
       if (!canon.has_value()) {
-        return fail(canon.error().code, "piece '" + p.name + "': " + canon.error().message,
-                    lineOf(mnode));
+        return fail(canon.error().code,
+                    "piece '" + p.name + "': " + canon.error().message, lineOf(mnode));
       }
       p.atoms.push_back(*canon);
     }
@@ -347,8 +368,9 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
     for (const std::string& target : targets) {
       const PieceTypeId to = v.findPiece(target);
       if (to == kNoPiece) {
-        return fail(ErrorCode::ValidationError,
-                    "piece '" + pieceName + "' promotes to '" + target + "', which is not declared");
+        return fail(ErrorCode::ValidationError, "piece '" + pieceName +
+                                                    "' promotes to '" + target +
+                                                    "', which is not declared");
       }
       v.pieces[from].promotesTo.push_back(to);
     }
@@ -362,14 +384,16 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
     }
     const auto axis = static_cast<std::size_t>(v.orientationAxis);
     const auto white = static_cast<std::int16_t>(*rank);
-    v.promotion[static_cast<std::size_t>(Color::White)] = Region{v.orientationAxis, white};
-    v.promotion[static_cast<std::size_t>(Color::Black)] =
-        Region{v.orientationAxis, static_cast<std::int16_t>(v.dims.extent(axis) - 1 - white)};
+    v.promotion[static_cast<std::size_t>(Color::White)] =
+        Region{v.orientationAxis, white};
+    v.promotion[static_cast<std::size_t>(Color::Black)] = Region{
+        v.orientationAxis, static_cast<std::int16_t>(v.dims.extent(axis) - 1 - white)};
   }
 
   // ---- rules ---------------------------------------------------------------
   v.enPassant = tbl["en_passant"].value_or(false);
-  v.halfmoveDrawLimit = static_cast<int>(tbl["halfmove_draw_limit"].value_or<std::int64_t>(0));
+  v.halfmoveDrawLimit =
+      static_cast<int>(tbl["halfmove_draw_limit"].value_or<std::int64_t>(0));
   const std::string stalemate = tbl["stalemate"].value_or(std::string{"draw"});
   if (stalemate == "draw") {
     v.stalemate = StalematePolicy::Draw;
@@ -389,17 +413,22 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
   if (const auto* cs = tbl["castle"].as_array()) {
     for (const auto& node : *cs) {
       const auto* t = node.as_table();
-      if (t == nullptr) return fail(ErrorCode::ValidationError, "[[castle]] must be a table", lineOf(node));
+      if (t == nullptr)
+        return fail(ErrorCode::ValidationError, "[[castle]] must be a table",
+                    lineOf(node));
       CastleTemplate ct;
       ct.name = (*t)["name"].value_or(std::string{});
-      const auto color = parseColor((*t)["color"].value_or(std::string{"white"}), lineOf(node));
-      if (!color.has_value()) return fail(color.error().code, color.error().message, color.error().line);
+      const auto color =
+          parseColor((*t)["color"].value_or(std::string{"white"}), lineOf(node));
+      if (!color.has_value())
+        return fail(color.error().code, color.error().message, color.error().line);
       ct.color = *color;
       const auto cellField = [&](const char* key) -> Result<CellId> {
         const std::string name = (*t)[key].value_or(std::string{});
         if (name.empty()) {
           return fail(ErrorCode::ValidationError,
-                      "castling template '" + ct.name + "' is missing '" + key + "'", lineOf(node));
+                      "castling template '" + ct.name + "' is missing '" + key + "'",
+                      lineOf(node));
         }
         auto c = parseCell(v.dims, name);
         if (!c.has_value()) return fail(c.error().code, c.error().message, lineOf(node));
@@ -410,17 +439,20 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
       const auto rf = cellField("rook_from");
       const auto rt = cellField("rook_to");
       for (const auto* r : {&kf, &kt2, &rf, &rt}) {
-        if (!r->has_value()) return fail(r->error().code, r->error().message, r->error().line);
+        if (!r->has_value())
+          return fail(r->error().code, r->error().message, r->error().line);
       }
       ct.kingFrom = *kf;
       ct.kingTo = *kt2;
       ct.rookFrom = *rf;
       ct.rookTo = *rt;
-      const auto cellList = [&](const char* key, std::vector<CellId>& out) -> Result<void> {
+      const auto cellList = [&](const char* key,
+                                std::vector<CellId>& out) -> Result<void> {
         if (const auto* arr = (*t)[key].as_array()) {
           for (const auto& x : *arr) {
             auto c = parseCell(v.dims, x.value_or(std::string{}));
-            if (!c.has_value()) return fail(c.error().code, c.error().message, lineOf(node));
+            if (!c.has_value())
+              return fail(c.error().code, c.error().message, lineOf(node));
             out.push_back(*c);
           }
         }
@@ -432,7 +464,8 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
       if (const auto r = cellList("safe", ct.mustBeSafe); !r.has_value()) {
         return fail(r.error().code, r.error().message, r.error().line);
       }
-      ct.rightsBit = static_cast<std::uint8_t>((*t)["rights_bit"].value_or<std::int64_t>(0));
+      ct.rightsBit =
+          static_cast<std::uint8_t>((*t)["rights_bit"].value_or<std::int64_t>(0));
       v.castles.push_back(std::move(ct));
     }
   }
@@ -444,7 +477,8 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
                 "a variant needs [start] board = \"...\" describing the opening setup");
   }
   auto placements = parseBoardSection(v.dims, v.pieces, board);
-  if (!placements.has_value()) return fail(placements.error().code, placements.error().message);
+  if (!placements.has_value())
+    return fail(placements.error().code, placements.error().message);
   v.start = std::move(*placements);
 
   if (auto ok = v.finalize(); !ok.has_value()) {
@@ -456,7 +490,8 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
 Result<VariantSpec> loadVariantFile(const std::filesystem::path& path) {
   std::ifstream in(path);
   if (!in) {
-    return fail(ErrorCode::ParseError, "cannot open variant file '" + path.string() + "'");
+    return fail(ErrorCode::ParseError,
+                "cannot open variant file '" + path.string() + "'");
   }
   std::ostringstream ss;
   ss << in.rdbuf();

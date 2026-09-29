@@ -9,7 +9,9 @@
 
 namespace cb::test {
 
-inline std::filesystem::path repoRoot() { return std::filesystem::path{CB_SOURCE_DIR}; }
+inline std::filesystem::path repoRoot() {
+  return std::filesystem::path{CB_SOURCE_DIR};
+}
 inline std::filesystem::path variantPath(std::string_view name) {
   return repoRoot() / "variants" / (std::string(name) + ".toml");
 }

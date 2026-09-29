@@ -1,0 +1,99 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# klein - a Klein bottle board.
+#
+# The files are glued straight and the ranks are glued with a flip of the file
+# coordinate. The surface is closed and non-orientable, and it has a consequence you
+# can feel while playing: **a bishop is no longer confined to one colour.** No
+# global two-colouring of the board exists, so a bishop can reach every cell. The
+# engine's test suite asserts exactly that, because it is a sharper check on the
+# direction-transport code than any hand-written move list could be.
+#
+# As with mobius.toml there are no pawns: "forward" is not globally definable here.
+
+name = "klein"
+side_to_move = "white"
+en_passant = false
+stalemate = "draw"
+halfmove_draw_limit = 100
+
+[[axis]]
+name = "file"
+extent = 8
+
+[[axis]]
+name = "rank"
+extent = 8
+
+[[geometry.identify]]
+axis = "file"
+kind = "periodic"
+
+[[geometry.identify]]
+axis = "rank"
+kind = "periodic"
+flip = ["file"]
+
+[[piece]]
+name = "knight"
+symbol = "N"
+
+  [[piece.move]]
+  vector = [1, 2]
+  max = 1
+  mode = "leap"
+
+[[piece]]
+name = "bishop"
+symbol = "B"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "rook"
+symbol = "R"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "queen"
+symbol = "Q"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "king"
+symbol = "K"
+royal = true
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+
+# A small army, offset in both rank and file. Two constraints force this. Gluing the
+# ranks puts the usual back rows in contact, and - because a bishop here reaches every
+# cell - any bishop or queen on the board gives check from almost anywhere, so this
+# variant fields only kings, rooks and knights. The bishop and queen remain declared
+# above so that a position can still contain them after a promotion or an edit.
+[start]
+board = "8/8/8/4rnkr/8/8/8/RNKR4"

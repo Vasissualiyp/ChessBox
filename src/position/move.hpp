@@ -19,7 +19,8 @@ enum class MoveFlag : std::uint8_t {
 };
 
 inline std::uint8_t operator|(MoveFlag a, MoveFlag b) {
-  return static_cast<std::uint8_t>(static_cast<std::uint8_t>(a) | static_cast<std::uint8_t>(b));
+  return static_cast<std::uint8_t>(static_cast<std::uint8_t>(a) |
+                                   static_cast<std::uint8_t>(b));
 }
 inline bool has(std::uint8_t flags, MoveFlag f) {
   return (flags & static_cast<std::uint8_t>(f)) != 0;
@@ -47,7 +48,8 @@ struct Move {
 
   friend bool operator==(const Move& a, const Move& b) {
     return a.from == b.from && a.to == b.to && a.captureCell == b.captureCell &&
-           a.promoteTo == b.promoteTo && a.flags == b.flags && a.castleIndex == b.castleIndex;
+           a.promoteTo == b.promoteTo && a.flags == b.flags &&
+           a.castleIndex == b.castleIndex;
   }
 };
 

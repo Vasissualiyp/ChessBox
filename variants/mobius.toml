@@ -1,0 +1,91 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# mobius - the files are glued into a loop with a half-twist.
+#
+# Crossing the file seam reverses the rank coordinate, so a rook travelling along a
+# rank comes back on the mirrored rank and needs two circuits to return home. The
+# board is non-orientable: it has no consistent notion of which way is "up".
+#
+# Hence no pawns. On an orientation-reversing board a piece that always moves
+# "forward" is not well defined - a pawn crossing the seam would find its forward
+# direction reversed, and any answer to that is a choice rather than a rule. Rather
+# than bake one in, this variant simply has no oriented pieces, and the question is
+# documented in docs/plan/M3-geometry.md 3.4 for the variants that do want an answer.
+
+name = "mobius"
+side_to_move = "white"
+en_passant = false
+stalemate = "draw"
+halfmove_draw_limit = 100
+
+[[axis]]
+name = "file"
+extent = 8
+
+[[axis]]
+name = "rank"
+extent = 8
+
+[[geometry.identify]]
+axis = "file"
+kind = "periodic"
+flip = ["rank"]
+
+[[piece]]
+name = "knight"
+symbol = "N"
+
+  [[piece.move]]
+  vector = [1, 2]
+  max = 1
+  mode = "leap"
+
+[[piece]]
+name = "bishop"
+symbol = "B"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "rook"
+symbol = "R"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "queen"
+symbol = "Q"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "king"
+symbol = "K"
+royal = true
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+
+[start]
+board = "rnbqkbnr/8/8/8/8/8/8/RNBQKBNR"

@@ -93,3 +93,71 @@ Adding a topology is a `[[geometry.identify]]` block plus goldens. No engine cod
 4. Each exotic-surface rule policy has tests for every option.
 5. Dimension-lift invariance (M2.2) still holds, including for periodic axes.
 6. A contradictory identification set yields a precise validation error.
+
+---
+
+## Status: substantially complete, with two real gaps
+
+Recorded 2026-09-28, at the end of M3.
+
+| Item | Status |
+|---|---|
+| M3.1 identification language | Done, in TOML, with the direction action derived rather than authored |
+| M3.2 hot path | Interior fast path done; **transport tables not built** - analytic only |
+| M3.3 topology family | Done except the real projective plane - see below |
+| M3.4 rule policies on exotic surfaces | **Documented and avoided, not made configurable** |
+| M3.5 renderer seam metadata | `Geometry::faceTransform` exposes it; nothing consumes it yet (M4) |
+
+### Transport tables were not built
+
+The plan's boundary-transport tables are an optimisation over the analytic fold, and
+the analytic fold turned out to be cheap enough that building the tables would have
+been speculative: it runs only on a boundary crossing, and the shipped glued variants
+are not limited by it. The `kMaxDirections`-style budget machinery and the
+table-vs-analytic differential test in M3.2 are therefore not present.
+
+What *is* limiting on glued boards is `isAttacked`, which falls back to a full forward
+scan (ADR-0010). That is the measured next piece of work, and it is a different
+problem from transport tables.
+
+### The projective plane is not expressible
+
+M3.3 listed the real projective plane. The identification language pairs *faces* of
+the box, and an antipodal identification is not of that shape, so it cannot currently
+be declared. This is a genuine expressiveness gap, not an oversight of implementation:
+extending the language to general cell-class identifications would also require the
+loader to canonicalise cells into equivalence classes (ARCH §4.3), which nothing does
+yet. Everything else in the M3.3 table ships, each with the mathematical invariant the
+plan asked for.
+
+### M3.4 became a design constraint rather than a feature
+
+The plan proposed per-variant policies for pawn direction, promotion regions,
+castling and en passant on exotic surfaces. What exists instead:
+
+- Promotion regions are already optional, so a torus simply declares none. **Done.**
+- Castling is already a list of cells, so a glued variant simply declares none.
+  **Done.**
+- Pawn direction across an orientation-reversing seam has **no policy**: the
+  non-orientable variants field no oriented pieces at all, and a test asserts that.
+  This is honest rather than complete - it means ChessBox cannot yet express "pawns on
+  a Klein bottle", and the options are still written up in §3.4 above for whoever
+  needs them.
+
+### An addition the plan did not anticipate
+
+Surface orientability and face handedness had to be separated. A reflecting wall
+reverses handedness but glues nothing, so the board stays an ordinary box of distinct
+cells: `Geometry::isOrientable()` now describes the quotient surface and
+`hasOrientationReversingFace()` describes the transforms. Conflating them classified
+`mirrorbox` as non-orientable, which is simply wrong.
+
+### The ambiguity ADR-0010 records
+
+A step leaving the box on two axes at once folds in axis order, and for gluings whose
+transforms disagree about a shared axis the result is order-dependent. That is a
+property of the declared geometry, not of the code. It is why `isAttacked` uses a
+forward scan on glued boards, and it is pinned by
+`tests/unit/geometry/test_corner_folds.cpp`. Resolving it - by making the fold provably
+order-independent, or by rejecting such gluings at load time - is the one piece of M3
+follow-up work that would unlock a significant speedup.

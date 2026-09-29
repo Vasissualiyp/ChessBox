@@ -42,7 +42,8 @@ Transform buildFaceTransform(const DimSpec& dims, const IdentDecl& d, Side side)
 
 }  // namespace
 
-Result<Geometry> Geometry::create(const DimSpec& dims, std::span<const IdentDecl> idents) {
+Result<Geometry> Geometry::create(const DimSpec& dims,
+                                  std::span<const IdentDecl> idents) {
   Geometry g;
   g.dims_ = dims;
   g.idents_.assign(idents.begin(), idents.end());
@@ -50,8 +51,8 @@ Result<Geometry> Geometry::create(const DimSpec& dims, std::span<const IdentDecl
   for (const IdentDecl& d : idents) {
     if (d.axis >= dims.dims()) {
       return fail(ErrorCode::ValidationError,
-                  "identification names axis " + std::to_string(d.axis) + " but the board has " +
-                      std::to_string(dims.dims()) + " axes");
+                  "identification names axis " + std::to_string(d.axis) +
+                      " but the board has " + std::to_string(dims.dims()) + " axes");
     }
     if (d.kind == BoundaryKind::Open) {
       return fail(ErrorCode::ValidationError,
@@ -59,17 +60,17 @@ Result<Geometry> Geometry::create(const DimSpec& dims, std::span<const IdentDecl
     }
     for (std::uint8_t f : d.flipAxes) {
       if (f >= dims.dims()) {
-        return fail(ErrorCode::ValidationError,
-                    "identification flips axis " + std::to_string(f) + ", which does not exist");
+        return fail(
+            ErrorCode::ValidationError,
+            "identification flips axis " + std::to_string(f) + ", which does not exist");
       }
     }
     if ((d.swapA >= 0) != (d.swapB >= 0)) {
       return fail(ErrorCode::ValidationError, "an axis swap needs both axes");
     }
-    if (d.swapA >= 0 &&
-        (d.swapA >= dims.dims() || d.swapB >= dims.dims() ||
-         dims.extent(static_cast<std::size_t>(d.swapA)) !=
-             dims.extent(static_cast<std::size_t>(d.swapB)))) {
+    if (d.swapA >= 0 && (d.swapA >= dims.dims() || d.swapB >= dims.dims() ||
+                         dims.extent(static_cast<std::size_t>(d.swapA)) !=
+                             dims.extent(static_cast<std::size_t>(d.swapB)))) {
       return fail(ErrorCode::ValidationError,
                   "swapped axes must exist and have equal extents");
     }
@@ -91,7 +92,11 @@ Result<Geometry> Geometry::create(const DimSpec& dims, std::span<const IdentDecl
       g.faceXf_[d.axis][static_cast<std::size_t>(s)] = buildFaceTransform(dims, d, side);
       g.hasIdents_ = true;
       if (g.faceXf_[d.axis][static_cast<std::size_t>(s)].reversesOrientation()) {
-        g.orientable_ = false;
+        g.reversingFace_ = true;
+        // A gluing through an orientation-reversing map makes the surface itself
+        // non-orientable; a reflecting wall does not glue anything, so it turns rays
+        // around without changing the topology.
+        if (d.kind == BoundaryKind::Periodic) g.orientable_ = false;
       }
     }
   }

@@ -12,9 +12,7 @@ namespace {
 /// compare this, never a file name (ARCH section 11).
 class IdHasher {
  public:
-  void add(std::uint64_t v) {
-    h_ ^= v + 0x9E3779B97F4A7C15ULL + (h_ << 6) + (h_ >> 2);
-  }
+  void add(std::uint64_t v) { h_ ^= v + 0x9E3779B97F4A7C15ULL + (h_ << 6) + (h_ >> 2); }
   void add(std::string_view s) {
     for (char c : s) add(static_cast<std::uint64_t>(static_cast<unsigned char>(c)));
   }
@@ -65,7 +63,8 @@ Result<void> VariantSpec::finalize() {
   for (std::size_t pi = 1; pi < pieces.size(); ++pi) {
     PieceTypeDef& p = pieces[pi];
     if (p.name.empty()) {
-      return fail(ErrorCode::ValidationError, "piece " + std::to_string(pi) + " has no name");
+      return fail(ErrorCode::ValidationError,
+                  "piece " + std::to_string(pi) + " has no name");
     }
     if (p.atoms.empty()) {
       return fail(ErrorCode::ValidationError, "piece '" + p.name + "' has no move atoms");
@@ -73,7 +72,8 @@ Result<void> VariantSpec::finalize() {
     for (MoveAtom& atom : p.atoms) {
       const auto canon = MoveAtom::canonicalize(atom);
       if (!canon.has_value()) {
-        return fail(canon.error().code, "piece '" + p.name + "': " + canon.error().message);
+        return fail(canon.error().code,
+                    "piece '" + p.name + "': " + canon.error().message);
       }
       atom = *canon;
 
@@ -106,10 +106,12 @@ Result<void> VariantSpec::finalize() {
 
         if (dirTable.size() > kMaxDirections) {
           return fail(ErrorCode::BudgetExceeded,
-                      "piece '" + p.name + "' atom " + atom.toString() + " pushes the board's "
-                      "direction table past " + std::to_string(kMaxDirections) +
-                      " entries on a " + std::to_string(nd) +
-                      "-axis board; reduce the atom's order or the dimension count");
+                      "piece '" + p.name + "' atom " + atom.toString() +
+                          " pushes the board's "
+                          "direction table past " +
+                          std::to_string(kMaxDirections) + " entries on a " +
+                          std::to_string(nd) +
+                          "-axis board; reduce the atom's order or the dimension count");
         }
       }
 
@@ -131,10 +133,9 @@ Result<void> VariantSpec::finalize() {
         }
       }
 
-      const std::uint64_t reach =
-          atom.maxK == kUnlimited ? dims.cellCount() : atom.maxK;
-      worstCaseMoves += static_cast<std::uint64_t>(std::max(atom.dirCount(Color::White),
-                                                            atom.dirCount(Color::Black))) *
+      const std::uint64_t reach = atom.maxK == kUnlimited ? dims.cellCount() : atom.maxK;
+      worstCaseMoves += static_cast<std::uint64_t>(std::max(
+                            atom.dirCount(Color::White), atom.dirCount(Color::Black))) *
                         reach;
     }
 
@@ -157,12 +158,14 @@ Result<void> VariantSpec::finalize() {
   int royals[kNumColors]{0, 0};
   for (const StartPiece& sp : start) {
     if (sp.type == kNoPiece || sp.type >= pieces.size()) {
-      return fail(ErrorCode::ValidationError,
-                  "starting position places an unknown piece type at " + sp.at.toString());
+      return fail(
+          ErrorCode::ValidationError,
+          "starting position places an unknown piece type at " + sp.at.toString());
     }
     if (!dims.inRange(sp.at)) {
-      return fail(ErrorCode::ValidationError,
-                  "starting position places a piece outside the board at " + sp.at.toString());
+      return fail(
+          ErrorCode::ValidationError,
+          "starting position places a piece outside the board at " + sp.at.toString());
     }
     const CellId c = dims.toCell(sp.at);
     if (occupied[c]) {
@@ -176,8 +179,9 @@ Result<void> VariantSpec::finalize() {
   // Zero-royal and multi-royal variants are legal (checkers has none); this only
   // rejects the asymmetric accident of one side having a king and the other not.
   if ((royals[0] == 0) != (royals[1] == 0)) {
-    return fail(ErrorCode::ValidationError,
-                "one side has a royal piece and the other does not; declare both or neither");
+    return fail(
+        ErrorCode::ValidationError,
+        "one side has a royal piece and the other does not; declare both or neither");
   }
 
   // ---- validate castling templates ---------------------------------------
@@ -194,8 +198,8 @@ Result<void> VariantSpec::finalize() {
                   "castling template '" + ct.name + "' needs a rights bit below 8");
     }
     if (std::find(usedBits.begin(), usedBits.end(), ct.rightsBit) != usedBits.end()) {
-      return fail(ErrorCode::ValidationError,
-                  "two castling templates share rights bit " + std::to_string(ct.rightsBit));
+      return fail(ErrorCode::ValidationError, "two castling templates share rights bit " +
+                                                  std::to_string(ct.rightsBit));
     }
     usedBits.push_back(ct.rightsBit);
   }
