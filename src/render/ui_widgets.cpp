@@ -173,8 +173,12 @@ bool rowControl(const char* id, const char* label, const view::Theme& theme, ImF
 bool button(const char* label, const view::Theme& theme, float width, bool primary,
             bool cold, bool enabled, ImFont* font) {
   const float s = uiScale();
-  return rowControl(label, label, theme, font, width, 42.0f * s, s, enabled, primary,
-                    cold, -1, nullptr);
+  return rowControl(label, label, theme, font, width, controlHeight(), s, enabled,
+                    primary, cold, -1, nullptr);
+}
+
+float controlHeight() {
+  return 42.0f * uiScale();
 }
 
 void eyebrow(const char* text, const view::Theme& theme, ImFont* monoFont, float scale) {

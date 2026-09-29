@@ -48,6 +48,10 @@ bool button(const char* label, const view::Theme& theme, float width = 0.0f,
             bool primary = false, bool cold = false, bool enabled = true,
             ImFont* font = nullptr);
 
+/// The height a `button` row draws at, so a layout can reserve room for one and the row
+/// is never the thing that gets clipped when the interface scale grows.
+[[nodiscard]] float controlHeight();
+
 /// A large menu entry. The label is the whole entry: a control says what it is by being
 /// named, and a line of grey text under every row is exactly the developer-tool look
 /// this interface is trying not to have. Disabled entries stay visible.
