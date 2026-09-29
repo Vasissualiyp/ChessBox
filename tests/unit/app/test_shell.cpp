@@ -6,6 +6,7 @@
 #include "app/shell.hpp"
 
 #include <fstream>
+#include <sstream>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -249,4 +250,47 @@ TEST_CASE("a missing settings file means defaults, not an error", "[unit][app]")
   const Settings s = Settings::load("/nonexistent/path/settings.conf");
   REQUIRE(s.guiScale == 1.0f);
   REQUIRE(s.lastVariant == "standard");
+}
+
+TEST_CASE("the editor opens the current variant and saves it back", "[unit][app]") {
+  auto shell = makeShell(tempSettings("editor.conf"));
+  shell->setVariantSourceLoader([](const std::string& name) -> Result<std::string> {
+    std::ifstream in(test::variantPath(name));
+    if (!in) return fail(ErrorCode::ParseError, "cannot open '" + name + "'");
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+  });
+  const auto out = std::filesystem::temp_directory_path() / "chessbox-shell-editor.toml";
+  shell->setVariantPathResolver([&](const std::string&) { return out; });
+
+  // Opening the editor screen with nothing loaded edits the current variant (standard,
+  // since nothing was started), and opens its source.
+  shell->go(Screen::Editor);
+  REQUIRE(shell->editor() != nullptr);
+  CHECK(shell->editorVariant() == "standard");
+  CHECK_FALSE(shell->editor()->dirty());
+
+  auto atoms = shell->editor()->pieceAtoms("rook");
+  REQUIRE(atoms.has_value());
+  auto edited = *atoms;
+  MoveAtom leap;
+  leap.mags.push(1);
+  leap.mags.push(2);
+  edited.push_back(*MoveAtom::canonicalize(leap));
+  REQUIRE(shell->editor()->setPieceAtoms("rook", edited).has_value());
+  CHECK(shell->editor()->dirty());
+
+  REQUIRE(shell->saveEditor().has_value());
+  CHECK_FALSE(shell->editor()->dirty());
+
+  // What was saved is a real variant, and it is no longer the shipped standard.
+  auto reloaded = loadVariantFile(out);
+  REQUIRE(reloaded.has_value());
+  auto original = loadVariantFile(test::variantPath("standard"));
+  REQUIRE(original.has_value());
+  CHECK(reloaded->variantId() != original->variantId());
+
+  std::error_code ec;
+  std::filesystem::remove(out, ec);
 }

@@ -137,6 +137,10 @@ class Ui {
   float clock_{0.0f};
   float enter_{1.0f};
   int lastScreen_{-1};
+  /// Which piece the piece designer has selected. Editor state, not shell state: the
+  /// document is what matters and it lives in the shell; which row is highlighted is a
+  /// view concern.
+  int editorPiece_{0};
   /// The screen being left, kept as a number so its own build can be re-run as a ghost,
   /// and the screen being built now, so `paneMove` knows whether this is a menu move.
   int leavingScreen_{-1};

@@ -13,6 +13,8 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -57,6 +59,20 @@ std::unique_ptr<app::Shell> makeShell(const std::filesystem::path& settings = {}
     if (!v.has_value()) return fail(v.error().code, v.error().message);
     return std::move(*v);
   });
+  // The editor reads and writes the author's own file, not the resolved spec.
+  shell->setVariantSourceLoader([](const std::string& name) -> Result<std::string> {
+    const auto path = variantDir() / (name + ".toml");
+    std::ifstream in(path);
+    if (!in) {
+      return fail(ErrorCode::ParseError,
+                  "cannot open variant file '" + path.string() + "'");
+    }
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+  });
+  shell->setVariantPathResolver(
+      [](const std::string& name) { return variantDir() / (name + ".toml"); });
   return shell;
 }
 

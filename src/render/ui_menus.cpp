@@ -9,7 +9,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <string>
+#include <vector>
 
 #include "io/notation.hpp"
 #include "render/piece_mesh.hpp"
@@ -378,23 +381,208 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   const PaneMove move = paneMove();
   beginPane("##editor", menuMin, menuMax, move.scale, move.alpha, px(46.0f), !ghosting_);
   eyebrow("editor", t, mono, scale_);
-  screenTitle("Editor", t, display, scale_, 2.0f);
-  ImGui::PushFont(small);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
-  ImGui::TextWrapped(
-      "Boards and pieces are already data - a variant file declares its axes, its "
-      "geometry, its pieces and its rules. These editors will write that file for you.");
+  screenTitle("Piece designer", t, display, scale_, 1.9f);
+
+  app::Editor* editor = shell.editor();
+  if (editor == nullptr) {
+    ImGui::PushFont(small);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
+    ImGui::TextWrapped("No variant is open to edit. Start one, then return here.");
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+    ImGui::Dummy(ImVec2(0, px(10)));
+    if (button("BACK", t, px(120), false, false, true, display)) shell.back();
+    endPane();
+    return request;
+  }
+
+  const auto magsText = [](const MoveAtom& a) {
+    std::string s = "[";
+    for (std::size_t i = 0; i < a.mags.size(); ++i) {
+      if (i != 0) s += ",";
+      s += std::to_string(a.mags[i]);
+    }
+    s += "]";
+    return s;
+  };
+  const auto parseMags = [](const char* text, SmallVec<std::int16_t, kMaxDims>& out) {
+    SmallVec<std::int16_t, kMaxDims> m;
+    const char* p = text;
+    while (*p != '\0') {
+      while (*p == ' ' || *p == ',' || *p == '[' || *p == ']' || *p == '\t') ++p;
+      if (*p == '\0') break;
+      char* end = nullptr;
+      const long v = std::strtol(p, &end, 10);
+      if (end == p || v <= 0 || v > 32767 || m.size() >= kMaxDims) return false;
+      m.push(static_cast<std::int16_t>(v));
+      p = end;
+    }
+    if (m.empty()) return false;
+    out = m;
+    return true;
+  };
+
+  // ---- header: what is open, whether it is saved, and the edit controls.
+  ImGui::PushFont(mono);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(editor->dirty() ? t.ember : t.boneDim));
+  ImGui::Text("%s%s", shell.editorVariant().c_str(), editor->dirty() ? "  *unsaved" : "");
   ImGui::PopStyleColor();
   ImGui::PopFont();
-  ImGui::Dummy(ImVec2(0, px(10)));
-
-  const float width = ImGui::GetContentRegionAvail().x;
-  if (menuEntry("Board designer", 1, t, display, width, false, scale_)) {
+  ImGui::Dummy(ImVec2(0, px(4)));
+  if (button("UNDO", t, px(84), false, true, false, display)) editor->undo();
+  ImGui::SameLine();
+  if (button("REDO", t, px(84), false, true, false, display)) editor->redo();
+  ImGui::SameLine();
+  if (button("SAVE", t, px(84), editor->dirty(), false, false, display)) {
+    (void)shell.saveEditor();
   }
-  if (menuEntry("Piece designer", 2, t, display, width, false, scale_)) {
-  }
-
   ImGui::Dummy(ImVec2(0, px(8)));
+
+  const std::vector<std::string> names = editor->pieceNames();
+  if (names.empty()) {
+    ImGui::TextUnformatted("This variant declares no pieces.");
+  } else if (ImGui::BeginTable(
+                 "##editorcols", 2,
+                 ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchProp)) {
+    if (editorPiece_ < 0 || editorPiece_ >= static_cast<int>(names.size()))
+      editorPiece_ = 0;
+    ImGui::TableSetupColumn("pieces", ImGuiTableColumnFlags_WidthFixed, px(120.0f));
+    ImGui::TableSetupColumn("moves", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableNextRow();
+
+    ImGui::TableSetColumnIndex(0);
+    ImGui::PushFont(small);
+    for (int i = 0; i < static_cast<int>(names.size()); ++i) {
+      const bool selected = i == editorPiece_;
+      ImGui::PushStyleColor(ImGuiCol_Text, col(selected ? t.ember : t.boneDim));
+      if (ImGui::Selectable(names[static_cast<std::size_t>(i)].c_str(), selected)) {
+        editorPiece_ = i;
+      }
+      ImGui::PopStyleColor();
+    }
+    ImGui::PopFont();
+
+    ImGui::TableSetColumnIndex(1);
+    const std::string piece = names[static_cast<std::size_t>(editorPiece_)];
+    auto atoms = editor->pieceAtoms(piece);
+    if (!atoms.has_value()) {
+      ImGui::TextUnformatted("this piece could not be read");
+    } else {
+      std::vector<MoveAtom> list = *atoms;
+      bool changed = false;
+      std::size_t removeAt = list.size();
+      ImGui::PushFont(small);
+      for (std::size_t i = 0; i < list.size(); ++i) {
+        ImGui::PushID(static_cast<int>(i));
+        ImGui::Text("%2zu", i + 1);
+        ImGui::SameLine();
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "%s", magsText(list[i]).c_str());
+        ImGui::SetNextItemWidth(px(96));
+        if (ImGui::InputText("##vec", buf, sizeof(buf),
+                             ImGuiInputTextFlags_EnterReturnsTrue)) {
+          if (parseMags(buf, list[i].mags)) changed = true;
+        }
+        int mode = list[i].mode == MoveMode::Slide
+                       ? 0
+                       : (list[i].mode == MoveMode::Leap ? 1 : 2);
+        ImGui::SetNextItemWidth(px(76));
+        if (ImGui::Combo("##mode", &mode, "slide\0leap\0hop\0")) {
+          list[i].mode = mode == 0   ? MoveMode::Slide
+                         : mode == 1 ? MoveMode::Leap
+                                     : MoveMode::Hop;
+          changed = true;
+        }
+        ImGui::SameLine();
+        int cap = list[i].capture == CapturePolicy::May
+                      ? 0
+                      : (list[i].capture == CapturePolicy::Must ? 1 : 2);
+        ImGui::SetNextItemWidth(px(84));
+        if (ImGui::Combo("##cap", &cap, "may\0must\0cannot\0")) {
+          list[i].capture = cap == 0   ? CapturePolicy::May
+                            : cap == 1 ? CapturePolicy::Must
+                                       : CapturePolicy::Cannot;
+          changed = true;
+        }
+        ImGui::SameLine();
+        bool rider = list[i].maxK == kUnlimited;
+        if (ImGui::Checkbox("ride", &rider)) {
+          list[i].maxK = rider ? kUnlimited : 1;
+          changed = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Checkbox("fwd", &list[i].oriented)) changed = true;
+        ImGui::SameLine();
+        if (ImGui::SmallButton("x")) removeAt = i;
+        ImGui::PopID();
+      }
+      ImGui::PopFont();
+      if (removeAt < list.size()) {
+        list.erase(list.begin() + static_cast<std::ptrdiff_t>(removeAt));
+        changed = true;
+      }
+
+      // The composition palette: dropping a bundle in unions its atoms, which is how
+      // rook + bishop becomes a queen in 2-D and something else entirely above it.
+      ImGui::Dummy(ImVec2(0, px(6)));
+      const auto addAtom = [&](std::initializer_list<std::int16_t> mags,
+                               std::uint32_t maxK, MoveMode m, CapturePolicy c,
+                               bool fwd) {
+        MoveAtom a;
+        for (std::int16_t v : mags) a.mags.push(v);
+        a.maxK = maxK;
+        a.mode = m;
+        a.capture = c;
+        a.oriented = fwd;
+        auto canon = MoveAtom::canonicalize(a);
+        if (canon.has_value()) list.push_back(*canon);
+        changed = true;
+      };
+      if (ImGui::SmallButton("+ rook [1]inf")) {
+        addAtom({1}, kUnlimited, MoveMode::Slide, CapturePolicy::May, false);
+      }
+      ImGui::SameLine();
+      if (ImGui::SmallButton("+ bishop [1,1]inf")) {
+        addAtom({1, 1}, kUnlimited, MoveMode::Slide, CapturePolicy::May, false);
+      }
+      ImGui::SameLine();
+      if (ImGui::SmallButton("+ knight [1,2]")) {
+        addAtom({1, 2}, 1, MoveMode::Leap, CapturePolicy::May, false);
+      }
+      ImGui::SameLine();
+      if (ImGui::SmallButton("+ king step [1]")) {
+        addAtom({1}, 1, MoveMode::Leap, CapturePolicy::May, false);
+      }
+      ImGui::SameLine();
+      if (ImGui::SmallButton("+ diag [1,1]")) {
+        addAtom({1, 1}, 1, MoveMode::Leap, CapturePolicy::May, false);
+      }
+      ImGui::SameLine();
+      if (ImGui::SmallButton("+ pawn push fwd")) {
+        addAtom({1}, 1, MoveMode::Leap, CapturePolicy::Cannot, true);
+      }
+      ImGui::SameLine();
+      if (ImGui::SmallButton("+ pawn capture fwd")) {
+        addAtom({1, 1}, 1, MoveMode::Leap, CapturePolicy::Must, true);
+      }
+
+      if (changed) {
+        bool ok = true;
+        for (MoveAtom& a : list) {
+          auto canon = MoveAtom::canonicalize(a);
+          if (!canon.has_value()) {
+            ok = false;
+            break;
+          }
+          a = *canon;
+        }
+        if (ok) (void)editor->setPieceAtoms(piece, list);
+      }
+    }
+    ImGui::EndTable();
+  }
+
+  ImGui::Dummy(ImVec2(0, px(10)));
   if (button("BACK", t, px(120), false, false, true, display)) shell.back();
   endPane();
   return request;

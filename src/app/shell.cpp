@@ -81,6 +81,12 @@ bool Shell::showsBoard() const noexcept {
 
 void Shell::go(Screen s) {
   if (s == screen_) return;
+  // Opening the editor with nothing loaded edits the current variant, or standard as a
+  // base. A failure leaves the screen with no document, which the screen reports rather
+  // than trapping the player on a menu.
+  if (s == Screen::Editor && editor_ == nullptr) {
+    (void)openEditor(currentVariant_.empty() ? "standard" : currentVariant_);
+  }
   // Only remember a screen worth returning to: bouncing between two overlays should
   // still take you back to the game.
   if (screen_ != Screen::Settings && screen_ != Screen::GameInfo &&
@@ -139,6 +145,32 @@ Difficulty Shell::difficultyOf(const std::string& name) const {
   }
   difficulty_.emplace(name, d);
   return d;
+}
+
+Result<void> Shell::openEditor(const std::string& variantName) {
+  if (!sourceLoader_) {
+    return fail(ErrorCode::Internal, "no variant source loader is installed");
+  }
+  auto text = sourceLoader_(variantName);
+  if (!text.has_value()) return fail(text.error().code, text.error().message);
+  auto editor = Editor::open(*text, variantName);
+  if (!editor.has_value()) {
+    return fail(editor.error().code, editor.error().message, editor.error().line);
+  }
+  editor_ = std::make_unique<Editor>(std::move(*editor));
+  editorVariant_ = variantName;
+  editorPath_ = pathResolver_ ? pathResolver_(variantName) : std::filesystem::path{};
+  return {};
+}
+
+Result<void> Shell::saveEditor() {
+  if (editor_ == nullptr) {
+    return fail(ErrorCode::Internal, "nothing is open in the editor");
+  }
+  if (editorPath_.empty()) {
+    return fail(ErrorCode::Internal, "no save path is installed for the editor");
+  }
+  return editor_->saveFile(editorPath_);
 }
 
 Result<void> Shell::startGame(const std::string& variantName) {

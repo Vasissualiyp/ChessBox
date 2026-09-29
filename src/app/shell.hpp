@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "app/editor.hpp"
 #include "app/session.hpp"
 #include "app/settings.hpp"
 
@@ -94,6 +95,36 @@ class Shell {
   /// nullptr and the screen falls back to a plain board.
   [[nodiscard]] const VariantSpec* preview(const std::string& name) const;
 
+  /// The variant's *source text*, for the editor. Separate from the resolved-spec loader
+  /// above because editing needs the author's spelling, which the spec has thrown away;
+  /// injected like the loader so the shell stays testable without files.
+  using VariantSourceLoader = std::function<Result<std::string>(const std::string&)>;
+  void setVariantSourceLoader(VariantSourceLoader loader) {
+    sourceLoader_ = std::move(loader);
+  }
+
+  /// Where a variant's file is written when the editor saves. Injected for the same
+  /// reason as the loaders: the shell stays testable without a filesystem.
+  using VariantPathResolver = std::function<std::filesystem::path(const std::string&)>;
+  void setVariantPathResolver(VariantPathResolver resolver) {
+    pathResolver_ = std::move(resolver);
+  }
+
+  /// Open a variant's source in the editor. Fails when no source loader is installed or
+  /// the variant will not load. Replaces any document already open.
+  Result<void> openEditor(const std::string& variantName);
+
+  /// Write the open document back to its file. Fails when nothing is open or no path
+  /// resolver is installed.
+  Result<void> saveEditor();
+
+  /// The document being edited, or nullptr when the editor has nothing open.
+  [[nodiscard]] Editor* editor() noexcept { return editor_.get(); }
+  [[nodiscard]] const Editor* editor() const noexcept { return editor_.get(); }
+  [[nodiscard]] const std::string& editorVariant() const noexcept {
+    return editorVariant_;
+  }
+
   void pause();
   void resume();
 
@@ -113,6 +144,11 @@ class Shell {
   Screen previous_{Screen::MainMenu};
   bool quit_{false};
   VariantLoader loader_;
+  VariantSourceLoader sourceLoader_;
+  VariantPathResolver pathResolver_;
+  std::unique_ptr<Editor> editor_;
+  std::string editorVariant_;
+  std::filesystem::path editorPath_;
   mutable std::unique_ptr<VariantSpec> preview_;
   mutable std::string previewName_;
   /// Difficulty per variant name, filled on first ask so the picker does not re-read a
