@@ -96,22 +96,22 @@ std::vector<Slice> enumerateSlices(const DimSpec& d, const ViewConfig& cfg) {
     float ox = 0;
     float oy = 0;
     for (std::size_t i = 0; i < g; ++i) {
-      // Later grid axes step by whole blocks of the earlier ones, so no two slices
-      // can ever land on the same origin.
-      float blockX = pitchX;
-      float blockY = pitchY;
-      for (std::size_t j = i % 2; j + 2 <= i; j += 2) {
-        const auto e = static_cast<float>(d.extent(cfg.gridAxes[j]));
-        if (i % 2 == 0) {
-          blockX *= e;
-        } else {
-          blockY *= e;
+      // Grid axes alternate between the two screen directions, so a 4-D board reads as
+      // a 2-D grid of boards rather than one very long row. `gridVertical` swaps which
+      // direction comes first, which is the "column of boards" arrangement.
+      const bool alongX = (i % 2 == 0) != cfg.gridVertical;
+      float block = alongX ? pitchX : pitchY;
+      // Later grid axes step by whole blocks of the earlier ones with the same
+      // direction, so no two slices can ever land on the same origin.
+      for (std::size_t j = 0; j < i; ++j) {
+        if (((j % 2 == 0) != cfg.gridVertical) == alongX) {
+          block *= static_cast<float>(d.extent(cfg.gridAxes[j]));
         }
       }
-      if (i % 2 == 0) {
-        ox += static_cast<float>(s.at[i]) * blockX;
+      if (alongX) {
+        ox += static_cast<float>(s.at[i]) * block;
       } else {
-        oy += static_cast<float>(s.at[i]) * blockY;
+        oy += static_cast<float>(s.at[i]) * block;
       }
     }
     s.originX = ox;

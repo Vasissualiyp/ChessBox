@@ -391,25 +391,10 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     if (options_.showCheck && inCheck) pieceColor = mix(pieceColor, theme_.blood, 0.65f);
 
     if (options_.flat) {
-      // Seen from straight above, a model is a blob. A token with the piece's letter on
-      // it - drawn by the interface, which is the only thing here that can render text -
-      // is what a flat board actually needs.
-      Instance disc{};
-      disc.center[0] = x;
-      disc.center[1] = y;
-      disc.center[2] = z + half.z * 1.6f;
-      disc.scale[0] = 0.40f / half.x;
-      disc.scale[1] = 0.40f / half.y;
-      disc.scale[2] = 0.05f / half.z;
-      toFloat4(pieceColor, disc.color);
-      byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(disc);
-
-      Instance inner = disc;
-      inner.center[2] = z + half.z * 2.4f;
-      inner.scale[0] = 0.33f / half.x;
-      inner.scale[1] = 0.33f / half.y;
-      toFloat4(mix(pieceColor, theme_.ink, 0.18f), inner.color);
-      byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(inner);
+      // Seen from straight above, a model is a blob, so the flat board's pieces are
+      // drawn entirely by the interface: a circle token with the piece's own icon, in
+      // screen space, which is also the only layer that can draw a circle and follow the
+      // move animation with it. The renderer contributes the board, not the pieces.
       return;
     }
 

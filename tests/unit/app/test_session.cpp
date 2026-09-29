@@ -198,6 +198,51 @@ TEST_CASE("the view can be re-aimed at other axes", "[unit][app]") {
   REQUIRE_FALSE(s->applyScript("axes file,nosuchaxis").has_value());
 }
 
+TEST_CASE("a vertical grid can be chosen, and flat mode refuses it", "[unit][app]") {
+  auto s = open("cube5");
+  Action v;
+  v.kind = ActionKind::SetScreenAxes;
+  v.text = "file,rank";
+  v.gridVertical = true;
+  REQUIRE(s->apply(v).has_value());
+  REQUIRE(s->viewConfig().gridVertical);
+  REQUIRE(s->viewConfig().gridAxes.size() == 1);
+
+  const auto slices = view::enumerateSlices(s->variant().dims, s->viewConfig());
+  REQUIRE(slices.size() == 5);
+  REQUIRE(slices[1].originX == 0.0f);
+  REQUIRE(slices[1].originY > 0.0f);  // stacked down, not across
+
+  // A top-down camera cannot see a column of depth, so flat mode drops the vertical
+  // arrangement and spreads the boards instead.
+  s->setFlatView(true);
+  REQUIRE_FALSE(s->viewConfig().gridVertical);
+}
+
+TEST_CASE("flat mode spreads a 3-D board's levels instead of hiding them",
+          "[unit][app]") {
+  auto s = open("cube5");
+  // The default 3-D view uses three screen axes, which is one board stacked in depth.
+  REQUIRE(s->viewConfig().screenAxes.size() == 3);
+  REQUIRE(view::enumerateSlices(s->variant().dims, s->viewConfig()).size() == 1);
+
+  s->setFlatView(true);
+  // The depth axis becomes a grid axis and the five levels spread across the screen, so
+  // none is hidden under another.
+  REQUIRE(s->viewConfig().screenAxes.size() == 2);
+  REQUIRE_FALSE(s->viewConfig().gridVertical);
+  REQUIRE(view::enumerateSlices(s->variant().dims, s->viewConfig()).size() == 5);
+}
+
+TEST_CASE("leaving flat mode restores the chosen 3-D view", "[unit][app]") {
+  auto s = open("cube5");
+  s->setFlatView(true);
+  REQUIRE(s->viewConfig().screenAxes.size() == 2);
+  s->setFlatView(false);
+  REQUIRE(s->viewConfig().screenAxes.size() == 3);  // the cube is back
+  REQUIRE(view::enumerateSlices(s->variant().dims, s->viewConfig()).size() == 1);
+}
+
 TEST_CASE("camera actions stay within sane limits", "[unit][app]") {
   auto s = open("standard");
   const float startPitch = s->camera().pitch;

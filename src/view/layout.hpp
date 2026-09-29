@@ -24,6 +24,10 @@ struct ViewConfig {
   SmallVec<std::uint8_t, kMaxDims> gridAxes;
   /// Gap between neighbouring sub-boards, in cells.
   float gridGap{2.0f};
+  /// Lay the sub-board grid out down the screen (Y) instead of across it (X). One extra
+  /// axis then reads as a column of boards rather than a row, and two extra axes keep
+  /// their alternating grid but start down rather than across.
+  bool gridVertical{false};
   /// Spacing along the third screen axis, as a multiple of the cell pitch.
   ///
   /// Levels of a 3-D board drawn one unit apart merge into an unreadable slab from any

@@ -64,8 +64,9 @@ TEST_CASE("a 4-D board becomes a row of sub-boards", "[unit][view]") {
   REQUIRE(layout(d, cfg).size() == 256);
 }
 
-TEST_CASE("grid axes alternate between horizontal and vertical", "[unit][view]") {
-  // With two extra axes the sub-boards form a 2-D grid rather than one very long row.
+TEST_CASE("grid axes alternate between horizontal and vertical",
+          "[unit][view]") {  // With two extra axes the sub-boards form a 2-D grid rather
+                             // than one very long row.
   // This is the arrangement 5D chess uses for turn and timeline, and it is what keeps
   // a 5-axis board readable at all.
   const DimSpec d = test::makeDims({4, 4, 3, 3});
@@ -88,6 +89,50 @@ TEST_CASE("grid axes alternate between horizontal and vertical", "[unit][view]")
   REQUIRE(slices[3].originY == pitch);
   REQUIRE(slices[4].originX == pitch);
   REQUIRE(slices[4].originY == pitch);
+}
+
+TEST_CASE("a vertical grid stacks the sub-boards down the screen", "[unit][view]") {
+  // The third screen axis of a 3-D board is depth, and from some cameras that reads as
+  // boards piled straight up. Being able to ask for that on purpose - a column of
+  // sub-boards rather than a row - is the other half of the axes control.
+  const DimSpec d = test::makeDims({5, 5, 5});
+  ViewConfig cfg;
+  cfg.screenAxes.push(0);
+  cfg.screenAxes.push(1);
+  cfg.gridAxes.push(2);
+  cfg.gridVertical = true;
+  REQUIRE(cfg.validate(d).has_value());
+
+  const auto slices = enumerateSlices(d, cfg);
+  REQUIRE(slices.size() == 5);
+  const float pitch = 5.0f + cfg.gridGap;
+  REQUIRE(slices[0].originX == 0.0f);
+  REQUIRE(slices[0].originY == 0.0f);
+  REQUIRE(slices[1].originX == 0.0f);
+  REQUIRE(slices[1].originY == pitch);  // down, not across
+  // And the layout stays injective, so the boards cannot overlap.
+  const auto placed = layout(d, cfg);
+  std::set<std::tuple<float, float, float>> positions;
+  for (const Placement& p : placed) REQUIRE(positions.insert({p.x, p.y, p.z}).second);
+}
+
+TEST_CASE("a vertical two-axis grid starts down the screen", "[unit][view]") {
+  const DimSpec d = test::makeDims({4, 4, 3, 3});
+  ViewConfig cfg;
+  cfg.screenAxes.push(0);
+  cfg.screenAxes.push(1);
+  cfg.gridAxes.push(2);
+  cfg.gridAxes.push(3);
+  cfg.gridVertical = true;
+  REQUIRE(cfg.validate(d).has_value());
+
+  const auto slices = enumerateSlices(d, cfg);
+  REQUIRE(slices.size() == 9);
+  const float pitch = 4.0f + cfg.gridGap;
+  REQUIRE(slices[1].originX == 0.0f);
+  REQUIRE(slices[1].originY == pitch);  // first grid axis goes down
+  REQUIRE(slices[3].originX == pitch);  // second goes across
+  REQUIRE(slices[3].originY == 0.0f);
 }
 
 TEST_CASE("the layout is injective for every shipped board shape", "[unit][view]") {

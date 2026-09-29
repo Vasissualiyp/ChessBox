@@ -31,6 +31,8 @@ struct Action {
   float dx{0};
   float dy{0};
   std::string text;
+  /// For SetScreenAxes: lay the sub-board grid down the screen instead of across it.
+  bool gridVertical{false};
 };
 
 /// Everything a front end needs, with no front end in it.
@@ -114,6 +116,9 @@ class Session {
   void refreshSnapshot();
   void refreshView();
   void applyViewMode();
+  /// The view actually laid out: the player's choice, adjusted for the flat mode, which
+  /// cannot show a depth axis because a top-down camera would stack the boards unseen.
+  [[nodiscard]] view::ViewConfig effectiveViewConfig() const;
   [[nodiscard]] const Move* findMove(CellId from, CellId to) const;
   [[nodiscard]] std::vector<PieceTypeId> promotionChoicesFor(CellId from,
                                                              CellId to) const;
@@ -122,6 +127,8 @@ class Session {
   std::unique_ptr<VariantSpec> variant_;
   std::unique_ptr<Game> game_;
   view::PositionView snapshot_;
+  /// What the player asked for; `viewCfg_` is this with the flat-mode adjustment applied.
+  view::ViewConfig chosenCfg_;
   view::ViewConfig viewCfg_;
   view::OrbitCamera camera_;
   std::vector<view::Placement> placements_;

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <vector>
 
@@ -13,6 +14,7 @@
 
 #include "io/notation.hpp"
 #include "render/offscreen_target.hpp"
+#include "render/piece_mesh.hpp"
 #include "render/ui_widgets.hpp"
 
 namespace cb::render {
@@ -44,6 +46,67 @@ std::filesystem::path findFont(const char* name) {
 }
 
 /// A heading with a rule running to the right of it, the way a plate is labelled.
+
+/// A piece drawn as a flat icon, for the top-down view where a model would be a blob.
+///
+/// The shape follows the piece's archetype, so a variant's pieces are distinguishable
+/// without anyone drawing art for them: a pawn is a ball, a rook a crenellated block, a
+/// knight a wedge, and so on. It is deliberately not a lettered tile - the flat board is
+/// meant to read as a board, not as a spreadsheet.
+void drawPieceGlyph(ImDrawList* dl, ImVec2 c, float r, ImU32 col, Archetype shape) {
+  switch (shape) {
+    case Archetype::Dome:  // pawn
+      dl->AddCircleFilled(ImVec2(c.x, c.y - r * 0.15f), r * 0.5f, col, 16);
+      dl->AddRectFilled(ImVec2(c.x - r * 0.7f, c.y + r * 0.35f),
+                        ImVec2(c.x + r * 0.7f, c.y + r * 0.62f), col, r * 0.15f);
+      break;
+    case Archetype::Tower:  // rook
+      dl->AddRectFilled(ImVec2(c.x - r * 0.62f, c.y - r * 0.45f),
+                        ImVec2(c.x + r * 0.62f, c.y + r * 0.7f), col, r * 0.1f);
+      for (int i = -1; i <= 1; ++i) {
+        dl->AddRectFilled(
+            ImVec2(c.x + static_cast<float>(i) * r * 0.42f - r * 0.16f, c.y - r * 0.85f),
+            ImVec2(c.x + static_cast<float>(i) * r * 0.42f + r * 0.16f, c.y - r * 0.45f),
+            col);
+      }
+      break;
+    case Archetype::Wedge:  // knight
+      dl->AddTriangleFilled(ImVec2(c.x, c.y - r * 0.8f),
+                            ImVec2(c.x - r * 0.75f, c.y + r * 0.65f),
+                            ImVec2(c.x + r * 0.75f, c.y + r * 0.65f), col);
+      break;
+    case Archetype::Spire:  // bishop
+      dl->AddTriangleFilled(ImVec2(c.x, c.y - r * 0.9f),
+                            ImVec2(c.x - r * 0.5f, c.y + r * 0.2f),
+                            ImVec2(c.x + r * 0.5f, c.y + r * 0.2f), col);
+      dl->AddCircleFilled(ImVec2(c.x, c.y + r * 0.4f), r * 0.48f, col, 16);
+      break;
+    case Archetype::Crown:  // queen
+      dl->AddRectFilled(ImVec2(c.x - r * 0.7f, c.y + r * 0.25f),
+                        ImVec2(c.x + r * 0.7f, c.y + r * 0.65f), col);
+      for (int i = -1; i <= 1; ++i) {
+        const float dx = static_cast<float>(i) * r * 0.6f;
+        dl->AddTriangleFilled(ImVec2(c.x + dx, c.y - r * 0.85f),
+                              ImVec2(c.x + dx - r * 0.24f, c.y + r * 0.25f),
+                              ImVec2(c.x + dx + r * 0.24f, c.y + r * 0.25f), col);
+      }
+      break;
+    case Archetype::Monolith:  // king, or anything royal
+      dl->AddRectFilled(ImVec2(c.x - r * 0.17f, c.y - r * 0.9f),
+                        ImVec2(c.x + r * 0.17f, c.y + r * 0.9f), col);
+      dl->AddRectFilled(ImVec2(c.x - r * 0.7f, c.y - r * 0.35f),
+                        ImVec2(c.x + r * 0.7f, c.y + r * 0.0f), col);
+      break;
+    case Archetype::Horn:  // unicorn and friends
+      dl->AddQuadFilled(ImVec2(c.x, c.y - r * 0.9f), ImVec2(c.x + r * 0.5f, c.y),
+                        ImVec2(c.x, c.y + r * 0.9f), ImVec2(c.x - r * 0.5f, c.y), col);
+      break;
+    default:
+      dl->AddCircleFilled(c, r * 0.6f, col, 16);
+      break;
+  }
+}
+
 }  // namespace
 
 Result<std::unique_ptr<Ui>> Ui::create(const VulkanContext& ctx, SDL_Window* window,
@@ -446,12 +509,24 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       ImGui::SameLine();
       // Cold, because it acts on the geometry rather than on the game.
       if (button("AXES", t, px(78), false, true)) {
+        const DimSpec& d = v.dims;
+        const int dims = static_cast<int>(d.dims());
+        // The default view, then every pair of axes twice: once with the extra axes laid
+        // across the screen and once down it. A 3-D board's depth axis is only visible
+        // as a column of boards, so both arrangements have to be in the cycle.
+        const int steps = 1 + dims * 2;
+        axisRotation_ = (axisRotation_ + 1) % steps;
         app::Action a;
         a.kind = app::ActionKind::SetScreenAxes;
-        const DimSpec& d = v.dims;
-        axisRotation_ = (axisRotation_ + 1) % d.dims();
-        a.text = d.name(static_cast<std::size_t>(axisRotation_)) + "," +
-                 d.name(static_cast<std::size_t>((axisRotation_ + 1) % d.dims()));
+        if (axisRotation_ == 0) {
+          a.text = "default";
+        } else {
+          const int s = axisRotation_ - 1;
+          const int r = (s / 2) % dims;
+          a.gridVertical = (s % 2) == 1;
+          a.text = d.name(static_cast<std::size_t>(r)) + "," +
+                   d.name(static_cast<std::size_t>((r + 1) % dims));
+        }
         (void)session.apply(a);
       }
     }
@@ -525,29 +600,48 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     }
   }
 
-  // A flat board draws every piece as the same token, so the interface names them: the
-  // piece's own symbol, projected onto the cell it stands on. Without this a flat board
-  // is a diagram of discs and the game cannot be read.
+  // A flat board's pieces are drawn here rather than by the renderer: a circle token and
+  // the piece's own icon, in screen space, which is also what lets the token follow the
+  // move animation exactly. The background draw list puts them over the board but under
+  // the panels, so a pause menu covers them rather than the other way round.
   if (session.flatView()) {
-    ImDrawList* dl = ImGui::GetForegroundDrawList();
-    auto* glyphFont = static_cast<ImFont*>(fontBody_);
-    const float fs = px(16.0f);
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
     const float w = vp->Size.x;
     const float h = vp->Size.y;
+    const view::OrbitCamera& cam = session.camera();
+    // One world unit is one cell along the drawn axes, so projecting it gives the
+    // on-screen cell pitch and the token can be sized to the board instead of a guess.
+    const view::OrbitCamera::ScreenPoint o0 =
+        cam.project(view::Vec3{0, 0, 0}, w / h, w, h);
+    const view::OrbitCamera::ScreenPoint o1 =
+        cam.project(view::Vec3{1, 0, 0}, w / h, w, h);
+    const float cellPx = std::max(px(6.0f), std::hypot(o1.x - o0.x, o1.y - o0.y));
+    const float radius = cellPx * 0.34f;
+
+    const auto drawToken = [&](const Piece& piece, const view::Vec3& world) {
+      if (piece.empty()) return;
+      const view::OrbitCamera::ScreenPoint sp = cam.project(world, w / h, w, h);
+      if (!sp.visible) return;
+      const bool white = piece.colorOf() == Color::White;
+      const view::Rgba token = white ? t.whitePiece : t.blackPiece;
+      const ImVec2 centre(sp.x, sp.y);
+      dl->AddCircleFilled(centre, radius, u32(token), 24);
+      dl->AddCircle(centre, radius, u32(t.ink), 24, px(1.5f));
+      drawPieceGlyph(dl, centre, radius * 0.82f, u32(white ? t.ink : t.bone),
+                     archetypeFor(v.pieces[piece.type]));
+    };
+
+    const view::MoveAnimation& anim = session.animation();
+    const CellId movingTo = anim.active() ? anim.travellingTo() : kInvalidCell;
     for (const view::Placement& pl : session.placements()) {
-      const Piece piece = session.snapshot().at(pl.cell);
-      if (piece.empty() || glyphFont == nullptr) continue;
-      const view::OrbitCamera::ScreenPoint sp =
-          session.camera().project(view::Vec3{pl.x, pl.y, pl.z}, w / h, w, h);
-      if (!sp.visible) continue;
-      char text[2] = {v.pieces[piece.type].symbol, '\0'};
-      if (piece.colorOf() == Color::Black) {
-        text[0] = static_cast<char>(std::tolower(static_cast<unsigned char>(text[0])));
+      if (pl.cell == movingTo) continue;  // the moving piece is drawn at its own point
+      drawToken(session.snapshot().at(pl.cell), view::Vec3{pl.x, pl.y, pl.z});
+    }
+    if (movingTo != kInvalidCell) {
+      const view::MoveAnimation::Sample at = anim.sample();
+      if (at.moving) {
+        drawToken(session.snapshot().at(movingTo), view::Vec3{at.x, at.y, at.z});
       }
-      const ImVec2 ts = glyphFont->CalcTextSizeA(fs, 1000.0f, 0.0f, text);
-      const view::Rgba glyph = piece.colorOf() == Color::White ? t.ink : t.bone;
-      dl->AddText(glyphFont, fs, ImVec2(sp.x - ts.x * 0.5f, sp.y - ts.y * 0.5f),
-                  u32(glyph), text);
     }
   }
 

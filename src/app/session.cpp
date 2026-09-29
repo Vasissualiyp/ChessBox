@@ -46,6 +46,8 @@ Result<Action> parseAction(const VariantSpec& v, std::string_view line) {
   if (verb == "axes") {
     a.kind = ActionKind::SetScreenAxes;
     in >> a.text;
+    std::string mode;
+    if (in >> mode && mode == "vertical") a.gridVertical = true;
     return a;
   }
   if (verb == "promote") {
@@ -63,8 +65,8 @@ Result<std::unique_ptr<Session>> Session::create(VariantSpec variant) {
   auto s = std::unique_ptr<Session>(new Session());
   s->variant_ = std::make_unique<VariantSpec>(std::move(variant));
   s->game_ = std::make_unique<Game>(*s->variant_);
-  s->viewCfg_ = view::ViewConfig::forBoard(s->variant_->dims);
-  if (auto ok = s->viewCfg_.validate(s->variant_->dims); !ok.has_value()) {
+  s->chosenCfg_ = view::ViewConfig::forBoard(s->variant_->dims);
+  if (auto ok = s->chosenCfg_.validate(s->variant_->dims); !ok.has_value()) {
     return fail(ok.error().code, ok.error().message);
   }
   s->refreshView();
@@ -72,7 +74,32 @@ Result<std::unique_ptr<Session>> Session::create(VariantSpec variant) {
   return s;
 }
 
+view::ViewConfig Session::effectiveViewConfig() const {
+  view::ViewConfig cfg = chosenCfg_;
+  if (!flat_) return cfg;
+  // A depth axis is invisible from straight above: the layers would sit exactly on top
+  // of one another and only the top board would show. Demote any third screen axis to a
+  // grid axis so the boards spread across the screen instead, and never stack them.
+  if (cfg.screenAxes.size() > 2) {
+    SmallVec<std::uint8_t, 3> screen;
+    SmallVec<std::uint8_t, kMaxDims> grid;
+    for (std::size_t i = 0; i < cfg.screenAxes.size(); ++i) {
+      if (i < 2) {
+        screen.push(cfg.screenAxes[i]);
+      } else {
+        grid.push(cfg.screenAxes[i]);
+      }
+    }
+    for (std::uint8_t a : cfg.gridAxes) grid.push(a);
+    cfg.screenAxes = screen;
+    cfg.gridAxes = grid;
+  }
+  cfg.gridVertical = false;
+  return cfg;
+}
+
 void Session::refreshView() {
+  viewCfg_ = effectiveViewConfig();
   placements_ = view::layout(variant_->dims, viewCfg_);
   seams_ = view::SeamMap::build(*variant_, viewCfg_, view::Theme::console());
   // Framed for the shape of the area the board is drawn into, which the interface
@@ -84,8 +111,9 @@ void Session::refreshView() {
 void Session::setFlatView(bool flat) {
   if (flat == flat_) return;
   flat_ = flat;
-  camera_ = view::OrbitCamera::frame(view::boundsOf(placements_), boardAspect_);
-  applyViewMode();
+  // The layout itself changes: flat mode moves a depth axis out of the way, so the
+  // board has to be re-laid and re-framed, not merely re-aimed.
+  refreshView();
 }
 
 void Session::applyViewMode() {
@@ -293,26 +321,32 @@ Result<void> Session::apply(const Action& a) {
 
     case ActionKind::SetScreenAxes: {
       view::ViewConfig cfg;
-      std::stringstream ss(a.text);
-      std::string name;
-      std::vector<bool> used(variant_->dims.dims(), false);
-      while (std::getline(ss, name, ',')) {
-        const int idx = variant_->dims.axisIndex(name);
-        if (idx < 0) {
-          return fail(ErrorCode::ValidationError, "no axis is called '" + name + "'");
+      if (a.text == "default") {
+        // The board's own view: every axis it can draw, with the rest as a grid.
+        cfg = view::ViewConfig::forBoard(variant_->dims);
+      } else {
+        std::stringstream ss(a.text);
+        std::string name;
+        std::vector<bool> used(variant_->dims.dims(), false);
+        while (std::getline(ss, name, ',')) {
+          const int idx = variant_->dims.axisIndex(name);
+          if (idx < 0) {
+            return fail(ErrorCode::ValidationError, "no axis is called '" + name + "'");
+          }
+          cfg.screenAxes.push(static_cast<std::uint8_t>(idx));
+          used[static_cast<std::size_t>(idx)] = true;
         }
-        cfg.screenAxes.push(static_cast<std::uint8_t>(idx));
-        used[static_cast<std::size_t>(idx)] = true;
-      }
-      for (std::uint8_t ax = 0; ax < variant_->dims.dims(); ++ax) {
-        if (!used[ax]) cfg.gridAxes.push(ax);
+        for (std::uint8_t ax = 0; ax < variant_->dims.dims(); ++ax) {
+          if (!used[ax]) cfg.gridAxes.push(ax);
+        }
+        cfg.gridVertical = a.gridVertical;
       }
       if (auto ok = cfg.validate(variant_->dims); !ok.has_value()) {
         return fail(ok.error().code, ok.error().message);
       }
-      viewCfg_ = cfg;
+      chosenCfg_ = cfg;
       refreshView();
-      message_ = "view: " + a.text;
+      message_ = a.text == "default" ? "view: default" : "view: " + a.text;
       return {};
     }
 
