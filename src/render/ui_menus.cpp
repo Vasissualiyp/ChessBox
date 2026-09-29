@@ -580,16 +580,25 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
       std::vector<MoveAtom> list = *atoms;
       bool changed = false;
       std::size_t removeAt = list.size();
+      // A small coloured button: the editor's controls say what they are by their hue -
+      // add is warm, remove is cool, and each kind of move has its own colour.
+      const auto chip = [&](const char* label, const view::Rgba& c, float w) {
+        ImGui::PushStyleColor(ImGuiCol_Button, col(c, 0.85f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, col(c));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, col(c));
+        const bool pressed = ImGui::Button(label, ImVec2(w, 0.0f));
+        ImGui::PopStyleColor(3);
+        return pressed;
+      };
       ImGui::PushFont(small);
       for (std::size_t i = 0; i < list.size(); ++i) {
         ImGui::PushID(static_cast<int>(i));
         ImGui::Text("%2zu", i + 1);
         ImGui::SameLine();
-        // Each step size is its own - n +, so a knight reads as 1 and 2 with each number
-        // adjustable in place - [1,3] is one tap away rather than a preset.
+        // Each step size is its own - n +, coloured so remove reads cool and add warm.
         for (std::size_t k = 0; k < list[i].mags.size(); ++k) {
           ImGui::PushID(static_cast<int>(k) + 1);
-          if (ImGui::SmallButton("-")) {
+          if (chip("-", t.panelHi, px(22))) {
             if (list[i].mags[k] > 1) {
               list[i].mags[k] = static_cast<std::int16_t>(list[i].mags[k] - 1);
               changed = true;
@@ -598,46 +607,53 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
           ImGui::SameLine();
           ImGui::Text("%d", static_cast<int>(list[i].mags[k]));
           ImGui::SameLine();
-          if (ImGui::SmallButton("+")) {
+          if (chip("+", t.ember, px(22))) {
             list[i].mags[k] = static_cast<std::int16_t>(list[i].mags[k] + 1);
             changed = true;
           }
           ImGui::PopID();
           ImGui::SameLine();
         }
-        if (ImGui::SmallButton("-")) {
+        // One fewer / one more step size, in a cooler pair so it is not confused with a
+        // value stepper.
+        if (chip("-", t.panelHi, px(22))) {
           if (list[i].mags.size() > 1) {
             list[i].mags.pop();
             changed = true;
           }
         }
         ImGui::SameLine();
-        if (ImGui::SmallButton("+")) {
+        if (chip("+", t.rift, px(22))) {
           if (list[i].mags.size() < kMaxDims) {
             list[i].mags.push(1);
             changed = true;
           }
         }
-        int mode = list[i].mode == MoveMode::Slide
-                       ? 0
-                       : (list[i].mode == MoveMode::Leap ? 1 : 2);
-        ImGui::SetNextItemWidth(px(76));
-        if (ImGui::Combo("##mode", &mode, "slide\0leap\0hop\0")) {
-          list[i].mode = mode == 0   ? MoveMode::Slide
-                         : mode == 1 ? MoveMode::Leap
-                                     : MoveMode::Hop;
-          changed = true;
+        ImGui::SameLine();
+        // The kind and the capture rule are buttons that cycle, not menus: one tap
+        // changes the state, and the colour says which state it is on.
+        {
+          const bool slide = list[i].mode == MoveMode::Slide;
+          const bool hop = list[i].mode == MoveMode::Hop;
+          const view::Rgba modeCol = slide ? t.diffMedium
+                                     : hop ? t.diffImpossible
+                                           : t.moss;
+          if (chip(slide ? "slide" : hop ? "hop" : "leap", modeCol, px(66))) {
+            list[i].mode = slide ? MoveMode::Leap : hop ? MoveMode::Slide : MoveMode::Hop;
+            changed = true;
+          }
         }
         ImGui::SameLine();
-        int cap = list[i].capture == CapturePolicy::May
-                      ? 0
-                      : (list[i].capture == CapturePolicy::Must ? 1 : 2);
-        ImGui::SetNextItemWidth(px(84));
-        if (ImGui::Combo("##cap", &cap, "may\0must\0cannot\0")) {
-          list[i].capture = cap == 0   ? CapturePolicy::May
-                            : cap == 1 ? CapturePolicy::Must
+        {
+          const bool may = list[i].capture == CapturePolicy::May;
+          const bool cannot = list[i].capture == CapturePolicy::Cannot;
+          const view::Rgba capCol = may ? t.ember : cannot ? t.panelHi : t.blood;
+          if (chip(may ? "may" : cannot ? "cannot" : "must", capCol, px(72))) {
+            list[i].capture = may      ? CapturePolicy::Must
+                              : cannot ? CapturePolicy::May
                                        : CapturePolicy::Cannot;
-          changed = true;
+            changed = true;
+          }
         }
         ImGui::SameLine();
         bool rider = list[i].maxK == kUnlimited;
@@ -648,7 +664,7 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
         ImGui::SameLine();
         if (ImGui::Checkbox("forward", &list[i].oriented)) changed = true;
         ImGui::SameLine();
-        if (ImGui::SmallButton("x")) removeAt = i;
+        if (chip("x", t.blood, px(22))) removeAt = i;
         ImGui::PopID();
       }
       ImGui::PopFont();
@@ -673,35 +689,35 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
         if (canon.has_value()) list.push_back(*canon);
         changed = true;
       };
-      if (ImGui::SmallButton("ADD MOVE")) {
+      if (chip("ADD MOVE", t.ember, 0.0f)) {
         addAtom({1}, 1, MoveMode::Leap, CapturePolicy::May, false);
       }
       ImGui::SameLine();
-      if (ImGui::SmallButton("+ rook")) {
+      if (chip("+ rook", t.diffEasy, 0.0f)) {
         addAtom({1}, kUnlimited, MoveMode::Slide, CapturePolicy::May, false);
       }
       ImGui::SameLine();
-      if (ImGui::SmallButton("+ bishop")) {
+      if (chip("+ bishop", t.diffMedium, 0.0f)) {
         addAtom({1, 1}, kUnlimited, MoveMode::Slide, CapturePolicy::May, false);
       }
       ImGui::SameLine();
-      if (ImGui::SmallButton("+ knight")) {
+      if (chip("+ knight", t.diffHard, 0.0f)) {
         addAtom({1, 2}, 1, MoveMode::Leap, CapturePolicy::May, false);
       }
       ImGui::SameLine();
-      if (ImGui::SmallButton("+ king")) {
+      if (chip("+ king", t.diffImpossible, 0.0f)) {
         addAtom({1}, 1, MoveMode::Leap, CapturePolicy::May, false);
       }
       ImGui::SameLine();
-      if (ImGui::SmallButton("+ diagonal step")) {
+      if (chip("+ diagonal step", t.rift, 0.0f)) {
         addAtom({1, 1}, 1, MoveMode::Leap, CapturePolicy::May, false);
       }
       ImGui::SameLine();
-      if (ImGui::SmallButton("+ forward step")) {
+      if (chip("+ forward step", t.moss, 0.0f)) {
         addAtom({1}, 1, MoveMode::Leap, CapturePolicy::Cannot, true);
       }
       ImGui::SameLine();
-      if (ImGui::SmallButton("+ forward capture")) {
+      if (chip("+ forward capture", t.blood, 0.0f)) {
         addAtom({1, 1}, 1, MoveMode::Leap, CapturePolicy::Must, true);
       }
 
