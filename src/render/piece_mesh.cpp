@@ -105,6 +105,111 @@ void addBox(MeshLibrary& m, std::int32_t base, float cx, float cy, float cz, flo
   }
 }
 
+/// A quarter of a disc in the XY plane, from +X round to +Y: the rounded corner that
+/// bends a timeline's connector into its rail. One mesh serves all four quadrants, by
+/// instance roll. Sized like the cell, so an accessory's scale is a wanted half-extent
+/// over the cell's.
+void addQuarterDisc(MeshLibrary& m, std::int32_t base, float r, float hz, int segments) {
+  const auto off = static_cast<std::uint32_t>(base);
+  const auto put = [&](float x, float y, float z, float nx, float ny, float nz) {
+    // Height matched to the cell slab's, so an accessory shades with its rail
+    // rather than a shade brighter.
+    return pushVertex(m, x, y, z, nx, ny, nz, z);
+  };
+  const float pie = 0.5f * std::numbers::pi_v<float>;
+  // The two flat faces: the top and the bottom of the quarter.
+  for (int side = 0; side < 2; ++side) {
+    const float z = side == 0 ? hz : -hz;
+    const float nz = side == 0 ? 1.0f : -1.0f;
+    const std::uint32_t centre = put(0, 0, z, 0, 0, nz);
+    for (int i = 0; i < segments; ++i) {
+      const float a0 = pie * static_cast<float>(i) / static_cast<float>(segments);
+      const float a1 = pie * static_cast<float>(i + 1) / static_cast<float>(segments);
+      const std::uint32_t v0 = put(r * std::cos(a0), r * std::sin(a0), z, 0, 0, nz);
+      const std::uint32_t v1 = put(r * std::cos(a1), r * std::sin(a1), z, 0, 0, nz);
+      if (side == 0) {
+        pushTri(m, centre - off, v0 - off, v1 - off);
+      } else {
+        pushTri(m, centre - off, v1 - off, v0 - off);
+      }
+    }
+  }
+  // The curved rim.
+  for (int i = 0; i < segments; ++i) {
+    const float a0 = pie * static_cast<float>(i) / static_cast<float>(segments);
+    const float a1 = pie * static_cast<float>(i + 1) / static_cast<float>(segments);
+    const float c0 = std::cos(a0);
+    const float s0 = std::sin(a0);
+    const float c1 = std::cos(a1);
+    const float s1 = std::sin(a1);
+    const float nx = (c0 + c1) * 0.5f;
+    const float ny = (s0 + s1) * 0.5f;
+    const std::uint32_t v0 = put(c0 * r, s0 * r, hz, nx, ny, 0);
+    const std::uint32_t v1 = put(c1 * r, s1 * r, hz, nx, ny, 0);
+    const std::uint32_t v2 = put(c1 * r, s1 * r, -hz, nx, ny, 0);
+    const std::uint32_t v3 = put(c0 * r, s0 * r, -hz, nx, ny, 0);
+    pushTri(m, v0 - off, v1 - off, v2 - off);
+    pushTri(m, v0 - off, v2 - off, v3 - off);
+  }
+  // The two radial walls, so the solid is closed.
+  for (int side = 0; side < 2; ++side) {
+    const float ex = side == 0 ? 1.0f : 0.0f;
+    const float ey = side == 0 ? 0.0f : 1.0f;
+    const float nx = side == 0 ? 0.0f : -1.0f;
+    const float ny = side == 0 ? -1.0f : 0.0f;
+    const std::uint32_t v0 = put(0, 0, hz, nx, ny, 0);
+    const std::uint32_t v1 = put(ex * r, ey * r, hz, nx, ny, 0);
+    const std::uint32_t v2 = put(ex * r, ey * r, -hz, nx, ny, 0);
+    const std::uint32_t v3 = put(0, 0, -hz, nx, ny, 0);
+    pushTri(m, v0 - off, v1 - off, v2 - off);
+    pushTri(m, v0 - off, v2 - off, v3 - off);
+  }
+}
+
+void addTriPrism(MeshLibrary& m, std::int32_t base, float hx, float hy, float hz,
+                 float totalHeight) {
+  const float tri[3][2] = {{hx, 0.0f}, {-hx, hy}, {-hx, -hy}};
+  const auto put = [&](float x, float y, float z, float nx, float ny, float nz) {
+    // Height matched to the cell slab's, so an accessory shades with its rail
+    // rather than a shade brighter.
+    return pushVertex(m, x, y, z, nx, ny, nz, z);
+  };
+  const auto off = static_cast<std::uint32_t>(base);
+  for (int side = 0; side < 2; ++side) {
+    const float z = side == 0 ? hz : -hz;
+    const float nz = side == 0 ? 1.0f : -1.0f;
+    const std::uint32_t a = put(tri[0][0], tri[0][1], z, 0.0f, 0.0f, nz);
+    const std::uint32_t b = put(tri[1][0], tri[1][1], z, 0.0f, 0.0f, nz);
+    const std::uint32_t c = put(tri[2][0], tri[2][1], z, 0.0f, 0.0f, nz);
+    if (side == 0) {
+      pushTri(m, a - off, b - off, c - off);
+    } else {
+      pushTri(m, a - off, c - off, b - off);
+    }
+  }
+  for (int i = 0; i < 3; ++i) {
+    const int j = (i + 1) % 3;
+    const float x0 = tri[i][0];
+    const float y0 = tri[i][1];
+    const float x1 = tri[j][0];
+    const float y1 = tri[j][1];
+    float nx = y1 - y0;
+    float ny = -(x1 - x0);
+    const float len = std::sqrt(nx * nx + ny * ny);
+    if (len > 0) {
+      nx /= len;
+      ny /= len;
+    }
+    const std::uint32_t v0 = put(x0, y0, hz, nx, ny, 0.0f);
+    const std::uint32_t v1 = put(x1, y1, hz, nx, ny, 0.0f);
+    const std::uint32_t v2 = put(x1, y1, -hz, nx, ny, 0.0f);
+    const std::uint32_t v3 = put(x0, y0, -hz, nx, ny, 0.0f);
+    pushTri(m, v0 - off, v1 - off, v2 - off);
+    pushTri(m, v0 - off, v2 - off, v3 - off);
+  }
+  (void)totalHeight;
+}
+
 /// Every piece stands on the same foot, which is what makes an army look like a set.
 void addFoot(MeshLibrary& m, std::int32_t base, float totalHeight) {
   addCone(m, base, 0.00f, 0.09f, 0.34f, 0.30f, totalHeight, false);
@@ -206,6 +311,16 @@ void buildArchetype(MeshLibrary& m, Archetype which, std::int32_t base) {
       addBox(m, base, 0, 0, 0, 0.5f, 0.5f, 0.5f, 1.0f);
       return;
 
+    case Archetype::Arrow:
+      // Sized to the cell's own bounding box, so a head is placed the same way every
+      // other accessory is: a wanted half-extent divided by `cellHalfExtent`.
+      addTriPrism(m, base, 0.46f, 0.46f, 0.055f, 1.0f);
+      return;
+
+    case Archetype::Fillet:
+      addQuarterDisc(m, base, 0.46f, 0.055f, 10);
+      return;
+
     case Archetype::Count:
       return;
   }
@@ -222,6 +337,8 @@ Archetype archetypeFromName(std::string_view name) {
   if (name == "monolith") return Archetype::Monolith;
   if (name == "horn") return Archetype::Horn;
   if (name == "portal") return Archetype::Portal;
+  if (name == "arrow") return Archetype::Arrow;
+  if (name == "fillet") return Archetype::Fillet;
   return Archetype::Tower;
 }
 
@@ -245,6 +362,10 @@ std::string_view archetypeName(Archetype a) {
       return "horn";
     case Archetype::Portal:
       return "portal";
+    case Archetype::Arrow:
+      return "arrow";
+    case Archetype::Fillet:
+      return "fillet";
     case Archetype::Count:
       break;
   }

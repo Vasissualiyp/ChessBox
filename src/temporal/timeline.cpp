@@ -48,11 +48,14 @@ bool TimelineModel::addBoard(LineId line, Turn turn) {
   return true;
 }
 
-std::optional<LineId> TimelineModel::branch(BranchOwner owner) {
+std::optional<LineId> TimelineModel::branch(BranchOwner owner, LineId parentLine,
+                                            Turn parentTurn) {
   if (owner == BranchOwner::Original) return std::nullopt;
   Timeline t;
   t.id = nextId(owner);
   t.owner = owner;
+  t.parentLine = parentLine;
+  t.parentTurn = parentTurn;
   if (owner == BranchOwner::White) {
     t.order = ++whiteBranches_;
   } else {

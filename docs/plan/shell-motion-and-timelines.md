@@ -1,7 +1,10 @@
 # Shell motion, and drawing the shape of a multiverse
 
-**Status:** planned, not built. Written before the work so the decisions are arguable
-before they are expensive.
+**Status:** built. Part A (one transition clock, a fuller field, a smaller manifold, a
+softer ground) and Part B (a real arrowhead, and a connector between a timeline and the
+board it branched from) are implemented and tested. B3 still stands: the timeline
+numbering has not been checked against the reference game, and drawing the links only
+makes any wrong convention more visible.
 
 Two unrelated complaints, both about the same failing: the game *computes* the right
 thing and then draws something that does not say so. The shell knows it has moved a level

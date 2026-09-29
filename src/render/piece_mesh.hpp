@@ -42,6 +42,8 @@ enum class Archetype : std::uint8_t {
   Horn,      ///< unicorn and other pieces that only exist above two dimensions
   Portal,    ///< the opening a wrapped move passes through: a cube, so it can stand
              ///< on whichever axis the seam it belongs to actually faces
+  Arrow,     ///< the flat triangular head on a timeline's rail: a direction, in the board
+  Fillet,    ///< a quarter disc: the rounded corner where a connector bends into a rail
   Count
 };
 

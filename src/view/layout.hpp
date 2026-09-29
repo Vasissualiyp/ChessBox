@@ -61,6 +61,15 @@ struct Slice {
   [[nodiscard]] std::string label(const DimSpec& d, const ViewConfig& cfg) const;
 };
 
+/// A branch of the multiverse, in lattice terms: the timeline it came from, the timeline
+/// it became, and the turn of the board it branched at. Exposed so the renderer can draw
+/// a connector between two rails without ever learning what a timeline is.
+struct TimelineLink {
+  std::int16_t fromLine{0};
+  std::int16_t toLine{0};
+  std::int16_t atTurn{0};
+};
+
 /// Enumerate the sub-boards, lowest grid axis varying fastest.
 std::vector<Slice> enumerateSlices(const DimSpec& d, const ViewConfig& cfg);
 

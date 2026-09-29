@@ -96,7 +96,7 @@ std::optional<std::vector<BoardKey>> Multiverse::apply(const BoardKey& source,
   if (!branchLine.has_value()) {
     add(destinationFuture, opponent(sideToMove(destination)));
   } else {
-    (void)lines_.branch(*branchOwner);
+    (void)lines_.branch(*branchOwner, destination.line, destination.turn);
     add(BoardKey{destinationFuture.turn, *branchLine}, newcomer);
   }
   answered_.insert(source);

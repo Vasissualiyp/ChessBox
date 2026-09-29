@@ -22,18 +22,11 @@ constexpr std::array<P, 8> kDomeHead{
     {{50, 18}, {60, 23}, {64, 33}, {60, 43}, {50, 48}, {40, 43}, {36, 33}, {40, 23}}};
 
 constexpr std::array<P, 4> kTowerShaft{{{28, 80}, {33, 43}, {67, 43}, {72, 80}}};
-constexpr std::array<P, 12> kTowerCrown{{{27, 43},
-                                         {73, 43},
-                                         {73, 20},
-                                         {63, 20},
-                                         {63, 30},
-                                         {55, 30},
-                                         {55, 20},
-                                         {45, 20},
-                                         {45, 30},
-                                         {37, 30},
-                                         {37, 20},
-                                         {27, 20}}};
+// The crenellated top is a solid block with the gaps *cut out*: a concave outline filled
+// as one polygon closes over its own notches and reads as a plain slab.
+constexpr std::array<P, 4> kTowerCrown{{{27, 43}, {73, 43}, {73, 20}, {27, 20}}};
+constexpr std::array<P, 4> kTowerNotchL{{{37, 17}, {45, 17}, {45, 31}, {37, 31}}};
+constexpr std::array<P, 4> kTowerNotchR{{{55, 17}, {63, 17}, {63, 31}, {55, 31}}};
 constexpr std::array<P, 4> kTowerSlot{{{44, 84}, {56, 84}, {56, 72}, {44, 72}}};
 
 constexpr std::array<P, 12> kWedgeHead{{{31, 80},
@@ -52,19 +45,17 @@ constexpr std::array<P, 4> kWedgeEye{{{54, 33}, {60, 36}, {55, 39}, {51, 36}}};
 
 constexpr std::array<P, 4> kSpireShaft{{{33, 80}, {40, 52}, {60, 52}, {67, 80}}};
 constexpr std::array<P, 4> kSpireCollar{{{36, 52}, {64, 52}, {60, 45}, {40, 45}}};
-constexpr std::array<P, 5> kSpireMitre{{{50, 12}, {63, 33}, {59, 45}, {41, 45}, {37, 33}}};
+constexpr std::array<P, 5> kSpireMitre{
+    {{50, 12}, {63, 33}, {59, 45}, {41, 45}, {37, 33}}};
 
 constexpr std::array<P, 4> kCrownShaft{{{32, 80}, {35, 53}, {65, 53}, {68, 80}}};
 constexpr std::array<P, 4> kCrownCollar{{{30, 53}, {70, 53}, {70, 45}, {30, 45}}};
-constexpr std::array<P, 9> kCrownPoints{{{29, 45},
-                                         {71, 45},
-                                         {75, 19},
-                                         {64, 32},
-                                         {58, 15},
-                                         {50, 29},
-                                         {42, 15},
-                                         {36, 32},
-                                         {25, 19}}};
+// Three sharp points, drawn as separate triangles rather than cut out of a band: a crown
+// tooth is a spike, not a square merlon, and a triangular notch would leave the outer
+// teeth square anyway.
+constexpr std::array<P, 3> kCrownToothL{{{23, 45}, {39, 45}, {31, 17}}};
+constexpr std::array<P, 3> kCrownToothC{{{42, 45}, {58, 45}, {50, 11}}};
+constexpr std::array<P, 3> kCrownToothR{{{61, 45}, {77, 45}, {69, 17}}};
 
 constexpr std::array<P, 4> kMonoShaft{{{33, 80}, {36, 53}, {64, 53}, {67, 80}}};
 constexpr std::array<P, 4> kMonoBlock{{{31, 53}, {69, 53}, {65, 25}, {35, 25}}};
@@ -87,23 +78,20 @@ constexpr std::array<P, 4> kPBaseWide{{{24, 90}, {76, 90}, {68, 74}, {32, 74}}};
 constexpr std::array<P, 4> kPBaseNarrow{{{26, 90}, {74, 90}, {66, 74}, {34, 74}}};
 
 constexpr std::array<P, 5> kPDome{{{50, 26}, {64, 40}, {58, 66}, {42, 66}, {36, 40}}};
-constexpr std::array<P, 12> kPTower{{{30, 74},
-                                     {30, 26},
-                                     {40, 26},
-                                     {40, 38},
-                                     {46, 38},
-                                     {46, 26},
-                                     {54, 26},
-                                     {54, 38},
-                                     {60, 38},
-                                     {60, 26},
-                                     {70, 26},
-                                     {70, 74}}};
+// The cheap set cannot cut holes, so its crenellations and teeth are separate convex
+// shapes with the gaps between them drawn as real background. The body carries the base
+// so the piece still stands on the same line as the rest.
+constexpr std::array<P, 4> kPTowerBody{{{26, 90}, {74, 90}, {70, 40}, {30, 40}}};
+constexpr std::array<P, 4> kPTowerMerlonL{{{30, 40}, {40, 40}, {40, 24}, {30, 24}}};
+constexpr std::array<P, 4> kPTowerMerlonC{{{45, 40}, {55, 40}, {55, 22}, {45, 22}}};
+constexpr std::array<P, 4> kPTowerMerlonR{{{60, 40}, {70, 40}, {70, 24}, {60, 24}}};
 constexpr std::array<P, 6> kPWedge{
     {{34, 74}, {30, 42}, {52, 18}, {72, 32}, {62, 52}, {66, 74}}};
 constexpr std::array<P, 5> kPSpire{{{50, 16}, {68, 62}, {58, 74}, {42, 74}, {32, 62}}};
-constexpr std::array<P, 7> kPCrown{
-    {{32, 74}, {28, 26}, {40, 44}, {50, 22}, {60, 44}, {72, 26}, {68, 74}}};
+constexpr std::array<P, 4> kPCrownBody{{{26, 90}, {74, 90}, {66, 46}, {34, 46}}};
+constexpr std::array<P, 3> kPCrownToothL{{{36, 46}, {44, 46}, {40, 18}}};
+constexpr std::array<P, 3> kPCrownToothC{{{47, 46}, {53, 46}, {50, 14}}};
+constexpr std::array<P, 3> kPCrownToothR{{{56, 46}, {64, 46}, {60, 18}}};
 constexpr std::array<P, 4> kPMonoBlock{{{34, 74}, {34, 34}, {66, 34}, {66, 74}}};
 constexpr std::array<P, 4> kPMonoCrossV{{{45, 10}, {55, 10}, {55, 30}, {45, 30}}};
 constexpr std::array<P, 4> kPMonoCrossH{{{36, 16}, {64, 16}, {64, 24}, {36, 24}}};
@@ -113,13 +101,13 @@ constexpr std::array<P, 4> kPSlab{{{36, 74}, {38, 24}, {62, 24}, {64, 74}}};
 // Tables of outlines, one entry per archetype that is a piece.
 constexpr std::array<IconPoly, 4> kFDome{kBaseNarrow, kDomeBody, kDomeCollar, kDomeHead};
 constexpr std::array<IconPoly, 3> kFTower{kBaseWide, kTowerShaft, kTowerCrown};
-constexpr std::array<IconPoly, 1> kFTowerCut{kTowerSlot};
+constexpr std::array<IconPoly, 3> kFTowerCut{kTowerSlot, kTowerNotchL, kTowerNotchR};
 constexpr std::array<IconPoly, 2> kFWedge{kBaseNarrow, kWedgeHead};
 constexpr std::array<IconPoly, 1> kFWedgeCut{kWedgeEye};
 constexpr std::array<IconPoly, 4> kFSpire{kBaseNarrow, kSpireShaft, kSpireCollar,
                                           kSpireMitre};
-constexpr std::array<IconPoly, 4> kFCrown{kBaseMid, kCrownShaft, kCrownCollar,
-                                          kCrownPoints};
+constexpr std::array<IconPoly, 6> kFCrown{kBaseMid,     kCrownShaft,  kCrownCollar,
+                                          kCrownToothL, kCrownToothC, kCrownToothR};
 constexpr std::array<IconPoly, 5> kFMono{kBaseMid, kMonoShaft, kMonoBlock, kMonoCrossV,
                                          kMonoCrossH};
 constexpr std::array<IconPoly, 3> kFHorn{kBaseNarrow, kHornShaft, kHornSpike};
@@ -127,10 +115,12 @@ constexpr std::array<IconPoly, 1> kFHornCut{kHornRing};
 constexpr std::array<IconPoly, 3> kFSlab{kBaseNarrow, kSlabShaft, kSlabBand};
 
 constexpr std::array<IconPoly, 2> kPDomeSet{kPBaseNarrow, kPDome};
-constexpr std::array<IconPoly, 2> kPTowerSet{kPBaseWide, kPTower};
+constexpr std::array<IconPoly, 4> kPTowerSet{kPTowerBody, kPTowerMerlonL, kPTowerMerlonC,
+                                             kPTowerMerlonR};
 constexpr std::array<IconPoly, 2> kPWedgeSet{kPBaseWide, kPWedge};
 constexpr std::array<IconPoly, 2> kPSpireSet{kPBaseNarrow, kPSpire};
-constexpr std::array<IconPoly, 2> kPCrownSet{kPBaseWide, kPCrown};
+constexpr std::array<IconPoly, 4> kPCrownSet{kPCrownBody, kPCrownToothL, kPCrownToothC,
+                                             kPCrownToothR};
 constexpr std::array<IconPoly, 4> kPMonoSet{kPBaseWide, kPMonoBlock, kPMonoCrossV,
                                             kPMonoCrossH};
 constexpr std::array<IconPoly, 2> kPHornSet{kPBaseNarrow, kPHorn};
@@ -165,6 +155,8 @@ PieceIcon pieceIcon(IconStyle style, Archetype shape) {
       return plain ? PieceIcon{kPHornSet, {}} : PieceIcon{kFHorn, kFHornCut};
     case Archetype::Cell:
     case Archetype::Portal:
+    case Archetype::Arrow:
+    case Archetype::Fillet:
     case Archetype::Count:
       return {};
   }

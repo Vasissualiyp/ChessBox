@@ -107,6 +107,18 @@ bool Session::boardVisible(CellId c) const {
   return game_ == nullptr || game_->boardVisible(c);
 }
 
+std::vector<view::TimelineLink> Session::timelineLinks() const {
+  std::vector<view::TimelineLink> out;
+  if (game_ == nullptr) return out;
+  const temporal::Multiverse* m = game_->multiverse();
+  if (m == nullptr) return out;
+  for (const temporal::Timeline& t : m->timelines().timelines()) {
+    if (t.parentTurn < 0) continue;  // the original timeline came from nowhere
+    out.push_back(view::TimelineLink{t.parentLine, t.id, t.parentTurn});
+  }
+  return out;
+}
+
 void Session::refreshView() {
   viewCfg_ = effectiveViewConfig();
   placements_ = view::layout(variant_->dims, viewCfg_);
@@ -130,13 +142,9 @@ void Session::refreshTemporalView() {
   const float pitch = camera_.pitch;
   const float distance = camera_.distance;
   refreshView();
-  // refreshView() has just framed whatever boards now exist. Keeping the player's own
-  // zoom is right until a new board will not fit in it - so take whichever is further
-  // out. Without this the multiverse grows off the edge of the screen and the board a
-  // move is expected on ends up half outside the frame.
-  const float framed = camera_.distance;
   // Center on the board(s) to answer on, so the newly created board the player must move
-  // on is in view rather than off to the side.
+  // on is in view rather than off to the side. The zoom is the player's: a new board must
+  // not pull the camera back, or every turn reads as a zoom-out.
   float cx = 0.0f;
   float cy = 0.0f;
   float cz = 0.0f;
@@ -156,7 +164,7 @@ void Session::refreshTemporalView() {
     camera_.yaw = yaw;
     camera_.pitch = pitch;
   }
-  camera_.distance = std::max(distance, framed);
+  camera_.distance = distance;
 }
 
 void Session::setTheme(const view::Theme& t) {
@@ -180,6 +188,10 @@ void Session::applyViewMode() {
     // so this needs no nudge off the pole to avoid a singularity.
     camera_.pitch = 1.5707963f;
     camera_.yaw = 0.0f;
+  } else {
+    // Coming back from a flat view the pitch is still at the pole; pull it into the
+    // solid range so the board is read from above rather than edge-on or underneath.
+    camera_.pitch = std::clamp(camera_.pitch, 0.05f, 1.5207963f);
   }
 }
 
@@ -379,7 +391,14 @@ Result<void> Session::apply(const Action& a) {
 
     case ActionKind::Orbit:
       camera_.yaw += a.dx;
-      camera_.pitch = std::clamp(camera_.pitch + a.dy, -1.5f, 1.5f);
+      // A flat view is always straight down. A solid one may tilt, but never so far as
+      // to look up at the board's underside: elevation stays strictly between the
+      // horizon and the pole, so the top face is always the one being read.
+      if (flat_) {
+        camera_.pitch = 1.5707963f;
+      } else {
+        camera_.pitch = std::clamp(camera_.pitch + a.dy, 0.05f, 1.5207963f);
+      }
       return {};
 
     case ActionKind::Pan: {

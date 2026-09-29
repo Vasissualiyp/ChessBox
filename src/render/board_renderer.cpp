@@ -126,7 +126,7 @@ Result<void> BoardRenderer::buildPipeline() {
   const VkVertexInputBindingDescription bindings[2]{
       {0, sizeof(MeshVertex), VK_VERTEX_INPUT_RATE_VERTEX},
       {1, sizeof(Instance), VK_VERTEX_INPUT_RATE_INSTANCE}};
-  const VkVertexInputAttributeDescription attrs[8]{
+  const VkVertexInputAttributeDescription attrs[9]{
       {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, pos)},
       {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, normal)},
       {2, 0, VK_FORMAT_R32_SFLOAT, offsetof(MeshVertex, height)},
@@ -134,13 +134,14 @@ Result<void> BoardRenderer::buildPipeline() {
       {4, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Instance, scale)},
       {5, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, color)},
       {6, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, edge)},
-      {7, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, edgeMask)}};
+      {7, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, edgeMask)},
+      {8, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, roll)}};
 
   VkPipelineVertexInputStateCreateInfo vi{};
   vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
   vi.vertexBindingDescriptionCount = 2;
   vi.pVertexBindingDescriptions = bindings;
-  vi.vertexAttributeDescriptionCount = 8;
+  vi.vertexAttributeDescriptionCount = 9;
   vi.pVertexAttributeDescriptions = attrs;
 
   VkPipelineInputAssemblyStateCreateInfo ia{};
@@ -543,7 +544,8 @@ Result<void> BoardRenderer::ensureInstanceCapacity(std::size_t count) {
 InstanceSet BoardRenderer::buildInstances(
     const view::PositionView& p, const view::ViewConfig& cfg, const view::SeamMap* seams,
     const view::MoveAnimation* anim, const std::function<bool(CellId)>& visible,
-    const std::function<bool(CellId)>& present) const {
+    const std::function<bool(CellId)>& present,
+    const std::vector<view::TimelineLink>& links) const {
   const VariantSpec& v = p.variant();
   auto placements = view::layout(v.dims, cfg);
   // A temporal variant's lattice is mostly boards that do not exist yet; `visible` says
@@ -723,7 +725,8 @@ InstanceSet BoardRenderer::buildInstances(
   {
     int temporalGrid = -1;
     for (std::size_t i = 0; i < cfg.gridAxes.size(); ++i) {
-      if (v.dims.kind(cfg.gridAxes[i]) == AxisKind::Temporal) temporalGrid = static_cast<int>(i);
+      if (v.dims.kind(cfg.gridAxes[i]) == AxisKind::Temporal)
+        temporalGrid = static_cast<int>(i);
     }
     if (temporalGrid >= 0) {
       const auto slices = view::enumerateSlices(v.dims, cfg);
@@ -732,18 +735,26 @@ InstanceSet BoardRenderer::buildInstances(
       // One rail per timeline: every slice that differs only in its turn coordinate.
       std::map<std::vector<std::int16_t>, std::pair<float, float>> rails;
       std::map<std::vector<std::int16_t>, bool> origin;
+      // Where each timeline's rail sits, so a branch can be joined to its parent. Only
+      // meaningful with a single multiverse axis; anything more and the links are
+      // skipped.
+      std::map<std::int16_t, float> acrossOf;
+      std::map<std::int16_t, float> spanOf;
+      std::map<std::int16_t, float> zOf;
+      std::map<std::int16_t, float> zBoardOf;
+      std::map<std::pair<std::int16_t, std::int16_t>, float> boardHi;
       for (std::uint32_t si = 0; si < slices.size(); ++si) {
         if (si >= extentsBySlice.size() || !extentsBySlice[si].seen) continue;
         std::vector<std::int16_t> key;
-        bool isOrigin = true;
         for (std::size_t i = 0; i < slices[si].at.size(); ++i) {
           if (static_cast<int>(i) == temporalGrid) continue;
           key.push_back(slices[si].at[i]);
-          if (slices[si].at[i] != 0) isOrigin = false;
         }
+        const auto turn = slices[si].at[static_cast<std::size_t>(temporalGrid)];
         const Extent& e = extentsBySlice[si];
         const float lo = alongX ? e.minX : e.minY;
         const float hi = alongX ? e.maxX : e.maxY;
+        if (key.size() == 1) boardHi[{key[0], turn}] = hi;
         const auto it = rails.find(key);
         if (it == rails.end()) {
           rails.emplace(key, std::pair{lo, hi});
@@ -751,14 +762,45 @@ InstanceSet BoardRenderer::buildInstances(
           it->second.first = std::min(it->second.first, lo);
           it->second.second = std::max(it->second.second, hi);
         }
-        origin[key] = origin.count(key) != 0 ? (origin[key] && isOrigin) : isOrigin;
+        // The timeline the game began on is the one with a board at turn 0 - not the one
+        // at line 0, since the origin sits in the middle of the axis so both players have
+        // room to branch.
+        if (origin.find(key) == origin.end()) {
+          origin[key] = turn == 0;
+        } else {
+          origin[key] = origin[key] || (turn == 0);
+        }
+      }
+
+      // Where a branch's rail begins: exactly where its connector meets it, so the two
+      // read as one path rather than leaving a gap. The origin timeline is unaffected.
+      std::map<std::int16_t, float> branchStartOf;
+      if (!links.empty()) {
+        for (const view::TimelineLink& link : links) {
+          const auto hi = boardHi.find({link.fromLine, link.atTurn});
+          if (hi == boardHi.end()) continue;
+          branchStartOf[link.toLine] = hi->second + cfg.gridGap * 0.5f + 0.5f;
+        }
+      }
+
+      // One height for every rail, from the lowest board on the board, so the origin
+      // timeline's rail and a branch's share a centreline instead of sitting at two
+      // slightly different depths.
+      float railFloorZ = 0.0f;
+      {
+        bool any = false;
+        for (const Extent& e : extentsBySlice) {
+          if (!e.seen) continue;
+          railFloorZ = any ? std::min(railFloorZ, e.z) : e.z;
+          any = true;
+        }
       }
 
       for (const auto& [key, span] : rails) {
-        // The rail runs along the row's near edge rather than through its middle: under
-        // the boards it would be hidden by the very plinths it is meant to run beneath.
-        float across = 0;
+        float acrossMin = 0;
+        float acrossMax = 0;
         float floorZ = 0;
+        float boardSpan = 1.0f;
         bool seen = false;
         for (std::uint32_t si = 0; si < slices.size(); ++si) {
           if (si >= extentsBySlice.size() || !extentsBySlice[si].seen) continue;
@@ -769,41 +811,143 @@ InstanceSet BoardRenderer::buildInstances(
           }
           if (k != key) continue;
           const Extent& e = extentsBySlice[si];
-          const float edge = alongX ? e.minY : e.minX;
-          across = seen ? std::min(across, edge) : edge;
+          boardSpan = alongX ? (e.maxX - e.minX) : (e.maxY - e.minY);
+          const float edgeMin = alongX ? e.minY : e.minX;
+          const float edgeMax = alongX ? e.maxY : e.maxX;
+          if (!seen) {
+            acrossMin = edgeMin;
+            acrossMax = edgeMax;
+          } else {
+            acrossMin = std::min(acrossMin, edgeMin);
+            acrossMax = std::max(acrossMax, edgeMax);
+          }
           floorZ = seen ? std::min(floorZ, e.z) : e.z;
           seen = true;
         }
         if (!seen) continue;
 
         const bool isOrigin = origin[key];
-        const view::Rgba tint = isOrigin ? theme_.ember : mix(theme_.ember, theme_.rule, 0.6f);
-        across -= 1.35f;
-        const float z = floorZ - half.z - 0.10f;
+        // The starting timeline is the accent at full strength; a branch is a clear tint
+        // of it, not a fade toward the rule colour, so both read as the same kind of
+        // thing while staying distinguishable.
+        const view::Rgba tint =
+            isOrigin ? theme_.ember : mix(theme_.ember, theme_.panel, 0.35f);
+        // Centred under the row and dropped in z, so the rail runs beneath its boards
+        // rather than beside them.
+        const float across = (acrossMin + acrossMax) * 0.5f;
+        const float z = railFloorZ - half.z - 0.34f;
+        if (key.size() == 1) {
+          acrossOf[key[0]] = across;
+          spanOf[key[0]] = boardSpan;
+          zOf[key[0]] = z;
+          zBoardOf[key[0]] = floorZ;
+        }
         const float head = 1.1f;
-        const float lo = span.first - 0.9f;
-        const float hi = span.second + 0.9f;
+        // The origin timeline starts a little before its first board; a branch starts
+        // exactly where its connector ends, so the connector and the rail are one line.
+        float lo = span.first - 0.9f;
+        if (!isOrigin && key.size() == 1) {
+          const auto bs = branchStartOf.find(key[0]);
+          if (bs != branchStartOf.end()) lo = bs->second;
+        }
+        // Run a board's width past the last board, so the rail reads as a direction
+        // rather than as an underline that happens to stop.
+        const float hi = span.second + 0.9f + boardSpan;
 
+        // The starting timeline's rail carries the accent at full width; a branch is a
+        // touch slimmer, so the two read as the same kind of thing, ranked. The origin
+        // rail is also twice as thick in Z, so it reads as the spine.
+        const float railHalf = isOrigin ? 0.26f : 0.20f;
+        const float railThick = isOrigin ? 0.05f : 0.025f;
         Instance rail{};
         rail.center[0] = alongX ? (lo + hi - head) * 0.5f : across;
         rail.center[1] = alongX ? across : (lo + hi - head) * 0.5f;
         rail.center[2] = z;
-        rail.scale[0] = (alongX ? (hi - lo - head) * 0.5f : 0.10f) / half.x;
-        rail.scale[1] = (alongX ? 0.10f : (hi - lo - head) * 0.5f) / half.y;
-        rail.scale[2] = 0.05f / half.z;
+        rail.scale[0] = (alongX ? (hi - lo - head) * 0.5f : railHalf) / half.x;
+        rail.scale[1] = (alongX ? railHalf : (hi - lo - head) * 0.5f) / half.y;
+        rail.scale[2] = railThick / half.z;
         toFloat4(tint, rail.color);
         byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(rail);
 
-        // The head, as a wedge standing on the rail: it points the way the game runs.
+        // The head: a solid triangular prism, twice as wide as the rail and a little
+        // thicker, pointing the way the game runs.
         Instance point{};
         point.center[0] = alongX ? hi - head * 0.5f : across;
         point.center[1] = alongX ? across : hi - head * 0.5f;
         point.center[2] = z;
-        point.scale[0] = (alongX ? head * 0.5f : 0.34f) / half.x;
-        point.scale[1] = (alongX ? 0.34f : head * 0.5f) / half.y;
-        point.scale[2] = 0.05f / half.z;
+        point.scale[0] = (alongX ? head * 0.5f : 0.68f) / half.x;
+        point.scale[1] = (alongX ? 0.68f : head * 0.5f) / half.y;
+        // As thick as the rail it caps, not prouder: a head is a point in the plane, and
+        // the plane is the board's.
+        point.scale[2] = railThick / half.z;
         toFloat4(tint, point.color);
-        byShape[static_cast<std::size_t>(Archetype::Wedge)].push_back(point);
+        byShape[static_cast<std::size_t>(Archetype::Arrow)].push_back(point);
+      }
+
+      // Join each branch to the board it came from: a bar running from the parent
+      // timeline's rail to the child's, half a board past the turn it branched at.
+      if (!links.empty()) {
+        const view::Rgba tint = mix(theme_.ember, theme_.panel, 0.35f);
+        for (const view::TimelineLink& link : links) {
+          const auto ap = acrossOf.find(link.fromLine);
+          const auto ac = acrossOf.find(link.toLine);
+          const auto hi = boardHi.find({link.fromLine, link.atTurn});
+          if (ap == acrossOf.end() || ac == acrossOf.end() || hi == boardHi.end()) {
+            continue;
+          }
+          // Join the two rails in the gap just past the board the piece came from - two
+          // board-squares, not two whole turn-columns, which land on an earlier board.
+          const float along = hi->second + cfg.gridGap * 0.5f + 0.5f;
+          const float y1 = ap->second;
+          const float y2 = ac->second;
+          const float run = std::max(0.08f, std::abs(y2 - y1) * 0.5f);
+          // One bar, as thin as a branch rail and at the same height, so the run from a
+          // branch into its parent's rail reads as a single bent body, not a stack of
+          // bars.
+          Instance conn{};
+          if (alongX) {
+            conn.center[0] = along;
+            conn.center[1] = (y1 + y2) * 0.5f;
+            conn.scale[0] = 0.20f / half.x;
+            conn.scale[1] = run / half.y;
+          } else {
+            conn.center[1] = along;
+            conn.center[0] = (y1 + y2) * 0.5f;
+            conn.scale[1] = 0.20f / half.y;
+            conn.scale[0] = run / half.x;
+          }
+          // Same height as the rails, so it joins them rather than floating over a board.
+          conn.center[2] = zOf[link.fromLine];
+          conn.scale[2] = 0.025f / half.z;
+          toFloat4(tint, conn.color);
+          byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(conn);
+
+          // The corner where the branch rail turns out of the connector is an elbow : the
+          // two bars leave one quadrant empty. Sit a quarter round on that corner and
+          // turn the mesh into the empty quadrant, so the notch fills to a smooth outer
+          // bend instead of two rectangles meeting at a right angle.
+          const float r = 0.20f;
+          const float halfPi = 1.5707963f;
+          Instance fil{};
+          if (alongX) {
+            // Rail runs +X, so the empty quadrant is -X and the way the connector does
+            // not go.
+            fil.center[0] = along;
+            fil.center[1] = y2;
+            fil.roll = y1 > y2 ? 2.0f * halfPi : halfPi;
+          } else {
+            // Rail runs +Y; the same reasoning with the axes swapped.
+            fil.center[0] = y2;
+            fil.center[1] = along;
+            fil.roll = y1 > y2 ? 2.0f * halfPi : 3.0f * halfPi;
+          }
+          fil.center[2] = zOf[link.fromLine];
+          fil.scale[0] = r / half.x;
+          fil.scale[1] = r / half.y;
+          fil.scale[2] = 0.025f / half.z;
+          toFloat4(tint, fil.color);
+          byShape[static_cast<std::size_t>(Archetype::Fillet)].push_back(fil);
+        }
       }
     }
   }
@@ -1023,9 +1167,10 @@ Result<void> BoardRenderer::render(const OffscreenTarget& target, const Instance
               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
-      barrier(target.scratchImage(), VK_IMAGE_ASPECT_COLOR_BIT,
-              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+              VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+      barrier(target.scratchImage(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
               VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
@@ -1039,11 +1184,13 @@ Result<void> BoardRenderer::render(const OffscreenTarget& target, const Instance
               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+              VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
       barrier(target.colorImage(), VK_IMAGE_ASPECT_COLOR_BIT,
               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+              VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
       blurPass(target.colorView(), blurFromScratch_, 0.0f,

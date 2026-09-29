@@ -248,11 +248,14 @@ TEST_CASE("camera actions stay within sane limits", "[unit][app]") {
   const float startPitch = s->camera().pitch;
   REQUIRE(s->applyScript("orbit 0.2 0.1").has_value());
   REQUIRE(s->camera().pitch > startPitch);
-  // Pitch is clamped, so no amount of dragging can turn the board inside out.
+  // Pitch is clamped to the solid band: no amount of dragging can turn the board
+  // inside out, with the camera looking up at its underside or straight past the pole.
   REQUIRE(s->applyScript("orbit 0 100\norbit 0 100").has_value());
-  REQUIRE(s->camera().pitch <= 1.5f);
+  REQUIRE(s->camera().pitch <= 1.55f);
+  REQUIRE(s->camera().pitch > 0.0f);
   REQUIRE(s->applyScript("orbit 0 -1000").has_value());
-  REQUIRE(s->camera().pitch >= -1.5f);
+  REQUIRE(s->camera().pitch > 0.0f);
+  REQUIRE(s->camera().pitch < 1.5707963f);
 
   const float startDistance = s->camera().distance;
   REQUIRE(s->applyScript("zoom 0.5").has_value());

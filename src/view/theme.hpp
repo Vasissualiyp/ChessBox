@@ -103,16 +103,16 @@ struct Theme {
   /// them.
   [[nodiscard]] static Theme manifold() {
     Theme t;
-    t.ink = Rgba::hex(0xEBEFF6);        // the ground is now the light one
-    t.soot = Rgba::hex(0xF2F5FA);
-    t.panel = Rgba::hex(0xF7F9FC);
-    t.panelHi = Rgba::hex(0xE3E9F3);
-    t.rule = Rgba::hex(0xC6D0E0);
+    t.ink = Rgba::hex(0xDCE0E6);  // the ground is now the light one
+    t.soot = Rgba::hex(0xE6EAF0);
+    t.panel = Rgba::hex(0xEEF1F6);
+    t.panelHi = Rgba::hex(0xD2D9E4);
+    t.rule = Rgba::hex(0xB4BECD);
 
-    t.bone = Rgba::hex(0x0E121A);       // "bone" is now the ink: type on paper
+    t.bone = Rgba::hex(0x0E121A);  // "bone" is now the ink: type on paper
     t.boneDim = Rgba::hex(0x39414F);
     t.boneFaint = Rgba::hex(0x737E90);
-    t.ember = Rgba::hex(0x2E4BFF);      // the one accent, electric rather than warm
+    t.ember = Rgba::hex(0x2E4BFF);  // the one accent, electric rather than warm
     t.emberDeep = Rgba::hex(0x6F4FF2);
 
     t.rift = Rgba::hex(0x1C7FA8);

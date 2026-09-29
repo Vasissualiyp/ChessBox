@@ -66,6 +66,9 @@ class Session {
   [[nodiscard]] float pullBack() const noexcept { return pullBack_; }
   /// Where the board is glued to itself, and in what colour. Built once per variant.
   [[nodiscard]] const view::SeamMap& seams() const noexcept { return seams_; }
+  /// The multiverse's branches, in lattice terms, for the view to draw connectors. Empty
+  /// for a variant with no timelines.
+  [[nodiscard]] std::vector<view::TimelineLink> timelineLinks() const;
   /// The palette the seams and the move animation are coloured from. Held here rather
   /// than read from the renderer so a session can be driven, and tested, with no
   /// renderer at all.

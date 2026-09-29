@@ -11,7 +11,14 @@
 namespace cb::render {
 namespace {
 
-using widgets::u32;
+/// A decoration is drawn twice while a screen changes - the one arriving and the one
+/// leaving - so every colour it emits is scaled by one alpha, set by drawDeco. That
+/// keeps a fade from having to be threaded through every polygon by hand.
+float gDecoAlpha = 1.0f;
+
+ImU32 u32(const view::Rgba& c, float a = 1.0f) {
+  return widgets::u32(c, a * gDecoAlpha);
+}
 
 constexpr float kPi = 3.14159265358979f;
 
@@ -32,7 +39,8 @@ Vec3 rotateY(Vec3 p, float a) {
           -p.x * std::sin(a) + p.z * std::cos(a)};
 }
 Vec3 rotateX(Vec3 p, float a) {
-  return {p.x, p.y * std::cos(a) - p.z * std::sin(a), p.y * std::sin(a) + p.z * std::cos(a)};
+  return {p.x, p.y * std::cos(a) - p.z * std::sin(a),
+          p.y * std::sin(a) + p.z * std::cos(a)};
 }
 
 /// Where a scene point lands, plus the depth it landed from - the depth is the only
@@ -80,8 +88,8 @@ void icon(ImDrawList* dl, IconStyle style, Archetype shape, ImVec2 centre, float
   }
 }
 
-const Archetype kPieceShapes[]{Archetype::Tower, Archetype::Wedge,  Archetype::Crown,
-                               Archetype::Spire, Archetype::Dome,   Archetype::Monolith,
+const Archetype kPieceShapes[]{Archetype::Tower, Archetype::Wedge, Archetype::Crown,
+                               Archetype::Spire, Archetype::Dome,  Archetype::Monolith,
                                Archetype::Horn};
 
 // ---------------------------------------------------------------------------
@@ -117,15 +125,14 @@ Vec3 quintic(int k1, int k2, float x, float y) {
   const float z1i = aRe * std::sin(p1) + aIm * std::cos(p1);
   const float z2r = bRe * std::cos(p2) - bIm * std::sin(p2);
   const float z2i = bRe * std::sin(p2) + bIm * std::cos(p2);
-  return {z1r, z2r,
-          z1i * std::cos(kQuinticAlpha) + z2i * std::sin(kQuinticAlpha)};
+  return {z1r, z2r, z1i * std::cos(kQuinticAlpha) + z2i * std::sin(kQuinticAlpha)};
 }
 
 void drawManifold(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
                   IconStyle iconStyle, float t) {
   Camera cam;
   cam.centre = ImVec2((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
-  cam.scale = std::min(max.x - min.x, max.y - min.y) * 0.40f;
+  cam.scale = std::min(max.x - min.x, max.y - min.y) * 0.20f;
   cam.yaw = t * 0.09f;
   cam.pitch = 0.45f + std::sin(t * 0.05f) * 0.22f;
 
@@ -194,11 +201,11 @@ void drawManifold(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& the
     u = std::fmod(std::fmod(u, kPi * 0.5f) + kPi * 0.5f, kPi * 0.5f);
     v = std::sin(v) * 0.85f;
     const Projected p = cam(quintic(k1, k2, u, v));
-    const float size = span * (0.030f + 0.012f / (1.0f + std::abs(p.depth))) * 3.0f;
+    const float size = span * (0.030f + 0.012f / (1.0f + std::abs(p.depth))) * 0.75f;
     const bool white = i % 2 == 0;
     icon(dl, iconStyle, kPieceShapes[static_cast<std::size_t>(i) % 7],
-         ImVec2(p.at.x, p.at.y - size * 0.2f), size,
-         u32(white ? pale : dark, 0.94f), u32(white ? dark : pale, 0.7f));
+         ImVec2(p.at.x, p.at.y - size * 0.2f), size, u32(white ? pale : dark, 0.94f),
+         u32(white ? dark : pale, 0.7f));
   }
 }
 
@@ -234,8 +241,8 @@ void drawLattice(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& them
   // Size the whole arrangement to the space it has, rather than picking a per-cell
   // scale and hoping: a nine-board lattice is nearly four times the width of one board,
   // and a constant that suits one of them runs the other off the edge of the pane.
-  const float unitsX =
-      static_cast<float>(n) + static_cast<float>(across - 1) * (static_cast<float>(n) + 3);
+  const float unitsX = static_cast<float>(n) +
+                       static_cast<float>(across - 1) * (static_cast<float>(n) + 3);
   const float unitsY =
       static_cast<float>(n) + static_cast<float>(down - 1) * (static_cast<float>(n) + 3);
   Camera cam;
@@ -255,8 +262,7 @@ void drawLattice(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& them
     for (const float sx : {-1.0f, 1.0f}) {
       for (const float sy : {-1.0f, 1.0f}) {
         for (const float sz : {-1.0f, 1.0f}) {
-          const Projected c =
-              cam({sx * unitsX * 0.5f, sy * unitsY * 0.5f, sz * zSpan});
+          const Projected c = cam({sx * unitsX * 0.5f, sy * unitsY * 0.5f, sz * zSpan});
           extX = std::max(extX, std::abs(c.at.x));
           extY = std::max(extY, std::abs(c.at.y));
         }
@@ -292,10 +298,12 @@ void drawLattice(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& them
     for (int by = 0; by < down; ++by) {
       for (int lz = 0; lz < layers; ++lz) {
         const float ox =
-            (static_cast<float>(bx) - static_cast<float>(across - 1) * 0.5f) * (static_cast<float>(n) + 3);
-        const float oy =
-            (static_cast<float>(by) - static_cast<float>(down - 1) * 0.5f) * (static_cast<float>(n) + 3);
-        const float oz = (static_cast<float>(lz) - static_cast<float>(layers - 1) * 0.5f) * 2.4f;
+            (static_cast<float>(bx) - static_cast<float>(across - 1) * 0.5f) *
+            (static_cast<float>(n) + 3);
+        const float oy = (static_cast<float>(by) - static_cast<float>(down - 1) * 0.5f) *
+                         (static_cast<float>(n) + 3);
+        const float oz =
+            (static_cast<float>(lz) - static_cast<float>(layers - 1) * 0.5f) * 2.4f;
         for (int i = 0; i < n; ++i) {
           for (int j = 0; j < n; ++j) {
             const float x = ox - half + static_cast<float>(i);
@@ -328,8 +336,9 @@ void drawLattice(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& them
   std::sort(tiles.begin(), tiles.end(),
             [](const Tile& a, const Tile& b) { return a.depth < b.depth; });
   for (const Tile& tile : tiles) {
-    dl->AddQuadFilled(tile.p[0], tile.p[1], tile.p[2], tile.p[3],
-                      u32(withAlpha(tile.light ? pale : dark, tile.light ? 0.20f : 0.34f)));
+    dl->AddQuadFilled(
+        tile.p[0], tile.p[1], tile.p[2], tile.p[3],
+        u32(withAlpha(tile.light ? pale : dark, tile.light ? 0.20f : 0.34f)));
   }
   std::sort(tokens.begin(), tokens.end(),
             [](const Token& a, const Token& b) { return a.depth < b.depth; });
@@ -410,8 +419,7 @@ void drawAtom(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
         dl->AddLine(centre, full, u32(withAlpha(line, 0.30f)), 1.4f);
         dl->AddCircleFilled(full, cell * 0.11f, u32(withAlpha(line, 0.45f)), 10);
 
-        const float phase =
-            std::fmod(t * 0.7f - static_cast<float>(index) * 0.34f, 5.6f);
+        const float phase = std::fmod(t * 0.7f - static_cast<float>(index) * 0.34f, 5.6f);
         ++index;
         const float k = std::clamp(phase, 0.0f, 1.0f);
         if (k <= 0.0f) continue;
@@ -457,7 +465,10 @@ Deco decoForScreen(int screen) noexcept {
 
 DepthField::DepthField() {
   std::uint32_t seed = 0xC0FFEEu;
-  bodies_.resize(30);
+  // More bodies, spread through the whole depth, so the near plane is never empty and
+  // the field reads as motion rather than as a few specks drifting. The polygon-to-piece
+  // ratio stays roughly 3:1.
+  bodies_.resize(84);
   for (std::size_t i = 0; i < bodies_.size(); ++i) {
     Body& b = bodies_[i];
     // A few of them are pieces rather than polygons: the background is made out of the
@@ -472,12 +483,13 @@ void DepthField::respawn(Body& b, std::uint32_t& seed, bool nearPlane) const {
   // Born on an annulus, so nothing is ever in front of the menu.
   b.angle = nextFloat(seed) * 2.0f * kPi;
   b.radius = 0.62f + nextFloat(seed) * 1.15f;
-  b.angleV = (nextFloat(seed) < 0.5f ? -1.0f : 1.0f) * (0.006f + nextFloat(seed) * 0.013f);
+  b.angleV =
+      (nextFloat(seed) < 0.5f ? -1.0f : 1.0f) * (0.006f + nextFloat(seed) * 0.013f);
   b.radiusV = 0.02f + nextFloat(seed) * 0.05f;
   b.radiusPhase = nextFloat(seed) * 2.0f * kPi;
   b.spin = nextFloat(seed) * 2.0f * kPi;
   b.spinV = (nextFloat(seed) - 0.5f) * 0.10f;
-  b.size = b.piece ? 150.0f + nextFloat(seed) * 190.0f : 90.0f + nextFloat(seed) * 230.0f;
+  b.size = b.piece ? 110.0f + nextFloat(seed) * 140.0f : 68.0f + nextFloat(seed) * 170.0f;
   b.zDrift = -0.010f - nextFloat(seed) * 0.025f;
   b.alphaPhase = nextFloat(seed) * 2.0f * kPi;
   b.alphaV = 0.18f + nextFloat(seed) * 0.24f;
@@ -547,13 +559,15 @@ void DepthField::draw(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme&
     }
 
     const float alpha =
-        fade * (0.20f + 0.26f * (std::sin(clock_ * b.alphaV + b.alphaPhase) * 0.5f + 0.5f));
+        fade *
+        (0.20f + 0.26f * (std::sin(clock_ * b.alphaV + b.alphaPhase) * 0.5f + 0.5f));
     const int sides = 3 + static_cast<int>(b.shape % 4);
     dl->PathClear();
     for (int i = 0; i < sides; ++i) {
       const float ang =
           b.spin + 2.0f * kPi * static_cast<float>(i) / static_cast<float>(sides);
-      const float r = b.size * scale * (0.55f + 0.35f * std::sin(ang * 3.0f + b.huePhase));
+      const float r =
+          b.size * scale * (0.55f + 0.35f * std::sin(ang * 3.0f + b.huePhase));
       dl->PathLineTo(ImVec2(at.x + std::cos(ang) * r, at.y + std::sin(ang) * r));
     }
     dl->PathFillConvex(u32(withAlpha(tint, alpha)));
@@ -561,23 +575,34 @@ void DepthField::draw(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme&
 }
 
 void drawDeco(ImDrawList* dl, Deco what, ImVec2 min, ImVec2 max, const view::Theme& theme,
-              IconStyle iconStyle, float time, const VariantSpec* variant) {
+              IconStyle iconStyle, float time, const VariantSpec* variant, float zoom,
+              float alpha) {
+  // A decoration at alpha 0 must emit nothing at all, or the leaving screen's object
+  // would still be in the draw list and the headless capture would see it.
+  if (alpha <= 0.0f) return;
+  // Zoom about the rect's centre: this is the camera dolly as a 2-D draw list can show
+  // it, and it changes the decoration's whole scale rather than any one part.
+  const ImVec2 c((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
+  const ImVec2 lo(c.x + (min.x - c.x) * zoom, c.y + (min.y - c.y) * zoom);
+  const ImVec2 hi(c.x + (max.x - c.x) * zoom, c.y + (max.y - c.y) * zoom);
+  gDecoAlpha = alpha;
   switch (what) {
     case Deco::Manifold:
-      drawManifold(dl, min, max, theme, iconStyle, time);
+      drawManifold(dl, lo, hi, theme, iconStyle, time);
       break;
     case Deco::Lattice:
-      drawLattice(dl, min, max, theme, iconStyle, time, variant);
+      drawLattice(dl, lo, hi, theme, iconStyle, time, variant);
       break;
     case Deco::Tesseract:
-      drawTesseract(dl, min, max, theme, time);
+      drawTesseract(dl, lo, hi, theme, time);
       break;
     case Deco::Atom:
-      drawAtom(dl, min, max, theme, iconStyle, time);
+      drawAtom(dl, lo, hi, theme, iconStyle, time);
       break;
     case Deco::None:
       break;
   }
+  gDecoAlpha = 1.0f;
 }
 
 }  // namespace cb::render

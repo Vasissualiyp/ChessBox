@@ -26,7 +26,10 @@ struct Instance {
   float edge[4]{};
   /// Which sides are glued: bit 0 = -x, 1 = +x, 2 = -y, 3 = +y.
   float edgeMask{0};
-  float pad{0};
+  /// Rotation about the mesh's own Z, in radians. Lets one mesh - the rounded corner
+  /// of a timeline connector - be placed in any of the four quadrants without four
+  /// copies of the geometry.
+  float roll{0};
 };
 static_assert(sizeof(Instance) == 64);
 
@@ -109,8 +112,8 @@ class BoardRenderer {
       const view::PositionView& p, const view::ViewConfig& cfg,
       const view::SeamMap* seams = nullptr, const view::MoveAnimation* anim = nullptr,
       const std::function<bool(CellId)>& visible = {},
-      const std::function<bool(CellId)>& present = {}) const;
-
+      const std::function<bool(CellId)>& present = {},
+      const std::vector<view::TimelineLink>& links = {}) const;
   /// Render one frame into `target`, leaving the colour image in TRANSFER_SRC_OPTIMAL.
   /// `overlay` records extra commands inside the same render pass, which is how the UI
   /// is drawn over the board without a second path.

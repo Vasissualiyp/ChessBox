@@ -14,9 +14,8 @@ using namespace cb::render;
 
 namespace {
 
-constexpr Archetype kPieces[] = {Archetype::Dome,  Archetype::Tower,
-                                 Archetype::Wedge, Archetype::Spire,
-                                 Archetype::Crown, Archetype::Monolith,
+constexpr Archetype kPieces[] = {Archetype::Dome,  Archetype::Tower, Archetype::Wedge,
+                                 Archetype::Spire, Archetype::Crown, Archetype::Monolith,
                                  Archetype::Horn};
 
 /// Twice the signed area: zero means the outline has no interior to fill.
@@ -130,19 +129,17 @@ TEST_CASE("a temporal board draws a rail under each timeline", "[render]") {
 
   const VariantSpec flat = test::loadVariant("standard");
   const Position fp = Position::startPosition(flat);
-  const InstanceSet plain = renderer.buildInstances(view::PositionView::capture(fp),
-                                                    view::ViewConfig::forBoard(flat.dims));
-  // A board with no turn axis has no arrow to draw: the wedge batch is pieces only, and
-  // standard chess has exactly two knights per side.
-  const std::uint32_t knights =
-      plain.batches[static_cast<std::size_t>(Archetype::Wedge)].count;
-  CHECK(knights == 4);
+  const InstanceSet plain = renderer.buildInstances(
+      view::PositionView::capture(fp), view::ViewConfig::forBoard(flat.dims));
+  // A board with no turn axis has no arrow to draw at all.
+  CHECK(plain.batches[static_cast<std::size_t>(Archetype::Arrow)].count == 0);
 
   const VariantSpec five = test::loadVariant("5d");
   const Position sp = Position::startPosition(five);
   const InstanceSet temporal = renderer.buildInstances(
       view::PositionView::capture(sp), view::ViewConfig::forBoard(five.dims));
-  // Every timeline gets a head, so there are more wedges here than there are knights.
-  CHECK(temporal.batches[static_cast<std::size_t>(Archetype::Wedge)].count > 4);
+  // Every timeline gets a head, and the head is its own shape rather than a chess
+  // piece's wedge - so this cannot pass just because a variant happens to field knights.
+  CHECK(temporal.batches[static_cast<std::size_t>(Archetype::Arrow)].count > 0);
 }
 #endif

@@ -2,9 +2,9 @@
 #include "render/ui_widgets.hpp"
 
 #include <algorithm>
-#include <map>
-#include <cstdio>
 #include <cmath>
+#include <cstdio>
+#include <map>
 
 namespace cb::render::widgets {
 namespace {
@@ -178,7 +178,8 @@ void screenTitle(const char* text, const view::Theme& theme, ImFont* displayFont
   const ImVec2 at = ImGui::GetCursorScreenPos();
   ImDrawList* dl = ImGui::GetWindowDrawList();
   const std::string caption = upper(text);
-  const float base = displayFont != nullptr ? displayFont->FontSize : ImGui::GetFontSize();
+  const float base =
+      displayFont != nullptr ? displayFont->FontSize : ImGui::GetFontSize();
   const float size = base * sizeMul;
   if (displayFont != nullptr) {
     dl->AddText(displayFont, size, at, u32(theme.bone), caption.c_str());
@@ -231,7 +232,8 @@ bool menuEntry(const char* label, int index, const view::Theme& theme, ImFont* l
     const float small = labelFont->FontSize * 0.58f;
     char idx[4]{};
     std::snprintf(idx, sizeof(idx), "%02d", index);
-    dl->AddText(labelFont, small, ImVec2(min.x + 6.0f * s, min.y + (max.y - min.y - small) * 0.5f),
+    dl->AddText(labelFont, small,
+                ImVec2(min.x + 6.0f * s, min.y + (max.y - min.y - small) * 0.5f),
                 u32(theme.boneFaint), idx);
     dl->AddText(labelFont, labelFont->FontSize, ImVec2(textX, top), labelColor,
                 caption.c_str());
@@ -327,7 +329,7 @@ void beginPlate(const char* id, const view::Theme& theme, ImVec2 size, float yBi
   ImGui::Begin(id, nullptr,
                ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                    ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar |
-                   ImGuiWindowFlags_NoSavedSettings);
+                   ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings);
   // The card is drawn first so content lands on top of it. For an auto-height plate the
   // size is the previous frame's, which settles on the frame after a screen opens.
   const ImVec2 p = ImGui::GetWindowPos();

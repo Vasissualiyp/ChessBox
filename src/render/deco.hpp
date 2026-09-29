@@ -61,8 +61,8 @@ class DepthField {
 
  private:
   struct Body {
-    float px{0}, py{0};   ///< position on the plane, in units of half the frame
-    float z{1};           ///< distance from the camera
+    float px{0}, py{0};  ///< position on the plane, in units of half the frame
+    float z{1};          ///< distance from the camera
     float zDrift{0};
     float angle{0}, angleV{0};
     float radius{0}, radiusV{0}, radiusPhase{0};
@@ -83,7 +83,12 @@ class DepthField {
 
 /// Draw one decorative object into a rectangle. `variant` may be null; only the lattice
 /// uses it, and with nothing loaded it falls back to a single board.
+///
+/// `zoom` scales the object about the rect's centre (the camera dolly, as a 2-D draw list
+/// can show it) and `alpha` fades every colour it emits. At `alpha` 0 it draws nothing at
+/// all, so a screen on its way out leaves no geometry behind.
 void drawDeco(ImDrawList* dl, Deco what, ImVec2 min, ImVec2 max, const view::Theme& theme,
-              IconStyle iconStyle, float time, const VariantSpec* variant);
+              IconStyle iconStyle, float time, const VariantSpec* variant,
+              float zoom = 1.0f, float alpha = 1.0f);
 
 }  // namespace cb::render

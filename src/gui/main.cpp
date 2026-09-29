@@ -185,7 +185,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
           shell->session()->snapshot(), shell->session()->viewConfig(),
           &shell->session()->seams(), &shell->session()->animation(),
           [&](CellId c) { return shell->session()->boardVisible(c); },
-          [&](CellId c) { return shell->session()->game().cellInPresent(c); });
+          [&](CellId c) { return shell->session()->game().cellInPresent(c); },
+          shell->session()->timelineLinks());
     }
     const view::OrbitCamera camera =
         shell->showsBoard() ? shell->session()->camera() : view::OrbitCamera{};
@@ -452,7 +453,11 @@ int main(int argc, char** argv) {
     (*ui)->endFrame();
 
     if (request.quit) running = false;
-    if (!request.loadVariant.empty() && request.loadVariant != shell->currentVariant()) {
+    // Start when asked, unless it is already the game on screen. With nothing loaded,
+    // "the current variant" is only the remembered name, so a request that happens to
+    // match it must still start - otherwise picking the last-played variant does nothing.
+    if (!request.loadVariant.empty() &&
+        (!shell->hasGame() || request.loadVariant != shell->currentVariant())) {
       (void)shell->startGame(request.loadVariant);
       renderer->setOptions(optionsFrom(shell->settings()));
     }
@@ -484,7 +489,8 @@ int main(int argc, char** argv) {
           shell->session()->snapshot(), shell->session()->viewConfig(),
           &shell->session()->seams(), &shell->session()->animation(),
           [&](CellId c) { return shell->session()->boardVisible(c); },
-          [&](CellId c) { return shell->session()->game().cellInPresent(c); });
+          [&](CellId c) { return shell->session()->game().cellInPresent(c); },
+          shell->session()->timelineLinks());
       camera = shell->session()->camera();
     }
 

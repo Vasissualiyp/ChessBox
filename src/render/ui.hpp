@@ -119,6 +119,11 @@ class Ui {
   float clock_{0.0f};
   float enter_{1.0f};
   int lastScreen_{-1};
+  /// The decoration of the screen being left, and which way the camera is going. One
+  /// clock (`enter_`) drives the arriving object, the leaving ghost, the menu pane and
+  /// the field, so none of them can disagree about where the camera is.
+  Deco leaving_{Deco::None};
+  bool deeper_{true};
   DepthField field_;
   /// Which variant the new-game screen is showing details for.
   std::string pickedVariant_;

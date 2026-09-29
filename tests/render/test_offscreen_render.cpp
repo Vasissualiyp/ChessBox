@@ -11,7 +11,9 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <numbers>
 
+#include "app/session.hpp"
 #include "io/fen.hpp"
 #include "render/board_renderer.hpp"
 #include "render/offscreen_target.hpp"
@@ -359,6 +361,56 @@ TEST_CASE("every shipped variant renders cleanly", "[render][gpu]") {
     REQUIRE(f.image.coveragePerMille(Image::Rgba{13, 11, 10, 255}) > 50);
     REQUIRE(writePpm(f.image, capturePath(name)).has_value());
   }
+}
+
+TEST_CASE("a branch connector turns into its rail on a rounded corner", "[render]") {
+  // The corner of a timeline elbow used to be two rectangles overlapping at a right
+  // angle. A quarter-round fillet is placed in the empty inside of the bend, turned by
+  // the instance's roll into the right quadrant. Built with no GPU: it is instance data.
+  auto session = app::Session::create(test::loadVariant("5d"));
+  REQUIRE(session.has_value());
+  app::Session& s = **session;
+  const auto click = [&](CellId c) {
+    app::Action a;
+    a.kind = app::ActionKind::ClickCell;
+    a.cell = c;
+    REQUIRE(s.apply(a).has_value());
+  };
+  const auto boardOf = [&](CellId c) {
+    const Coord co = s.variant().dims.toCoord(c);
+    return std::pair<int, int>{co.c[2], co.c[3]};
+  };
+  const auto playFirst = [&](bool normal) {
+    Move chosen{};
+    bool found = false;
+    for (const Move& m : s.game().legalMoves()) {
+      if ((boardOf(m.from) == boardOf(m.to)) == normal) {
+        chosen = m;
+        found = true;
+        break;
+      }
+    }
+    REQUIRE(found);
+    click(chosen.from);
+    click(chosen.to);
+  };
+  playFirst(true);   // White advances.
+  playFirst(true);   // Black advances.
+  playFirst(false);  // Black travels into the past and branches.
+  REQUIRE_FALSE(s.timelineLinks().empty());
+
+  BoardRenderer renderer;
+  const view::ViewConfig cfg = view::ViewConfig::forBoard(s.variant().dims);
+  const InstanceSet set = renderer.buildInstances(
+      s.snapshot(), cfg, nullptr, nullptr, [&](CellId c) { return s.boardVisible(c); },
+      {}, s.timelineLinks());
+  const auto& batch = set.batches[static_cast<std::size_t>(Archetype::Fillet)];
+  REQUIRE(batch.count >= 1);
+  const Instance& fil = set.instances[batch.first];
+  // A quarter-turn multiple of the roll, and the fillet as thick as the rail it sits on.
+  const float quarter = fil.roll / (0.5f * std::numbers::pi_v<float>);
+  CHECK(std::abs(quarter - std::round(quarter)) < 0.01f);
+  CHECK(std::abs(fil.scale[2] - 0.025f / 0.055f) < 0.05f);
 }
 
 #endif  // CB_HAVE_VULKAN

@@ -13,8 +13,8 @@
 #include <imgui_impl_vulkan.h>
 
 #include "io/notation.hpp"
-#include "render/offscreen_target.hpp"
 #include "render/deco.hpp"
+#include "render/offscreen_target.hpp"
 #include "render/piece_icon.hpp"
 #include "render/piece_mesh.hpp"
 #include "render/ui_widgets.hpp"
@@ -305,17 +305,19 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
   const ImGuiViewport* vp = ImGui::GetMainViewport();
   ImDrawList* dl = ImGui::GetBackgroundDrawList();
   const ImVec2 min = vp->WorkPos;
-  const ImVec2 max = ImVec2(vp->WorkPos.x + vp->WorkSize.x, vp->WorkPos.y + vp->WorkSize.y);
+  const ImVec2 max =
+      ImVec2(vp->WorkPos.x + vp->WorkSize.x, vp->WorkPos.y + vp->WorkSize.y);
 
   // The ground. A light shell has to paint its own, or the board's clear colour shows
   // through where nothing else is drawn.
   dl->AddRectFilled(min, max, u32(theme_.ink));
   field_.draw(dl, min, max, theme_, iconStyle_, true, true);
 
-  // Deeper screens put their object on the other side. Alternating by depth is what
-  // makes each level a distinct place rather than a fade, and it needs no per-screen
-  // authoring: it falls out of the depth alone.
-  const bool decoLeft = app::screenDepth(shell.screen()) % 2 == 0;
+  // The object stays on one side across screens. Alternating it by depth made the
+  // decoration jump from one half of the frame to the other as the screen changed, which
+  // reads as a teleport; keeping it put lets the one clock zoom it in place, so a deeper
+  // screen looks like the camera moving towards the same object rather than a new one.
+  const bool decoLeft = true;
   const float split = (min.x + max.x) * 0.5f;
   const ImVec2 decoMin(decoLeft ? min.x : split, min.y);
   const ImVec2 decoMax(decoLeft ? split : max.x, max.y);
@@ -328,8 +330,19 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
       shell.screen() == app::Screen::NewGame
           ? shell.preview(pickedVariant_)
           : (shell.hasGame() ? &shell.session()->variant() : nullptr);
+  // One clock drives the camera move. Eased, so the arrival settles rather than stopping
+  // dead; the incoming object grows or shrinks to its place, and the outgoing one - the
+  // screen being left - is drawn as a ghost that zooms away. Its build function is never
+  // re-run.
+  const float ease = enter_ * enter_ * (3.0f - 2.0f * enter_);
+  const float inZoom = deeper_ ? 0.55f + 0.45f * ease : 1.7f - 0.7f * ease;
   drawDeco(dl, decoForScreen(static_cast<int>(shell.screen())), decoMin, decoMax, theme_,
-           iconStyle_, clock_, subject);
+           iconStyle_, clock_, subject, inZoom, ease);
+  if (leaving_ != Deco::None && enter_ < 1.0f) {
+    const float outZoom = deeper_ ? 1.0f + 0.8f * ease : 1.0f - 0.5f * ease;
+    drawDeco(dl, leaving_, decoMin, decoMax, theme_, iconStyle_, clock_, subject, outZoom,
+             1.0f - ease);
+  }
 
   // A hairline between the object and the menu, and the depth ladder on the far left.
   dl->AddLine(ImVec2(split, min.y), ImVec2(split, max.y), u32(theme_.rule, 0.6f));
@@ -365,10 +378,14 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
   // or away from it, on the way back out.
   const int screen = static_cast<int>(shell.screen());
   if (screen != lastScreen_) {
-    const bool deeper = lastScreen_ < 0 || app::screenDepth(shell.screen()) >=
-                                               app::screenDepth(
-                                                   static_cast<app::Screen>(lastScreen_));
+    const bool deeper =
+        lastScreen_ < 0 || app::screenDepth(shell.screen()) >=
+                               app::screenDepth(static_cast<app::Screen>(lastScreen_));
     field_.push(deeper ? 3.1f : -2.6f);
+    // Remember what is leaving, so it can be drawn as a ghost. Its build function is
+    // never run again: drawing a departing screen must not be able to navigate.
+    leaving_ = lastScreen_ >= 0 ? decoForScreen(lastScreen_) : Deco::None;
+    deeper_ = deeper;
     enter_ = 0.0f;
     lastScreen_ = screen;
   }
@@ -602,6 +619,15 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
         }
         (void)session.apply(a);
       }
+    }
+    ImGui::SameLine();
+    // View mode travels with the player: a flat board is easier to read, a solid one
+    // easier to understand. Cold, because it is a view of the geometry, not a move.
+    if (button(session.flatView() ? "2D" : "3D", t, px(64), false, true)) {
+      const bool flat = !session.flatView();
+      session.setFlatView(flat);
+      shell.settings().flatView = flat;
+      request.settingsChanged = true;
     }
     ImGui::SameLine();
     if (button("MENU", t, px(78))) shell.pause();

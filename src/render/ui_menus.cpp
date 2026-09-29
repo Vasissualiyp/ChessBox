@@ -115,22 +115,11 @@ UiRequest Ui::buildMainMenu(app::Shell& shell) {
   UiRequest request;
   const view::Theme& t = theme_;
   auto* display = static_cast<ImFont*>(fontDisplay_);
-  auto* small = static_cast<ImFont*>(fontSmall_);
-  auto* mono = static_cast<ImFont*>(fontMono_);
 
   ImVec2 menuMin, menuMax;
   drawShellFrame(shell, menuMin, menuMax);
   beginPane("##mainmenu", menuMin, menuMax, enter_, px(46.0f));
-  eyebrow("chessbox", t, mono, scale_);
-  screenTitle("Every board", t, display, scale_, 2.4f);
-  screenTitle("you can define.", t, display, scale_, 2.4f);
-  ImGui::PushFont(small);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
-  ImGui::TextWrapped(
-      "Any number of axes. Any gluing. Pieces as vectors. Time as another direction to "
-      "move in.");
-  ImGui::PopStyleColor();
-  ImGui::PopFont();
+  screenTitle("CHESSBOX", t, display, scale_, 2.4f);
   ImGui::Dummy(ImVec2(0, px(14)));
 
   const float width = ImGui::GetContentRegionAvail().x;
@@ -277,8 +266,7 @@ UiRequest Ui::buildPause(app::Shell& shell) {
   const ImVec2 vmax(vp->WorkPos.x + vp->WorkSize.x, vp->WorkPos.y + vp->WorkSize.y);
   ImGui::GetBackgroundDrawList()->AddRectFilled(vmin, vmax, u32(t.ink, 0.42f));
   const float split = vmin.x + (vmax.x - vmin.x) * 0.52f;
-  beginPane("##pause", ImVec2(split, vmin.y), ImVec2(vmax.x, vmax.y), enter_,
-            px(46.0f));
+  beginPane("##pause", ImVec2(split, vmin.y), ImVec2(vmax.x, vmax.y), enter_, px(46.0f));
   // The board keeps the other side, so the position sits clear of the menu rather than
   // half behind it.
   request.boardRect[0] = vmin.x;
@@ -364,7 +352,11 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   screenTitle("Settings", t, display, scale_, 2.0f);
   ImGui::Dummy(ImVec2(0, px(4)));
 
-  ImGui::BeginChild("##settingsbody", ImVec2(0, px(430)));
+  // The body is the one scroller; the panel itself never scrolls, and the height leaves
+  // room for the Back button beneath it so it can never be clipped or hidden.
+  ImGui::BeginChild(
+      "##settingsbody",
+      ImVec2(0, std::max(px(120.0f), ImGui::GetContentRegionAvail().y - px(44.0f))));
   ImGui::PushItemWidth(px(220));
 
   heading("DISPLAY", t, small);
@@ -517,8 +509,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       before.showLastMove != s.showLastMove || before.showCheck != s.showCheck ||
       before.showSeams != s.showSeams || before.showCoordinates != s.showCoordinates ||
       before.pieceHeightScale != s.pieceHeightScale || before.flatView != s.flatView ||
-      before.pieceIcons != s.pieceIcons ||
-      before.animateMoves != s.animateMoves ||
+      before.pieceIcons != s.pieceIcons || before.animateMoves != s.animateMoves ||
       before.animationSpeed != s.animationSpeed ||
       before.orbitSensitivity != s.orbitSensitivity ||
       before.zoomSensitivity != s.zoomSensitivity ||
@@ -547,7 +538,9 @@ UiRequest Ui::buildGameInfo(app::Shell& shell) {
   screenTitle(v.name.c_str(), t, display, scale_, 2.0f);
   ImGui::Dummy(ImVec2(0, px(4)));
 
-  ImGui::BeginChild("##infobody", ImVec2(0, px(400)));
+  ImGui::BeginChild(
+      "##infobody",
+      ImVec2(0, std::max(px(120.0f), ImGui::GetContentRegionAvail().y - px(44.0f))));
   heading("BOARD", t, small);
   ImGui::PushFont(small);
   for (std::uint8_t a = 0; a < v.dims.dims(); ++a) {
@@ -630,7 +623,9 @@ UiRequest Ui::buildPieceMoves(app::Shell& shell) {
   ImGui::PopFont();
   ImGui::Dummy(ImVec2(0, px(6)));
 
-  ImGui::BeginChild("##piecebody", ImVec2(0, px(430)));
+  ImGui::BeginChild(
+      "##piecebody",
+      ImVec2(0, std::max(px(120.0f), ImGui::GetContentRegionAvail().y - px(44.0f))));
   for (std::size_t i = 1; i < v.pieces.size(); ++i) {
     const PieceTypeDef& piece = v.pieces[i];
     ImGui::PushID(static_cast<int>(i));

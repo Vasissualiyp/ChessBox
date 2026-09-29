@@ -16,6 +16,8 @@ layout(location = 5) in vec4 instColor;
 layout(location = 6) in vec4 instEdge;    // seam colour; alpha 0 means no seam here
 layout(location = 7) in float instEdgeMask;
 
+layout(location = 8) in float instRoll;     // rotation about the mesh's own Z, radians
+
 layout(push_constant) uniform Push {
     mat4 viewProj;
     vec4 lightDir;
@@ -30,10 +32,19 @@ layout(location = 5) out float fragHeight;
 layout(location = 6) out vec2 fragEdgeInset;
 
 void main() {
-    vec3 world = instCenter + inPosition * instScale;
+    // Spin the mesh in its own plane before scaling, so one quarter-round corner can be
+    // turned into any of the four quadrants it is needed in.
+    const float cr = cos(instRoll);
+    const float sr = sin(instRoll);
+    const vec2 spun = vec2(inPosition.x * cr - inPosition.y * sr,
+                           inPosition.x * sr + inPosition.y * cr);
+    const vec3 local = vec3(spun, inPosition.z);
+    vec3 world = instCenter + local * instScale;
     gl_Position = push.viewProj * vec4(world, 1.0);
     fragColor = instColor;
-    fragNormal = normalize(inNormal / max(abs(instScale), vec3(1e-6)));
+    const vec2 nspun = vec2(inNormal.x * cr - inNormal.y * sr,
+                            inNormal.x * sr + inNormal.y * cr);
+    fragNormal = normalize(vec3(nspun, inNormal.z) / max(abs(instScale), vec3(1e-6)));
     fragLocal = inPosition.xy;
     fragEdge = instEdge;
     fragEdgeMask = instEdgeMask;

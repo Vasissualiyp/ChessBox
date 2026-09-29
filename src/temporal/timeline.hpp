@@ -48,6 +48,11 @@ struct Timeline {
   /// 1-based rank among its owner's branches; 0 for the original timeline. This is the
   /// number the activity rule counts.
   int order{0};
+  /// The board this timeline was born from: the line the branching move arrived on, and
+  /// the turn on it that it landed on. -1 for the original timeline, which came from
+  /// nowhere. Kept so the shape of the multiverse can be drawn, not just computed.
+  LineId parentLine{0};
+  Turn parentTurn{-1};
   std::vector<Turn> boards;  // ascending; a board exists at each
 
   [[nodiscard]] Turn latest() const noexcept {
@@ -81,8 +86,9 @@ class TimelineModel {
   /// Record that a board exists at (turn, line). A duplicate is refused.
   bool addBoard(LineId line, Turn turn);
 
-  /// Create a timeline for `owner`. Returns the new line, or nullopt for the original.
-  std::optional<LineId> branch(BranchOwner owner);
+  /// Create a timeline for `owner`, branched from board (parentTurn, parentLine).
+  /// Returns the new line, or nullopt for the original.
+  std::optional<LineId> branch(BranchOwner owner, LineId parentLine, Turn parentTurn);
 
   /// The line `owner`'s next branch would take, without creating it.
   [[nodiscard]] LineId nextId(BranchOwner owner) const;
