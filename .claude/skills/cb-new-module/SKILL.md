@@ -43,8 +43,8 @@ cb_layer(chessbox_<layer> LEVEL <n>
   DEPS chessbox_<lower> ...)
 ```
 
-Levels are spaced by 10 (base 0, diag 5, space 10, geometry 20, position 30,
-pieces 40, variant 45, movegen 50, rules 60, temporal 70, game 80, io 90,
+Levels are spaced out (base 0, diag 5, space 10, geometry 20, pieces 30,
+variant 35, position 40, movegen 50, rules 60, temporal 70, game 80, io 90,
 cli/render/net 100) so a layer can be inserted without renumbering. Add
 `add_subdirectory(<layer>)` to `src/CMakeLists.txt` **in bottom-up order** -
 `cb_layer()` requires dependencies to be declared before their users.

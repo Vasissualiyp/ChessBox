@@ -53,8 +53,8 @@ Each layer is a CMake target linking only to lower layers, so a violation is a
 | L7 | `src/temporal` | turn/timeline axes, present, branching |
 | L6 | `src/rules` | effect VM: triggers, conditions, effects |
 | L5 | `src/movegen` | expansion, ray walk, staged gen, legality, perft |
-| L4 | `src/pieces`, `src/variant` | vector-move algebra, resolved `VariantSpec` |
-| L3 | `src/position` | cells, piece lists, occupancy, field columns, hash |
+| L4 | `src/position` | cells, occupancy, field columns, hash, make/unmake |
+| L3 | `src/pieces`, `src/variant` | vector-move algebra, resolved `VariantSpec` |
 | L2 | `src/geometry` | identifications, transition group, transport |
 | L1 | `src/space` | `DimSpec`, `Coord`, `Direction`, strides, `CellId` |
 | L0 | `src/base`, `src/diag` | containers, arenas, `Result`, bitsets, RNG, Zobrist, tracing |

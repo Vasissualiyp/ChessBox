@@ -48,7 +48,15 @@ std::string stripNonCode(const std::string& src) {
         if (c == '/' && n == '/') { s = S::Line; ++i; }
         else if (c == '/' && n == '*') { s = S::Block; ++i; }
         else if (c == '"') { s = S::Str; }
-        else if (c == '\'') { s = S::Chr; }
+        else if (c == '\'' && !(!out.empty() &&
+                               (std::isalnum(static_cast<unsigned char>(out.back())) != 0 ||
+                                out.back() == '_'))) {
+          // A quote directly after an alphanumeric is a digit separator
+          // (0xFFFF'FFFFu), not the start of a character literal. Treating it as
+          // one desynchronizes the scanner and makes later comment text look like
+          // code - which is exactly how this test produced a false positive.
+          s = S::Chr;
+        }
         else { out += c; }
         break;
       case S::Line:

@@ -21,9 +21,16 @@ target_compile_definitions(chessbox_tests PRIVATE
 
 # Aggregate, label-addressable suites: `ctest -L unit` is the fast loop.
 # Labels are added as the first test of that kind lands, so an empty label can
-# never silently "pass". golden/perft join in M1.
-foreach(label unit property arch)
-  add_test(NAME ${label} COMMAND chessbox_tests "[${label}]")
+# never silently "pass". golden/perft joined in M1.
+foreach(label unit property golden perft arch)
+  add_test(NAME ${label} COMMAND chessbox_tests "[${label}]~[slow]")
   set_tests_properties(${label} PROPERTIES LABELS ${label})
 endforeach()
+
+# The deep node counts are minutes of work, so they are their own label rather
+# than a tax on every `ctest --preset dev`. CI runs them; the fast loop does not.
+add_test(NAME perft-slow COMMAND chessbox_tests "[perft][slow]")
+set_tests_properties(perft-slow PROPERTIES LABELS "slow;perft" TIMEOUT 3600)
+add_test(NAME property-slow COMMAND chessbox_tests "[property][slow]")
+set_tests_properties(property-slow PROPERTIES LABELS "slow;property" TIMEOUT 3600)
 set_tests_properties(property PROPERTIES TIMEOUT 900)
