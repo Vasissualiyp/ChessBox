@@ -1,11 +1,71 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "io/variant_doc.hpp"
 
+#include <cstdint>
 #include <sstream>
+#include <string_view>
+#include <utility>
 
 #include <toml++/toml.hpp>
 
 namespace cb {
+namespace {
+
+toml::table* findPieceTable(toml::table& root, std::string_view name) {
+  auto* arr = root["piece"].as_array();
+  if (arr == nullptr) return nullptr;
+  for (auto&& node : *arr) {
+    auto* t = node.as_table();
+    if (t != nullptr && (*t)["name"].value_or(std::string{}) == name) return t;
+  }
+  return nullptr;
+}
+
+/// The orientation axis as (index, extent), or (-1, 0) when the variant has none. The
+/// index is what `Region.axis` wants; the extent is what mirrors a `from_rank` for
+/// Black, exactly as the loader does it.
+std::pair<int, std::int16_t> orientationAxisOf(const toml::table& root) {
+  const auto oa = root["orientation_axis"].value<std::string>();
+  if (!oa.has_value()) return {-1, 0};
+  const auto* axes = root["axis"].as_array();
+  if (axes == nullptr) return {-1, 0};
+  int index = 0;
+  for (const auto& node : *axes) {
+    const auto* t = node.as_table();
+    if (t == nullptr) continue;
+    if ((*t)["name"].value_or(std::string{}) == *oa) {
+      return {index, static_cast<std::int16_t>((*t)["extent"].value_or<std::int64_t>(0))};
+    }
+    ++index;
+  }
+  return {-1, 0};
+}
+
+std::string_view modeWord(MoveMode m) {
+  switch (m) {
+    case MoveMode::Slide:
+      return "slide";
+    case MoveMode::Leap:
+      return "leap";
+    case MoveMode::Hop:
+      return "hop";
+  }
+  return "leap";
+}
+
+std::string_view captureWord(CapturePolicy c) {
+  switch (c) {
+    case CapturePolicy::May:
+      return "may";
+    case CapturePolicy::Must:
+      return "must";
+    case CapturePolicy::Cannot:
+      return "cannot";
+  }
+  return "may";
+}
+
+}  // namespace
 
 struct VariantDoc::Impl {
   toml::table table;
@@ -34,6 +94,118 @@ std::string VariantDoc::serialize() const {
   // than by a hand-rolled emitter that drifts from the dialect the loader accepts.
   out << toml::toml_formatter{impl_->table};
   return out.str();
+}
+
+std::vector<std::string> VariantDoc::pieceNames() const {
+  std::vector<std::string> names;
+  const auto* arr = impl_->table["piece"].as_array();
+  if (arr == nullptr) return names;
+  for (const auto& node : *arr) {
+    const auto* t = node.as_table();
+    if (t != nullptr) names.push_back((*t)["name"].value_or(std::string{}));
+  }
+  return names;
+}
+
+Result<std::vector<MoveAtom>> VariantDoc::pieceAtoms(std::string_view piece) const {
+  const toml::table* pt = findPieceTable(impl_->table, piece);
+  if (pt == nullptr) {
+    return fail(ErrorCode::ValidationError,
+                "no piece is called '" + std::string(piece) + "'");
+  }
+  const auto [orientAxis, orientExtent] = orientationAxisOf(impl_->table);
+  std::vector<MoveAtom> out;
+  const auto* moves = (*pt)["move"].as_array();
+  if (moves == nullptr) return out;
+  for (const auto& node : *moves) {
+    const auto* mt = node.as_table();
+    if (mt == nullptr) continue;
+    MoveAtom a;
+    if (const auto* vec = (*mt)["vector"].as_array()) {
+      for (const auto& v : *vec) {
+        if (const auto n = v.value<std::int64_t>()) {
+          a.mags.push(static_cast<std::int16_t>(*n));
+        }
+      }
+    }
+    if (a.mags.empty()) continue;
+
+    const std::string maxText = (*mt)["max"].value_or(std::string{});
+    if (maxText == "inf") {
+      a.maxK = kUnlimited;
+    } else if (const auto mk = (*mt)["max"].value<std::int64_t>()) {
+      a.maxK = static_cast<std::uint32_t>(*mk);
+    }
+    a.minK = static_cast<std::uint32_t>((*mt)["min"].value_or<std::int64_t>(1));
+
+    const std::string mode = (*mt)["mode"].value_or(std::string{"leap"});
+    a.mode = mode == "slide" ? MoveMode::Slide
+             : mode == "hop" ? MoveMode::Hop
+                             : MoveMode::Leap;
+    const std::string cap = (*mt)["capture"].value_or(std::string{"may"});
+    a.capture = cap == "must"     ? CapturePolicy::Must
+                : cap == "cannot" ? CapturePolicy::Cannot
+                                  : CapturePolicy::May;
+    a.oriented = (*mt)["forward"].value_or(false);
+    a.leavesEnPassant = (*mt)["leaves_en_passant"].value_or(false);
+
+    if (const auto home = (*mt)["from_rank"].value<std::int64_t>()) {
+      if (orientAxis >= 0) {
+        const auto white = static_cast<std::int16_t>(*home);
+        a.fromRegion[static_cast<std::size_t>(Color::White)] = Region{orientAxis, white};
+        a.fromRegion[static_cast<std::size_t>(Color::Black)] =
+            Region{orientAxis, static_cast<std::int16_t>(orientExtent - 1 - white)};
+      }
+    }
+
+    auto canon = MoveAtom::canonicalize(a);
+    if (canon.has_value()) out.push_back(*canon);
+  }
+  return out;
+}
+
+Result<void> VariantDoc::setPieceAtoms(std::string_view piece,
+                                       const std::vector<MoveAtom>& atoms) {
+  toml::table* pt = findPieceTable(impl_->table, piece);
+  if (pt == nullptr) {
+    return fail(ErrorCode::ValidationError,
+                "no piece is called '" + std::string(piece) + "'");
+  }
+  toml::array moves;
+  for (const MoveAtom& a : atoms) {
+    toml::table m;
+    toml::array vec;
+    for (const auto mag : a.mags) vec.push_back(static_cast<std::int64_t>(mag));
+    m.insert("vector", std::move(vec));
+    if (a.minK != 1) m.insert("min", static_cast<std::int64_t>(a.minK));
+    if (a.maxK == kUnlimited) {
+      m.insert("max", std::string{"inf"});
+    } else if (a.maxK != 1) {
+      m.insert("max", static_cast<std::int64_t>(a.maxK));
+    }
+    if (a.mode != MoveMode::Leap) m.insert("mode", std::string(modeWord(a.mode)));
+    if (a.capture != CapturePolicy::May) {
+      m.insert("capture", std::string(captureWord(a.capture)));
+    }
+    if (a.oriented) m.insert("forward", true);
+    if (a.fromRegion[static_cast<std::size_t>(Color::White)].active()) {
+      m.insert("from_rank",
+               static_cast<std::int64_t>(
+                   a.fromRegion[static_cast<std::size_t>(Color::White)].value));
+    }
+    if (a.leavesEnPassant) m.insert("leaves_en_passant", true);
+    moves.push_back(std::move(m));
+  }
+  pt->insert_or_assign("move", std::move(moves));
+  return {};
+}
+
+std::string VariantDoc::description() const {
+  return impl_->table["description"].value_or(std::string{});
+}
+
+void VariantDoc::setDescription(std::string text) {
+  impl_->table.insert_or_assign("description", std::move(text));
 }
 
 }  // namespace cb

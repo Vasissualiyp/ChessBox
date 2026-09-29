@@ -58,3 +58,56 @@ TEST_CASE("the document refuses a malformed file where the loader would", "[unit
   REQUIRE_FALSE(doc.has_value());
   CHECK(doc.error().code == ErrorCode::ParseError);
 }
+
+TEST_CASE("the document reads and edits a piece's moves", "[unit][io]") {
+  auto doc = VariantDoc::parse(readFile(test::variantPath("standard")), "standard");
+  REQUIRE(doc.has_value());
+
+  const auto names = doc->pieceNames();
+  REQUIRE(std::find(names.begin(), names.end(), "rook") != names.end());
+
+  auto rook = doc->pieceAtoms("rook");
+  REQUIRE(rook.has_value());
+  REQUIRE(rook->size() == 1);
+  CHECK((*rook)[0].maxK == kUnlimited);  // a rider
+
+  auto knight = doc->pieceAtoms("knight");
+  REQUIRE(knight.has_value());
+  REQUIRE(knight->size() == 1);
+
+  // A rook that can also leap like a knight is a semantic change: it must survive the
+  // round trip and it must change the variant's identity.
+  auto edited = *rook;
+  edited.push_back((*knight)[0]);
+  REQUIRE(doc->setPieceAtoms("rook", edited).has_value());
+
+  const auto before =
+      loadVariantToml(readFile(test::variantPath("standard")), "standard");
+  const auto after = loadVariantToml(doc->serialize(), "standard");
+  REQUIRE(before.has_value());
+  REQUIRE(after.has_value());
+  CHECK(before->variantId() != after->variantId());
+
+  const PieceTypeId rookType = after->findPiece("rook");
+  REQUIRE(rookType != kNoPiece);
+  CHECK(after->pieces[rookType].atoms.size() == 2);
+
+  // Reading back through the document gives what was written.
+  auto reread = doc->pieceAtoms("rook");
+  REQUIRE(reread.has_value());
+  CHECK(reread->size() == 2);
+}
+
+TEST_CASE("a cosmetic edit leaves the variant's identity alone", "[unit][io]") {
+  auto doc = VariantDoc::parse(readFile(test::variantPath("standard")), "standard");
+  REQUIRE(doc.has_value());
+  const auto before = loadVariantToml(doc->serialize(), "standard");
+  REQUIRE(before.has_value());
+
+  doc->setDescription("a different pitch for the same game");
+  CHECK(doc->description() == "a different pitch for the same game");
+
+  const auto after = loadVariantToml(doc->serialize(), "standard");
+  REQUIRE(after.has_value());
+  CHECK(before->variantId() == after->variantId());
+}
