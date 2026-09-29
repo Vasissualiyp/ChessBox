@@ -552,28 +552,26 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   const std::vector<std::string> names = editor->pieceNames();
   if (names.empty()) {
     ImGui::TextUnformatted("This variant declares no pieces.");
-  } else if (ImGui::BeginTable(
-                 "##editorcols", 2,
-                 ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchProp)) {
+  } else {
     if (editorPiece_ < 0 || editorPiece_ >= static_cast<int>(names.size()))
       editorPiece_ = 0;
-    ImGui::TableSetupColumn("pieces", ImGuiTableColumnFlags_WidthFixed, px(120.0f));
-    ImGui::TableSetupColumn("moves", ImGuiTableColumnFlags_WidthStretch);
-    ImGui::TableNextRow();
 
-    ImGui::TableSetColumnIndex(0);
+    // The pieces as a lit row of buttons, not a list: the move editor below wants the
+    // whole pane width, and a table fought it for it.
     ImGui::PushFont(small);
     for (int i = 0; i < static_cast<int>(names.size()); ++i) {
+      if (i != 0) ImGui::SameLine();
       const bool selected = i == editorPiece_;
-      ImGui::PushStyleColor(ImGuiCol_Text, col(selected ? t.ember : t.boneDim));
-      if (ImGui::Selectable(names[static_cast<std::size_t>(i)].c_str(), selected)) {
+      ImGui::PushStyleColor(ImGuiCol_Button, col(selected ? t.emberDeep : t.panelHi,
+                                                 selected ? 1.0f : 0.6f));
+      ImGui::PushStyleColor(ImGuiCol_Text, col(selected ? t.bone : t.boneDim));
+      if (ImGui::SmallButton(names[static_cast<std::size_t>(i)].c_str()))
         editorPiece_ = i;
-      }
-      ImGui::PopStyleColor();
+      ImGui::PopStyleColor(2);
     }
     ImGui::PopFont();
+    ImGui::Dummy(ImVec2(0, px(4)));
 
-    ImGui::TableSetColumnIndex(1);
     const std::string piece = names[static_cast<std::size_t>(editorPiece_)];
     auto atoms = editor->pieceAtoms(piece);
     if (!atoms.has_value()) {
@@ -587,14 +585,21 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
         ImGui::PushID(static_cast<int>(i));
         ImGui::Text("%2zu", i + 1);
         ImGui::SameLine();
-        // Each magnitude is a number, edited in place: [1,2] is two ints, and a longer
-        // stride like a knight's [1,3] is typed here rather than offered as a preset.
+        // Each step size is its own - n +, so a knight reads as 1 and 2 with each number
+        // adjustable in place - [1,3] is one tap away rather than a preset.
         for (std::size_t k = 0; k < list[i].mags.size(); ++k) {
           ImGui::PushID(static_cast<int>(k) + 1);
-          ImGui::SetNextItemWidth(px(48));
-          int v = list[i].mags[k];
-          if (ImGui::InputInt("##mag", &v, 1, 1)) {
-            list[i].mags[k] = static_cast<std::int16_t>(std::clamp(v, 1, 32767));
+          if (ImGui::SmallButton("-")) {
+            if (list[i].mags[k] > 1) {
+              list[i].mags[k] = static_cast<std::int16_t>(list[i].mags[k] - 1);
+              changed = true;
+            }
+          }
+          ImGui::SameLine();
+          ImGui::Text("%d", static_cast<int>(list[i].mags[k]));
+          ImGui::SameLine();
+          if (ImGui::SmallButton("+")) {
+            list[i].mags[k] = static_cast<std::int16_t>(list[i].mags[k] + 1);
             changed = true;
           }
           ImGui::PopID();
@@ -606,9 +611,6 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
             changed = true;
           }
         }
-        ImGui::SameLine();
-        // How many step sizes this move has, so -/+ read as "one fewer/more".
-        ImGui::Text("%zu", list[i].mags.size());
         ImGui::SameLine();
         if (ImGui::SmallButton("+")) {
           if (list[i].mags.size() < kMaxDims) {
@@ -725,7 +727,6 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
         if (ok) (void)editor->setPieceAtoms(piece, list);
       }
     }
-    ImGui::EndTable();
   }
   ImGui::PopStyleColor(9);
   ImGui::PopStyleVar(3);

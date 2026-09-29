@@ -380,7 +380,10 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
   // reads as a teleport; keeping it put lets the one clock zoom it in place, so a deeper
   // screen looks like the camera moving towards the same object rather than a new one.
   const bool decoLeft = true;
-  const float split = (min.x + max.x) * 0.5f;
+  // Most screens split the frame in half. The designer needs a wider pane for its rows
+  // of controls, so it takes the larger share and leaves the preview a narrower strip.
+  const float menuShare = shell.screen() == app::Screen::Editor ? 0.42f : 0.5f;
+  const float split = min.x + (max.x - min.x) * menuShare;
   const ImVec2 decoMin(decoLeft ? min.x : split, min.y);
   const ImVec2 decoMax(decoLeft ? split : max.x, max.y);
   menuMin = ImVec2(decoLeft ? split : min.x, min.y);
