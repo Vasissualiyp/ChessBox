@@ -58,6 +58,27 @@ class Session {
 
   Result<void> apply(const Action& a);
 
+  /// Tell the session how wide the board's drawing area is relative to its height, so
+  /// the default camera frames the board in the space the interface leaves it.
+  void setBoardAspect(float aspect);
+
+  /// A move the player has committed to except for what the pawn becomes.
+  ///
+  /// The session stops and asks rather than choosing silently: a variant may promote to
+  /// pieces nobody expects, so "queen by default" is a guess, not a rule. While a
+  /// promotion is pending the board is frozen - clicks do nothing until it is resolved.
+  struct PendingPromotion {
+    bool active{false};
+    CellId from{kInvalidCell};
+    CellId to{kInvalidCell};
+    std::vector<PieceTypeId> choices;
+  };
+  [[nodiscard]] const PendingPromotion& pendingPromotion() const noexcept {
+    return pending_;
+  }
+  Result<void> choosePromotion(PieceTypeId piece);
+  void cancelPromotion();
+
   /// Replace the current position from FEN-N, discarding history. Used for setting up a
   /// study or a test position, and by the front end's position entry.
   Result<void> loadFen(std::string_view fen);
@@ -75,6 +96,9 @@ class Session {
   void refreshSnapshot();
   void refreshView();
   [[nodiscard]] const Move* findMove(CellId from, CellId to) const;
+  [[nodiscard]] std::vector<PieceTypeId> promotionChoicesFor(CellId from,
+                                                             CellId to) const;
+  Result<void> playChecked(const Move& m);
 
   std::unique_ptr<VariantSpec> variant_;
   std::unique_ptr<Game> game_;
@@ -83,6 +107,9 @@ class Session {
   view::OrbitCamera camera_;
   std::vector<view::Placement> placements_;
   CellId selected_{kInvalidCell};
+  float boardAspect_{1.3f};
+  bool framedOnce_{false};
+  PendingPromotion pending_;
   std::string promotionPreference_;
   std::string message_;
 };

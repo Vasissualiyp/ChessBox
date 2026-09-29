@@ -168,3 +168,63 @@ had been keeping its own history instead. `app::Session` needed a real one.
 6. Move ghosts equal engine moves. **Holds structurally**: highlights come from
    `Game::legalMoves`, and the renderer has no move logic to disagree with.
 7. Headless action-log tests for select/move/promote/undo/variant-switch. **Holds.**
+
+---
+
+## M4.5: from tech demo to game
+
+Recorded 2026-09-29, after the visual direction was agreed.
+
+M4 produced a renderer that drew coloured boxes with a status line in the terminal.
+That demonstrated the engine; it was not a game. This pass closed the gap.
+
+**Visual direction.** One rule holds the look together: *warm is the game you know,
+cold is the geometry you don't*. Amber is the candle - selection, headings, the primary
+action - and cyan is spent **only** where the board stops being flat: seams, wrapped
+moves, extra axes. A player learns in one game that cyan means "this edge is not where
+it looks", and that only works because nothing else is allowed to use it. The palette is
+`view::Theme`, a struct, so retheming - or letting a Workshop variant carry its own -
+never means touching the renderer.
+
+**Pieces are assembled, not loaded.** A variant may declare a piece nobody anticipated,
+so models cannot be files. Seven archetypes are built at load from primitives, a variant
+may name one (`shape = "horn"`) and set a height, and anything it leaves out is derived
+from *how the piece moves*: oriented atoms give a pawn's dome, three-axis atoms give the
+unicorn's horn, several sliding families give a crown. Height encodes value, so the
+tallest piece in an unfamiliar army is the one that matters most. An unknown name falls
+back to a tower - a variant is never unplayable for want of a model.
+
+**The interface** is Dear ImGui restyled until it stops looking like Dear ImGui: square
+panels, warm borders, chunky bevelled controls whose press lands on the accent, Cinzel
+for anything naming a thing and JetBrains Mono for anything a machine produced. Left
+rail: variant nameplate, board readout, library. Right rail: status, ledger, controls.
+Promotion is a modal built from the variant's own `promotes_to` list, so a variant that
+promotes to a unicorn offers a unicorn.
+
+**Promotion now asks.** The session stops and reports a pending promotion rather than
+picking a queen, because "queen" is a guess in a variant that might promote to anything.
+
+**Two fixes worth recording**, both found by looking at a rendered frame:
+
+- The camera framed the board against the whole window, so the rails covered a quarter
+  of it. The board now has its own viewport - the gap the rails leave - and picking uses
+  the same rectangle, or a click would select a different cell than the one under the
+  cursor.
+- Framing used the usual bounding-sphere approximation, which clipped the near rank: a
+  board is a wide flat slab seen at a steep angle, and a sphere is a poor stand-in for
+  what reaches the frustum edges. It now fits the actual corners exactly, in one pass,
+  with a half-cell margin because the bounds describe cell *centres*.
+
+**Seam visualisation**, the gap M4 recorded, is now half closed: a glued face draws a
+cyan edge on the sides the geometry actually identified, so the two halves of a seam can
+be paired by eye. Ghost continuations past a seam and the unfold animation are still to
+come.
+
+### How the interface is verified
+
+`chessbox_gui --shot FILE` renders one frame - board, rails, ledger, promotion state -
+into an image with **no display present**, using SDL's dummy video driver for the window
+the interface needs and the same offscreen target the headless tests use. It exits
+nonzero if the validation layers said anything, and `ctest -R gui-frame` runs it. That
+makes the whole screen reviewable, and regressions in it catchable, on a machine with no
+compositor.

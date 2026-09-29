@@ -44,6 +44,13 @@ struct PieceTypeDef {
   /// Whether moving this piece resets the draw clock. Declared rather than
   /// inferred: "it is a pawn" is not a concept the engine has.
   bool resetsDrawClock{false};
+
+  /// Appearance, declared the same way movement is. \`shape\` names an archetype the
+  /// renderer assembles from primitives; empty means "derive it from the atoms".
+  /// Height is in permille of a pawn, as an integer because this layer is part of the
+  /// deterministic core and may not contain floating point.
+  std::string shape;
+  int heightPermille{0};
 };
 
 /// A multi-piece move template. Castling is the familiar instance, but the shape

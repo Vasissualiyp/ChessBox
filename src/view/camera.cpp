@@ -65,17 +65,55 @@ Mat4 perspective(float fovYRadians, float aspect, float nearZ, float farZ) {
   return m;
 }
 
-OrbitCamera OrbitCamera::frame(const Bounds& b) {
+OrbitCamera OrbitCamera::frame(const Bounds& b, float aspect, float headroom) {
   OrbitCamera cam;
-  cam.target = Vec3{b.centerX(), b.centerY(), b.centerZ()};
-  // Pull back far enough that the bounding sphere fits the vertical field of view, with
-  // just enough margin that nothing touches the edge of the image. The bound is a sphere
-  // around a mostly flat scene, so it already overestimates; adding a generous margin on
-  // top of that wastes most of the frame, which for a board game is the difference
-  // between a readable position and a distant diagram.
-  const float radius = std::max(b.radius(), 1.0f);
-  cam.distance = radius / std::tan(cam.fovY * 0.5f) * 1.15f;
-  cam.farZ = cam.distance + radius * 4.0f + 10.0f;
+  cam.target = Vec3{b.centerX(), b.centerY(), b.centerZ() + headroom * 0.5f};
+
+  // Fit exactly rather than by the usual bounding-sphere approximation, which is what
+  // was clipping the near rank: the board is a wide flat slab seen at a steep angle, so
+  // a sphere around it is a poor stand-in for what actually reaches the frustum edges.
+  //
+  // Moving the camera straight back along its own view direction changes a point's
+  // depth and nothing else, so the exact distance to add can be solved in one pass over
+  // the corners instead of iterated.
+  const float t = std::tan(cam.fovY * 0.5f);
+  // The bounds describe cell *centres*, but a cell is half a cell wide either side of
+  // its centre - without this margin the near rank is clipped.
+  constexpr float kCellMargin = 0.55f;
+  const float minX = b.minX - kCellMargin;
+  const float maxX = b.maxX + kCellMargin;
+  const float minY = b.minY - kCellMargin;
+  const float maxY = b.maxY + kCellMargin;
+  const float corners[8][3] = {{minX, minY, b.minZ},
+                               {maxX, minY, b.minZ},
+                               {minX, maxY, b.minZ},
+                               {maxX, maxY, b.minZ},
+                               {minX, minY, b.maxZ + headroom},
+                               {maxX, minY, b.maxZ + headroom},
+                               {minX, maxY, b.maxZ + headroom},
+                               {maxX, maxY, b.maxZ + headroom}};
+
+  const float radius = std::max(
+      1.0f, length(Vec3{b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ}) * 0.5f);
+  cam.distance = radius / t;  // a starting point; the pass below makes it exact
+
+  const Vec3 eye = cam.eye();
+  const Vec3 forward = normalize(cam.target - eye);
+  const Vec3 right = normalize(cross(forward, Vec3{0, 0, 1}));
+  const Vec3 up = cross(right, forward);
+
+  float extra = 0.0f;
+  for (const auto& c : corners) {
+    const Vec3 rel = Vec3{c[0], c[1], c[2]} - eye;
+    const float depth = dot(rel, forward);
+    const float x = std::abs(dot(rel, right));
+    const float y = std::abs(dot(rel, up));
+    extra = std::max(extra, x / (aspect * t) - depth);
+    extra = std::max(extra, y / t - depth);
+  }
+  // A little air so nothing sits flush against the edge of the frame.
+  cam.distance = (cam.distance + std::max(0.0f, extra)) * 1.04f;
+  cam.farZ = cam.distance + radius * 4.0f + 20.0f;
   return cam;
 }
 

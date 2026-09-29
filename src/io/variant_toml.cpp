@@ -298,6 +298,17 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
     p.symbol = static_cast<char>(std::toupper(sym[0]));
     p.royal = (*t)["royal"].value_or(false);
     p.resetsDrawClock = (*t)["resets_draw_clock"].value_or(false);
+    p.shape = (*t)["shape"].value_or(std::string{});
+    // Height arrives as a multiplier ("1.15") and is stored in permille: the variant
+    // layer is part of the deterministic core and holds no floating point.
+    if (const auto h = (*t)["height"].value<double>()) {
+      p.heightPermille = static_cast<int>(*h * 1000.0 + 0.5);
+      if (p.heightPermille < 200 || p.heightPermille > 4000) {
+        return fail(ErrorCode::ValidationError,
+                    "piece '" + p.name + "': height must be between 0.2 and 4.0",
+                    lineOf(node));
+      }
+    }
     if (const auto* pr = (*t)["promotes_to"].as_array()) {
       for (const auto& x : *pr) promotesTo[p.name].push_back(x.value_or(std::string{}));
     }

@@ -42,3 +42,16 @@ set_tests_properties(perft-slow PROPERTIES LABELS "slow;perft" TIMEOUT 3600)
 add_test(NAME property-slow COMMAND chessbox_tests "[property][slow]")
 set_tests_properties(property-slow PROPERTIES LABELS "slow;property" TIMEOUT 3600)
 set_tests_properties(property PROPERTIES TIMEOUT 900)
+
+# The interface, end to end: the real binary renders one frame - board, rails, ledger,
+# promotion state - into an image with no display present, and fails if the Vulkan
+# validation layers say anything. It is the only automated check that the panels and the
+# board agree about where the board is, and it needs no compositor to run.
+if(TARGET chessbox_gui)
+  add_test(NAME gui-frame
+    COMMAND chessbox_gui standard --shot ${CMAKE_BINARY_DIR}/render-captures/gui.ppm
+            --script "click e2"
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(gui-frame PROPERTIES LABELS "render;gui" TIMEOUT 120
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+endif()

@@ -45,7 +45,8 @@ Result<std::vector<Token>> tokenize(std::string_view text) {
     std::int64_t value = 0;
     const auto* first = word.data();
     const auto* last = word.data() + word.size();
-    if (const auto r = std::from_chars(first, last, value); r.ec == std::errc{} && r.ptr == last) {
+    if (const auto r = std::from_chars(first, last, value);
+        r.ec == std::errc{} && r.ptr == last) {
       out.push_back(Token{Token::Kind::Number, word, value});
     } else {
       out.push_back(Token{Token::Kind::Word, word, 0});
@@ -73,12 +74,18 @@ const std::map<std::string, ExprOp>& nullaryNames() {
 
 const std::map<std::string, ExprOp>& opNames() {
   static const std::map<std::string, ExprOp> m{
-      {"not", ExprOp::Not},       {"and", ExprOp::And},
-      {"or", ExprOp::Or},         {"eq", ExprOp::Eq},
-      {"ne", ExprOp::Ne},         {"lt", ExprOp::Lt},
-      {"gt", ExprOp::Gt},         {"add", ExprOp::Add},
-      {"sub", ExprOp::Sub},       {"type_at", ExprOp::TypeAt},
-      {"color_at", ExprOp::ColorAt}, {"is_empty", ExprOp::IsEmpty},
+      {"not", ExprOp::Not},
+      {"and", ExprOp::And},
+      {"or", ExprOp::Or},
+      {"eq", ExprOp::Eq},
+      {"ne", ExprOp::Ne},
+      {"lt", ExprOp::Lt},
+      {"gt", ExprOp::Gt},
+      {"add", ExprOp::Add},
+      {"sub", ExprOp::Sub},
+      {"type_at", ExprOp::TypeAt},
+      {"color_at", ExprOp::ColorAt},
+      {"is_empty", ExprOp::IsEmpty},
       {"has_capture_from", ExprOp::HasCaptureFrom},
   };
   return m;
@@ -86,14 +93,16 @@ const std::map<std::string, ExprOp>& opNames() {
 
 class Parser {
  public:
-  Parser(const VariantSpec& v, std::vector<Token> tokens) : v_(v), t_(std::move(tokens)) {}
+  Parser(const VariantSpec& v, std::vector<Token> tokens)
+      : v_(v), t_(std::move(tokens)) {}
 
   Result<Expr> parse() {
     auto e = parseOne();
     if (!e.has_value()) return e;
     if (i_ != t_.size()) {
-      return fail(ErrorCode::ParseError,
-                  "trailing text after the expression, starting at '" + t_[i_].text + "'");
+      return fail(
+          ErrorCode::ParseError,
+          "trailing text after the expression, starting at '" + t_[i_].text + "'");
     }
     return e;
   }
@@ -120,8 +129,8 @@ class Parser {
     // immediate rather than an argument.
     if (op == "piece_field" || op == "cell_field" || op == "coord") {
       if (i_ >= t_.size() || t_[i_].kind != Token::Kind::Word) {
-        return fail(ErrorCode::ParseError, "'" + op + "' needs a name first, e.g. (" + op +
-                                               " charge move.to)");
+        return fail(ErrorCode::ParseError,
+                    "'" + op + "' needs a name first, e.g. (" + op + " charge move.to)");
       }
       const std::string name = t_[i_++].text;
       int index = -1;
@@ -136,8 +145,9 @@ class Parser {
         e.op = ExprOp::CoordOf;
       }
       if (index < 0) {
-        return fail(ErrorCode::ValidationError,
-                    "'" + op + "' names '" + name + "', which this variant does not declare");
+        return fail(
+            ErrorCode::ValidationError,
+            "'" + op + "' names '" + name + "', which this variant does not declare");
       }
       e.imm = index;
     } else {
@@ -181,7 +191,8 @@ class Parser {
       const std::string name = word.substr(6);
       if (name == "white") return Expr::constant(static_cast<std::int64_t>(Color::White));
       if (name == "black") return Expr::constant(static_cast<std::int64_t>(Color::Black));
-      return fail(ErrorCode::ValidationError, "colour must be white or black, not '" + name + "'");
+      return fail(ErrorCode::ValidationError,
+                  "colour must be white or black, not '" + name + "'");
     }
     if (word == "empty") return Expr::constant(kNoPiece);
     if (word == "true") return Expr::constant(1);

@@ -21,10 +21,22 @@
             python3 git
           ] ++ lib.optionals stdenv.hostPlatform.isLinux [ valgrind ];
 
-          gfx = with pkgs; [
+          # Dear ImGui with the backends this project actually uses. The default
+          # package ships GLFW and OpenGL only, which are of no use here.
+          imguiSdlVulkan = pkgs.imgui.override {
+            IMGUI_BUILD_SDL3_BINDING = true;
+            IMGUI_BUILD_VULKAN_BINDING = true;
+            IMGUI_BUILD_GLFW_BINDING = false;
+            IMGUI_BUILD_OPENGL3_BINDING = false;
+          };
+
+          gfx = (with pkgs; [
             sdl3 vulkan-headers vulkan-loader vulkan-validation-layers
             vulkan-tools shaderc spirv-tools vulkan-memory-allocator
-          ];
+            # Typefaces are part of the build, not a system dependency: the game
+            # installs its own so it looks the same on every machine.
+            cinzel jetbrains-mono
+          ]) ++ [ imguiSdlVulkan ];
 
           mkShell = extra: pkgs.mkShell {
             packages = core ++ extra;
@@ -37,8 +49,11 @@
             # which is fatal under -Werror. Drop the hardening flag in the shell
             # rather than weakening our own warning settings.
             hardeningDisable = [ "fortify" "fortify3" ];
-            # Catch2/toml++ come from nix, not FetchContent: builds stay hermetic.
-            CMAKE_PREFIX_PATH = "${pkgs.catch2_3}:${pkgs.tomlplusplus}";
+            # CMAKE_PREFIX_PATH is deliberately NOT set here: nix's cmake setup hook
+            # already puts every buildInput on it, and overriding it hides the rest of
+            # them (which is exactly how imgui went missing once).
+            CB_FONT_CINZEL = "${pkgs.cinzel}/share/fonts/truetype";
+            CB_FONT_MONO = "${pkgs.jetbrains-mono}/share/fonts/truetype";
             shellHook = ''
               export CCACHE_DIR="$PWD/.cache/ccache"
               echo "ChessBox dev shell. See AGENTS.md. Presets: dev asan tsan release coverage bench"

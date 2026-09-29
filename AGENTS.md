@@ -34,7 +34,20 @@ nix flake check                  # THE gate: both compilers, sanitizers, coverag
 ./build/dev/src/cli/chessbox                          # interactive
 ./build/dev/src/cli/chessbox "load torus" board moves  # batch; nonzero exit on error
 ./build/release/bench/chessbox_bench                   # release only
+
+# The game. Needs the gfx shell; run from the repo root so variants/ resolves.
+./build/dev/src/gui/chessbox_gui                       # standard chess
+./build/dev/src/gui/chessbox_gui klein                 # any variant in variants/
+./build/dev/src/gui/chessbox_gui cube5 --shot out.ppm --script "click c1"
 ```
+
+**A build directory remembers which shell configured it.** One configured under
+`.#gfx` will not build under the plain shell - the Vulkan and SDL headers are gone.
+Use `.#gfx` for anything touching the renderer, the interface or the GUI.
+
+`--shot` renders one frame - board, rails, ledger, everything - to an image with **no
+display required**, and exits nonzero if the Vulkan validation layers said anything. It
+is how the interface gets reviewed, and `ctest -R gui-frame` runs it.
 
 The CLI is the fastest way to inspect anything: `info` prints a variant's axes,
 geometry and canonicalised atoms; `board` renders N-D boards as labelled slices;
@@ -61,13 +74,13 @@ Each layer is a CMake target linking only to lower layers, so a violation is a
 | Layer | Dir | Holds |
 |---|---|---|
 | L110 | `src/cli` | the scriptable command-line front end |
-| L100 | `src/render` | Vulkan context, offscreen target, instanced board renderer, window |
+| L110 | `src/gui` | the playable window's main loop (exe only) |
+| L100 | `src/render` | Vulkan, offscreen target, instanced renderer, piece meshes, ImGui panels |
 | L95 | `src/app` | interaction: actions in, snapshot out; no front end in it |
 | L90 | `src/io` | variant TOML loader, notation, FEN-N, ASCII board, replay |
 | L80 | `src/game` | history, undo, adjudication, repetition, clocks |
 | L70 | `src/temporal` | turn/timeline axes, present, branching (M6) |
-| L65 | `src/rules` | effect VM: triggers, conditions, effects (M5) |
-| L60 | `src/view` | N-D projection, camera, picking, position snapshots |
+| L60 | `src/view` | N-D projection, camera, picking, snapshots, the theme |
 | L50 | `src/movegen` | expansion, ray walk, staged gen, legality, perft |
 | L40 | `src/position` | cells, occupancy, field columns, hash, make/unmake |
 | L30/35 | `src/pieces`, `src/variant` | vector-move algebra, resolved `VariantSpec` |
@@ -92,7 +105,9 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | New piece | `variants/*.toml` (data only) | `cb-new-piece` |
 | New variant | `variants/`, goldens, `docs/variants/` | `cb-new-variant` |
 | New topology | `variants/*.toml` geometry block | `cb-new-geometry` |
-| New rule mechanic | `src/rules/` opcode + tests + docs table (M5) | `cb-new-effect` |
+| New rule mechanic | `src/rules/` opcode + tests + docs table | `cb-new-effect` |
+| A piece's look | `variants/*.toml` `shape` / `height` (data only) | `cb-new-piece` |
+| UI colours | `src/view/theme.hpp` - one struct, no renderer changes | |
 | New module in a layer | that layer's dir + CMake edge + test + this table | `cb-new-module` |
 | A decision | `docs/adr/` | `cb-adr` |
 | Perft mismatch | bisect with `divide` against the oracle | `cb-perft-golden` |
@@ -143,5 +158,12 @@ These are the ones that have actually cost time here, not hypotheticals.
   support (1–3 axes), not the dimension count; `docs/plan/M2-nd-generalization.md`
   records the measurement reasoning.
 - `kMaxDims = 8` lives in `src/space/dims.hpp` and nowhere else.
+- **Pieces have no model files.** A shape is assembled from primitives against an
+  archetype (`src/render/piece_mesh.cpp`); a variant may name one, and anything it
+  leaves out is derived from how the piece moves. An unknown name falls back rather
+  than failing - a variant is never unplayable for want of a model.
+- The palette is `view::Theme`, one struct. Retheming must not touch the renderer.
+- Cyan (`rift`) is reserved for geometry that is not flat: seams, wrapped moves, extra
+  axes. Spending it on anything else breaks the one rule a player learns by playing.
 - Debug is pinned to `-O0` because nix injects `-O2`; a Catch2 `[.]`-hidden test still
   runs if a filter matches any of its other tags.

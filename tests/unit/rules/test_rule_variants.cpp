@@ -200,7 +200,8 @@ TEST_CASE("rule execution is deterministic and reversible", "[unit][rules]") {
       // An explosion can end the game abruptly - that is the variant working, not a
       // failure - so a short playout is fine as long as it unwinds exactly.
       if (moves.empty()) break;
-      REQUIRE(g.play(moves[rng.below(static_cast<std::uint32_t>(moves.size()))]).has_value());
+      REQUIRE(
+          g.play(moves[rng.below(static_cast<std::uint32_t>(moves.size()))]).has_value());
       REQUIRE(g.position().hash() == g.position().computeHash());
       hashes.push_back(g.position().hash());
       ++played;
@@ -222,39 +223,51 @@ TEST_CASE("a malformed rule set is rejected with an actionable message",
           "[unit][rules]") {
   const std::string base =
       "name=\"t\"\n[[axis]]\nname=\"file\"\nextent=4\n[[axis]]\nname=\"rank\"\nextent=4\n"
-      "[[piece]]\nname=\"king\"\nsymbol=\"K\"\nroyal=true\n[[piece.move]]\nvector=[1]\nmax=1\n"
+      "[[piece]]\nname=\"king\"\nsymbol=\"K\"\nroyal=true\n[[piece.move]]\nvector=[1]"
+      "\nmax=1\n"
       "[start]\nboard=\"4/4/4/4\"\n";
   struct Case {
     const char* rules;
     const char* fragment;
   };
   const Case cases[] = {
-      {"[[rule]]\nname=\"r\"\nwhen=\"never\"\n[[rule.effect]]\nop=\"destroy\"\nat=\"move.to\"\n",
+      {"[[rule]]\nname=\"r\"\nwhen=\"never\"\n[[rule.effect]]\nop=\"destroy\"\nat=\"move."
+       "to\"\n",
        "'when' must be one of"},
       {"[[rule]]\nname=\"r\"\nwhen=\"on_move_end\"\n", "at least one"},
       {"[[rule]]\nname=\"r\"\nwhen=\"on_move_end\"\n[[rule.effect]]\nop=\"wiggle\"\n",
        "unknown effect"},
       {"[[rule]]\nname=\"r\"\nwhen=\"on_move_end\"\n[[rule.effect]]\nop=\"destroy\"\n",
        "needs 'at'"},
-      {"[[rule]]\nname=\"r\"\nwhen=\"on_move_end\"\n[[rule.effect]]\nop=\"destroy\"\nat=\"(nope)\"\n",
+      {"[[rule]]\nname=\"r\"\nwhen=\"on_move_end\"\n[[rule.effect]]\nop=\"destroy\"\nat="
+       "\"(nope)\"\n",
        "unknown operator"},
-      {"[[rule]]\nname=\"r\"\nwhen=\"on_move_end\"\n[[rule.effect]]\nop=\"destroy\"\nat=\"piece:dragon\"\n",
+      {"[[rule]]\nname=\"r\"\nwhen=\"on_move_end\"\n[[rule.effect]]\nop=\"destroy\"\nat="
+       "\"piece:dragon\"\n",
        "no piece is called"},
-      {"[[rule]]\nname=\"r\"\nwhen=\"on_move_end\"\n[[rule.effect]]\nop=\"transform\"\nat=\"move.to\"\npiece=\"dragon\"\n",
+      {"[[rule]]\nname=\"r\"\nwhen=\"on_move_end\"\n[[rule.effect]]\nop="
+       "\"transform\"\nat=\"move.to\"\npiece=\"dragon\"\n",
        "no piece is called"},
-      {"[[rule]]\nname=\"r\"\nwhen=\"on_move_end\"\n[[rule.effect]]\nop=\"set_piece_field\"\nat=\"move.to\"\nvalue=\"1\"\nfield=\"charge\"\n",
+      {"[[rule]]\nname=\"r\"\nwhen=\"on_move_end\"\n[[rule.effect]]\nop=\"set_piece_"
+       "field\"\nat=\"move.to\"\nvalue=\"1\"\nfield=\"charge\"\n",
        "no field is called"},
-      {"[[rule]]\nname=\"r\"\nwhen=\"on_move_end\"\n[[rule.effect]]\nop=\"forbid_move\"\n",
+      {"[[rule]]\nname=\"r\"\nwhen=\"on_move_end\"\n[[rule.effect]]\nop=\"forbid_"
+       "move\"\n",
        "only means anything under on_move_filter"},
-      {"[[rule]]\nname=\"r\"\nwhen=\"on_move_filter\"\n[[rule.effect]]\nop=\"repeat_turn\"\n",
+      {"[[rule]]\nname=\"r\"\nwhen=\"on_move_filter\"\n[[rule.effect]]\nop=\"repeat_"
+       "turn\"\n",
        "cannot run before the move"},
-      {"[[rule]]\nname=\"r\"\nwhen=\"on_capture\"\n[[rule.effect]]\nop=\"destroy_region\"\nat=\"move.to\"\nradius=9\n",
+      {"[[rule]]\nname=\"r\"\nwhen=\"on_capture\"\n[[rule.effect]]\nop=\"destroy_"
+       "region\"\nat=\"move.to\"\nradius=9\n",
        "radius must be between"},
-      {"[[rule]]\nname=\"r\"\nwhen=\"on_capture\"\n[[rule.effect]]\nop=\"destroy\"\nat=\"cell\"\n",
+      {"[[rule]]\nname=\"r\"\nwhen=\"on_capture\"\n[[rule.effect]]\nop=\"destroy\"\nat="
+       "\"cell\"\n",
        "only be used inside an effect that walks cells"},
-      {"[[rule]]\nname=\"r\"\nwhen=\"on_capture\"\n[[rule.effect]]\nop=\"destroy\"\nat=\"(eq move.to)\"\n",
+      {"[[rule]]\nname=\"r\"\nwhen=\"on_capture\"\n[[rule.effect]]\nop=\"destroy\"\nat="
+       "\"(eq move.to)\"\n",
        "takes 2 argument"},
-      {"[[rule]]\nname=\"r\"\nwhen=\"on_capture\"\n[[rule.effect]]\nop=\"destroy\"\nat=\"(coord nosuch move.to)\"\n",
+      {"[[rule]]\nname=\"r\"\nwhen=\"on_capture\"\n[[rule.effect]]\nop=\"destroy\"\nat="
+       "\"(coord nosuch move.to)\"\n",
        "does not declare"},
   };
   for (const Case& c : cases) {

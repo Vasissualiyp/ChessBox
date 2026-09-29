@@ -97,23 +97,46 @@ TEST_CASE("undo walks the game back", "[unit][app]") {
   REQUIRE(s->message() == "nothing to undo");
 }
 
-TEST_CASE("promotion follows the stated preference", "[unit][app]") {
+TEST_CASE("promotion asks rather than guessing", "[unit][app]") {
   // A bare position with one white pawn a step from promoting.
   const char* kAboutToPromote = "4k3/1P6/8/8/8/8/8/4K3 w - - 0 1";
 
-  SECTION("the default is the last declared piece, which is the queen") {
+  SECTION("with several choices the session stops and asks") {
+    // Choosing silently would be a guess: a variant can promote to pieces nobody
+    // expects, so the player is asked rather than defaulted to a queen.
     auto s = open("standard");
     REQUIRE(s->loadFen(kAboutToPromote).has_value());
     REQUIRE(s->applyScript("click b7\nclick b8").has_value());
+    REQUIRE(s->game().plyCount() == 0);
+    REQUIRE(s->pendingPromotion().active);
+    REQUIRE(s->pendingPromotion().choices.size() == 4);
+
+    // The board is frozen until the choice is made: the move is already committed.
+    REQUIRE(s->applyScript("click a1").has_value());
+    REQUIRE(s->game().plyCount() == 0);
+
+    REQUIRE(s->choosePromotion(s->variant().findPiece("rook")).has_value());
     REQUIRE(s->game().plyCount() == 1);
     REQUIRE(s->game().position().at(cell(*s, "b8")).type ==
-            s->variant().findPiece("queen"));
+            s->variant().findPiece("rook"));
+    REQUIRE_FALSE(s->pendingPromotion().active);
   }
 
-  SECTION("an explicit preference is honoured") {
+  SECTION("cancelling puts the move back") {
+    auto s = open("standard");
+    REQUIRE(s->loadFen(kAboutToPromote).has_value());
+    REQUIRE(s->applyScript("click b7\nclick b8").has_value());
+    s->cancelPromotion();
+    REQUIRE_FALSE(s->pendingPromotion().active);
+    REQUIRE(s->game().plyCount() == 0);
+    REQUIRE(s->selected() == kInvalidCell);
+  }
+
+  SECTION("a standing preference skips the prompt") {
     auto s = open("standard");
     REQUIRE(s->loadFen(kAboutToPromote).has_value());
     REQUIRE(s->applyScript("promote knight\nclick b7\nclick b8").has_value());
+    REQUIRE_FALSE(s->pendingPromotion().active);
     REQUIRE(s->game().position().at(cell(*s, "b8")).type ==
             s->variant().findPiece("knight"));
   }

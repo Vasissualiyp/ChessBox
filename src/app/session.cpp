@@ -74,7 +74,26 @@ Result<std::unique_ptr<Session>> Session::create(VariantSpec variant) {
 
 void Session::refreshView() {
   placements_ = view::layout(variant_->dims, viewCfg_);
-  camera_ = view::OrbitCamera::frame(view::boundsOf(placements_));
+  // Framed for the shape of the area the board is drawn into, which the interface
+  // narrows with its rails - not for the whole window.
+  camera_ = view::OrbitCamera::frame(view::boundsOf(placements_), boardAspect_);
+}
+
+void Session::setBoardAspect(float aspect) {
+  if (aspect <= 0.0f || std::abs(aspect - boardAspect_) < 0.01f) return;
+  boardAspect_ = aspect;
+  const float keptDistance = camera_.distance;
+  const float keptYaw = camera_.yaw;
+  const float keptPitch = camera_.pitch;
+  camera_ = view::OrbitCamera::frame(view::boundsOf(placements_), boardAspect_);
+  // A resize re-frames, but whatever the player had turned or zoomed to is theirs to
+  // keep unless the board itself changed.
+  if (framedOnce_) {
+    camera_.distance = keptDistance;
+    camera_.yaw = keptYaw;
+    camera_.pitch = keptPitch;
+  }
+  framedOnce_ = true;
 }
 
 const Move* Session::findMove(CellId from, CellId to) const {
@@ -96,6 +115,45 @@ const Move* Session::findMove(CellId from, CellId to) const {
     }
   }
   return best;
+}
+
+std::vector<PieceTypeId> Session::promotionChoicesFor(CellId from, CellId to) const {
+  std::vector<PieceTypeId> out;
+  for (const Move& m : game_->legalMoves()) {
+    if (m.from != from || m.to != to || m.promoteTo == kNoPiece) continue;
+    if (std::find(out.begin(), out.end(), m.promoteTo) == out.end())
+      out.push_back(m.promoteTo);
+  }
+  return out;
+}
+
+Result<void> Session::playChecked(const Move& m) {
+  const Move chosen = m;  // play() invalidates the legal-move cache the move points into
+  if (auto ok = game_->play(chosen); !ok.has_value()) {
+    return fail(ok.error().code, ok.error().message);
+  }
+  message_ = moveText(*variant_, chosen);
+  selected_ = kInvalidCell;
+  pending_ = PendingPromotion{};
+  refreshSnapshot();
+  return {};
+}
+
+Result<void> Session::choosePromotion(PieceTypeId piece) {
+  if (!pending_.active) return fail(ErrorCode::Internal, "no promotion is pending");
+  for (const Move& m : game_->legalMoves()) {
+    if (m.from == pending_.from && m.to == pending_.to && m.promoteTo == piece) {
+      return playChecked(m);
+    }
+  }
+  return fail(ErrorCode::ValidationError, "that is not one of the promotion choices");
+}
+
+void Session::cancelPromotion() {
+  pending_ = PendingPromotion{};
+  selected_ = kInvalidCell;
+  message_ = "promotion cancelled";
+  refreshSnapshot();
 }
 
 void Session::refreshSnapshot() {
@@ -122,20 +180,25 @@ Result<void> Session::apply(const Action& a) {
       if (a.cell >= variant_->dims.cellCount()) {
         return fail(ErrorCode::OutOfRange, "clicked cell is off the board");
       }
+      // While a promotion is pending the board is frozen: the player has already
+      // committed to the move and owes only the choice of piece.
+      if (pending_.active) return {};
       const Piece piece = game_->position().at(a.cell);
       const bool ownPiece =
           !piece.empty() && piece.colorOf() == game_->position().sideToMove();
 
       if (selected_ != kInvalidCell) {
         if (const Move* m = findMove(selected_, a.cell); m != nullptr) {
-          const Move chosen = *m;  // play() invalidates the legal-move cache
-          if (auto ok = game_->play(chosen); !ok.has_value()) {
-            return fail(ok.error().code, ok.error().message);
+          auto choices = promotionChoicesFor(selected_, a.cell);
+          if (choices.size() > 1 && promotionPreference_.empty()) {
+            // More than one thing the pawn could become and no standing preference:
+            // ask, rather than picking for the player.
+            pending_ = PendingPromotion{true, selected_, a.cell, std::move(choices)};
+            message_ = "choose a piece";
+            refreshSnapshot();
+            return {};
           }
-          message_ = moveText(*variant_, chosen);
-          selected_ = kInvalidCell;
-          refreshSnapshot();
-          return {};
+          return playChecked(*m);
         }
         if (a.cell == selected_) {
           selected_ = kInvalidCell;
@@ -159,6 +222,7 @@ Result<void> Session::apply(const Action& a) {
     }
 
     case ActionKind::Undo:
+      pending_ = PendingPromotion{};
       if (!game_->undo()) {
         message_ = "nothing to undo";
         return {};
@@ -170,6 +234,7 @@ Result<void> Session::apply(const Action& a) {
 
     case ActionKind::Reset:
       game_->reset();
+      pending_ = PendingPromotion{};
       selected_ = kInvalidCell;
       message_ = "reset";
       refreshSnapshot();

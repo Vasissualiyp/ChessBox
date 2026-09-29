@@ -66,7 +66,12 @@ struct OrbitCamera {
   float farZ{1000.0f};
 
   /// Frame the whole laid-out scene, whatever its dimensionality.
-  static OrbitCamera frame(const Bounds& b);
+  ///
+  /// `headroom` is how far the pieces stand above the cells the bounds were measured
+  /// from - a king's crown should not be clipped - and `aspect` is the shape of the
+  /// area the board will actually be drawn into, which is narrower than the window
+  /// once the interface takes its rails.
+  static OrbitCamera frame(const Bounds& b, float aspect = 1.3f, float headroom = 1.4f);
 
   [[nodiscard]] Vec3 eye() const;
   [[nodiscard]] Mat4 viewProj(float aspect) const;

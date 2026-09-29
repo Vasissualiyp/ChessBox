@@ -42,23 +42,48 @@ add_custom_command(OUTPUT ${CB_SPV_HEADER}
 
 set(CB_RENDER_SOURCES
   vulkan_context.cpp offscreen_target.cpp board_renderer.cpp image_io.cpp
+  piece_mesh.cpp
   ${CB_SPV_HEADER})
 
-# SDL3 supplies the window and the surface. Without it the renderer still builds and the
-# headless tests still run - only the playable window is missing.
+# SDL3 supplies the window and the surface; Dear ImGui supplies the panels. Without
+# either, the renderer still builds and the headless tests still run - only the playable
+# window is missing.
 find_package(SDL3 CONFIG)
+find_package(imgui CONFIG)
 if(SDL3_FOUND)
   list(APPEND CB_RENDER_SOURCES window.cpp)
+  if(imgui_FOUND)
+    list(APPEND CB_RENDER_SOURCES ui.cpp)
+  endif()
 endif()
 
 cb_layer(chessbox_render LEVEL 100
   SOURCES ${CB_RENDER_SOURCES}
-  DEPS chessbox_view
+  DEPS chessbox_view chessbox_app
   SYSTEM_DEPS Vulkan::Vulkan)
 target_include_directories(chessbox_render PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/generated)
 if(SDL3_FOUND)
   target_link_libraries(chessbox_render PUBLIC SDL3::SDL3)
   target_compile_definitions(chessbox_render PUBLIC CB_HAVE_SDL=1)
 endif()
+if(SDL3_FOUND AND imgui_FOUND)
+  target_link_libraries(chessbox_render PUBLIC imgui::imgui)
+  target_compile_definitions(chessbox_render PUBLIC CB_HAVE_IMGUI=1)
+endif()
+
+# The game installs its own typefaces so it looks the same on every machine rather than
+# inheriting whatever the system happens to have.
+set(CB_FONT_FILES "")
+if(DEFINED ENV{CB_FONT_CINZEL} AND EXISTS "$ENV{CB_FONT_CINZEL}/Cinzel-Bold.ttf")
+  list(APPEND CB_FONT_FILES "$ENV{CB_FONT_CINZEL}/Cinzel-Bold.ttf")
+endif()
+if(DEFINED ENV{CB_FONT_MONO} AND EXISTS "$ENV{CB_FONT_MONO}/JetBrainsMono-Regular.ttf")
+  list(APPEND CB_FONT_FILES "$ENV{CB_FONT_MONO}/JetBrainsMono-Regular.ttf")
+endif()
+if(CB_FONT_FILES)
+  file(COPY ${CB_FONT_FILES} DESTINATION ${CMAKE_BINARY_DIR}/fonts)
+  install(FILES ${CB_FONT_FILES} DESTINATION share/chessbox/fonts)
+endif()
+
 set(CB_HAVE_VULKAN ON CACHE INTERNAL "")
-set(CB_HAVE_SDL ${SDL3_FOUND} CACHE INTERNAL "")
+set(CB_HAVE_GUI ${SDL3_FOUND} CACHE INTERNAL "")
