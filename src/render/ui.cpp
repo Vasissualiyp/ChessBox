@@ -58,20 +58,44 @@ bool isMenuScreen(app::Screen s) noexcept {
     case app::Screen::Editor:
     case app::Screen::Settings:
     case app::Screen::QuitConfirm:
+    case app::Screen::PauseQuitConfirm:
       return true;
     default:
       return false;
   }
 }
 
+/// How far in the pause branch a screen is: the game is in front (0), pause is a step
+/// back (1), and the reference and quit panels are another step (2). Screens outside the
+/// branch return -1.
+int pauseRank(app::Screen s) noexcept {
+  switch (s) {
+    case app::Screen::Game:
+      return 0;
+    case app::Screen::Paused:
+      return 1;
+    case app::Screen::GameInfo:
+    case app::Screen::PieceMoves:
+    case app::Screen::PauseQuitConfirm:
+      return 2;
+    default:
+      return -1;
+  }
+}
+
 /// Which way the camera travels when moving from one screen to another.
 ///
-/// Usually deeper is simply "a greater screen depth". The quit prompt is the exception:
-/// it is the layer *outside* the menu, not deeper into the game, so opening it backs
-/// out - the same move as returning to the menu - and closing it goes back in.
+/// On the shell's own menus, deeper is "a greater screen depth": opening a panel moves
+/// forward into it. The pause branch is the reverse - the game is in front, pressing
+/// pause steps back, and opening a reference panel steps back again - so there it is the
+/// *lower* rank that is forward. The main-menu quit prompt is the other exception: it
+/// sits outside the menu, so opening it backs out too.
 bool goesDeeper(app::Screen from, app::Screen to) noexcept {
   if (to == app::Screen::QuitConfirm) return false;
   if (from == app::Screen::QuitConfirm) return true;
+  const int fromRank = pauseRank(from);
+  const int toRank = pauseRank(to);
+  if (fromRank >= 0 && toRank >= 0) return toRank < fromRank;
   return app::screenDepth(to) >= app::screenDepth(from);
 }
 
@@ -358,6 +382,10 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
   const ImVec2 decoMax(decoLeft ? split : max.x, max.y);
   menuMin = ImVec2(decoLeft ? split : min.x, min.y);
   menuMax = ImVec2(decoLeft ? max.x : split, max.y);
+  // Remembered so a screen that owns its own object - the piece reference and its move
+  // diagrams - can put it in the same place the deco would have gone.
+  decoMin_ = decoMin;
+  decoMax_ = decoMax;
 
   // A dragging ghost only needs the rectangle: the ground, the field and the arriving
   // object are the arriving screen's to draw, and drawing them twice would double them.
@@ -446,22 +474,32 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
 
   // The board replaces the decorative object here: the object *is* the board.
   dl->AddRectFilled(min, max, u32(t.ink));
-
   bool quiet[kN][kN] = {};
   bool capture[kN][kN] = {};
   const int cx = kN / 2;
   const int cy = kN / 2;
+  // A 2-D preview only has two axes; the variant's forward axis is whichever of them it
+  // declared (standard chess means the rank), and anything else reads as the second.
+  const int orientIndex = editor->orientationAxis() == 0 ? 0 : 1;
   for (const MoveAtom& a : *atoms) {
     if (a.mode == MoveMode::Hop) continue;  // needs a hurdle; none on an empty board
     const std::vector<Direction> dirs =
-        a.oriented ? expandAtomOriented(a.mags, 2, 0, Color::White)
+        a.oriented ? expandAtomOriented(a.mags, 2, static_cast<std::uint8_t>(orientIndex),
+                                        Color::White)
                    : expandAtom(a.mags, 2);
-    const int steps =
-        a.mode == MoveMode::Slide ? kN - 1 : std::min(static_cast<int>(a.maxK), kN - 1);
+    // Step range from the atom's own min/max: a rider runs to the edge, an exact-n
+    // move like a pawn's double step lands only where it says.
+    const int first = std::max(1, static_cast<int>(a.minK));
+    const int last =
+        a.maxK == kUnlimited ? kN - 1 : std::min(static_cast<int>(a.maxK), kN - 1);
     for (const Direction& d : dirs) {
-      for (int n = 1; n <= steps; ++n) {
-        const int x = cx + n * d.v[0];
-        const int y = cy + n * d.v[1];
+      for (int n = first; n <= last; ++n) {
+        // The forward axis is drawn up the screen and the other to the right, so a
+        // forward-only piece reads as moving up, the way a player expects to see it.
+        const auto up = static_cast<std::size_t>(orientIndex);
+        const auto right = static_cast<std::size_t>(orientIndex == 0 ? 1 : 0);
+        const int x = cx + n * d.v[right];
+        const int y = cy - n * d.v[up];
         if (x < 0 || x >= kN || y < 0 || y >= kN) break;
         if (a.capture == CapturePolicy::Must) {
           capture[y][x] = true;
@@ -551,6 +589,9 @@ void Ui::drawGhost(app::Shell& shell) {
     case app::Screen::QuitConfirm:
       (void)buildQuitConfirm(shell);
       break;
+    case app::Screen::PauseQuitConfirm:
+      (void)buildPauseQuitConfirm(shell);
+      break;
     default:
       break;
   }
@@ -591,35 +632,16 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
       return buildEditor(shell);
     case app::Screen::QuitConfirm:
       return buildQuitConfirm(shell);
-    case app::Screen::Settings: {
-      // Opened over a game, the rails stay up so the position behind stays readable.
-      UiRequest out;
-      if (shell.showsBoard()) out = buildGameHud(shell, fps);
-      const UiRequest settings = buildSettings(shell);
-      out.settingsChanged = settings.settingsChanged;
-      out.applyScale = settings.applyScale;
-      out.toggleFullscreen = settings.toggleFullscreen;
-      out.quit = out.quit || settings.quit;
-      return out;
-    }
-    case app::Screen::GameInfo: {
-      UiRequest out = buildGameHud(shell, fps);
-      const UiRequest info = buildGameInfo(shell);
-      out.quit = out.quit || info.quit;
-      return out;
-    }
-    case app::Screen::PieceMoves: {
-      UiRequest out = buildGameHud(shell, fps);
-      const UiRequest moves = buildPieceMoves(shell);
-      out.quit = out.quit || moves.quit;
-      return out;
-    }
-    case app::Screen::Paused: {
-      // No heads-up display behind the pause menu. The readouts are for a player who is
-      // moving; a paused board wants the position visible and nothing else competing
-      // with the menu for the corners.
+    case app::Screen::PauseQuitConfirm:
+      return buildPauseQuitConfirm(shell);
+    case app::Screen::Settings:
+      return buildSettings(shell);
+    case app::Screen::GameInfo:
+      return buildGameInfo(shell);
+    case app::Screen::PieceMoves:
+      return buildPieceMoves(shell);
+    case app::Screen::Paused:
       return buildPause(shell);
-    }
     case app::Screen::Game:
       break;
   }

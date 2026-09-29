@@ -39,6 +39,9 @@ class Editor {
   [[nodiscard]] std::string description() const;
   void setDescription(std::string text);
 
+  /// Index of the variant's orientation axis, or -1. Read by the move preview.
+  [[nodiscard]] int orientationAxis() const;
+
   [[nodiscard]] std::vector<std::string> pieceNames() const;
   [[nodiscard]] Result<std::vector<MoveAtom>> pieceAtoms(std::string_view piece) const;
   [[nodiscard]] Result<void> setPieceAtoms(std::string_view piece,

@@ -58,6 +58,10 @@ class VariantDoc {
   [[nodiscard]] std::string name() const;
   void setName(std::string name);
 
+  /// Index of the axis "forward" is measured along, or -1 when none is declared. The
+  /// piece designer needs it: an oriented atom's forward half depends on it.
+  [[nodiscard]] int orientationAxis() const;
+
  private:
   VariantDoc();
 

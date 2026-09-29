@@ -216,4 +216,8 @@ void VariantDoc::setName(std::string name) {
   impl_->table.insert_or_assign("name", std::move(name));
 }
 
+int VariantDoc::orientationAxis() const {
+  return orientationAxisOf(impl_->table).first;
+}
+
 }  // namespace cb

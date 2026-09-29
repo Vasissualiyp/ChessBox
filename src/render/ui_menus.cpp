@@ -203,6 +203,37 @@ UiRequest Ui::buildQuitConfirm(app::Shell& shell) {
   return request;
 }
 
+UiRequest Ui::buildPauseQuitConfirm(app::Shell& shell) {
+  UiRequest request;
+  const view::Theme& t = theme_;
+  auto* display = static_cast<ImFont*>(fontDisplay_);
+  auto* small = static_cast<ImFont*>(fontSmall_);
+  auto* mono = static_cast<ImFont*>(fontMono_);
+
+  // The pause section's own quit prompt, a step back from the game rather than the main
+  // menu's. Same frame and pane as its neighbours, so it belongs where it is.
+  ImVec2 menuMin, menuMax;
+  drawShellFrame(shell, menuMin, menuMax);
+  const PaneMove move = paneMove();
+  beginPane("##pausequit", menuMin, menuMax, move.scale, move.alpha, px(46.0f),
+            !ghosting_);
+  eyebrow("quit", t, mono, scale_);
+  screenTitle("Leave the game?", t, display, scale_, 1.9f);
+  ImGui::Dummy(ImVec2(0, px(6)));
+  ImGui::PushFont(small);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
+  ImGui::TextWrapped("The window will close and the game in progress will be lost.");
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
+  ImGui::Dummy(ImVec2(0, px(14)));
+
+  if (button("BACK", t, px(150), true, false, true, display)) shell.back();
+  ImGui::SameLine();
+  if (button("QUIT", t, px(110), false, false, true, display)) request.quit = true;
+  endPane();
+  return request;
+}
+
 UiRequest Ui::buildNewGame(app::Shell& shell) {
   UiRequest request;
   const view::Theme& t = theme_;
@@ -327,23 +358,13 @@ UiRequest Ui::buildPause(app::Shell& shell) {
   auto* display = static_cast<ImFont*>(fontDisplay_);
   auto* mono = static_cast<ImFont*>(fontMono_);
 
-  // Pause does not cover the board - the whole point of stepping the camera back and
-  // throwing the position out of focus is that you can still see it. So the menu takes
-  // one side, over a scrim thin enough to read through, and the board stays where it is.
-  const ImGuiViewport* vp = ImGui::GetMainViewport();
-  const ImVec2 vmin = vp->WorkPos;
-  const ImVec2 vmax(vp->WorkPos.x + vp->WorkSize.x, vp->WorkPos.y + vp->WorkSize.y);
-  ImGui::GetBackgroundDrawList()->AddRectFilled(vmin, vmax, u32(t.ink, 0.42f));
-  const float split = vmin.x + (vmax.x - vmin.x) * 0.52f;
+  // Pause is a shell menu a step back from the game, not a panel floating over it: the
+  // same frame, pane and field as every other menu. Stepping back into the game is what
+  // "Continue" does; the board is not kept behind the menu.
+  ImVec2 menuMin, menuMax;
+  drawShellFrame(shell, menuMin, menuMax);
   const PaneMove move = paneMove();
-  beginPane("##pause", ImVec2(split, vmin.y), ImVec2(vmax.x, vmax.y), move.scale,
-            move.alpha, px(46.0f), !ghosting_);
-  // The board keeps the other side, so the position sits clear of the menu rather than
-  // half behind it.
-  request.boardRect[0] = vmin.x;
-  request.boardRect[1] = vmin.y;
-  request.boardRect[2] = split - vmin.x;
-  request.boardRect[3] = vmax.y - vmin.y;
+  beginPane("##pause", menuMin, menuMax, move.scale, move.alpha, px(46.0f), !ghosting_);
   eyebrow(shell.currentVariant().c_str(), t, mono, scale_);
   screenTitle("Paused", t, display, scale_, 1.8f);
   ImGui::Dummy(ImVec2(0, px(8)));
@@ -362,8 +383,10 @@ UiRequest Ui::buildPause(app::Shell& shell) {
   if (menuEntry("Main menu", 5, t, display, width, true, scale_)) {
     shell.go(app::Screen::MainMenu);
   }
+  // A pause-specific confirmation, so quitting from the game keeps the pause section's
+  // own look and step rather than jumping to the main menu's prompt.
   if (menuEntry("Quit", 6, t, display, width, true, scale_)) {
-    shell.go(app::Screen::QuitConfirm);
+    shell.go(app::Screen::PauseQuitConfirm);
   }
   endPane();
   return request;
@@ -456,32 +479,6 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     return request;
   }
 
-  const auto magsText = [](const MoveAtom& a) {
-    std::string s = "[";
-    for (std::size_t i = 0; i < a.mags.size(); ++i) {
-      if (i != 0) s += ",";
-      s += std::to_string(a.mags[i]);
-    }
-    s += "]";
-    return s;
-  };
-  const auto parseMags = [](const char* text, SmallVec<std::int16_t, kMaxDims>& out) {
-    SmallVec<std::int16_t, kMaxDims> m;
-    const char* p = text;
-    while (*p != '\0') {
-      while (*p == ' ' || *p == ',' || *p == '[' || *p == ']' || *p == '\t') ++p;
-      if (*p == '\0') break;
-      char* end = nullptr;
-      const long v = std::strtol(p, &end, 10);
-      if (end == p || v <= 0 || v > 32767 || m.size() >= kMaxDims) return false;
-      m.push(static_cast<std::int16_t>(v));
-      p = end;
-    }
-    if (m.empty()) return false;
-    out = m;
-    return true;
-  };
-
   // ---- header: what is open, whether it is saved, and the edit controls.
   ImGui::PushFont(mono);
   ImGui::PushStyleColor(ImGuiCol_Text, col(editor->dirty() ? t.ember : t.boneDim));
@@ -489,15 +486,15 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   ImGui::PopStyleColor();
   ImGui::PopFont();
   ImGui::Dummy(ImVec2(0, px(4)));
-  if (button("UNDO", t, px(84), false, true, false, display)) editor->undo();
+  if (button("UNDO", t, px(84), false, true, true, display)) editor->undo();
   ImGui::SameLine();
-  if (button("REDO", t, px(84), false, true, false, display)) editor->redo();
+  if (button("REDO", t, px(84), false, true, true, display)) editor->redo();
   ImGui::SameLine();
-  if (button("SAVE", t, px(84), editor->dirty(), false, false, display)) {
+  if (button("SAVE", t, px(84), editor->dirty(), false, true, display)) {
     (void)shell.saveEditor();
   }
   ImGui::SameLine();
-  if (button("HELP", t, px(84), false, true, false, display)) editorPage_ = 2;
+  if (button("HELP", t, px(84), false, true, true, display)) editorPage_ = 2;
   ImGui::Dummy(ImVec2(0, px(8)));
 
   const std::vector<std::string> names = editor->pieceNames();
@@ -538,12 +535,31 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
         ImGui::PushID(static_cast<int>(i));
         ImGui::Text("%2zu", i + 1);
         ImGui::SameLine();
-        char buf[64];
-        std::snprintf(buf, sizeof(buf), "%s", magsText(list[i]).c_str());
-        ImGui::SetNextItemWidth(px(96));
-        if (ImGui::InputText("##vec", buf, sizeof(buf),
-                             ImGuiInputTextFlags_EnterReturnsTrue)) {
-          if (parseMags(buf, list[i].mags)) changed = true;
+        // Each magnitude is a number, edited in place: [1,2] is two ints, and a longer
+        // stride like a knight's [1,3] is typed here rather than offered as a preset.
+        for (std::size_t k = 0; k < list[i].mags.size(); ++k) {
+          ImGui::PushID(static_cast<int>(k) + 1);
+          ImGui::SetNextItemWidth(px(48));
+          int v = list[i].mags[k];
+          if (ImGui::InputInt("##mag", &v, 1, 1)) {
+            list[i].mags[k] = static_cast<std::int16_t>(std::clamp(v, 1, 32767));
+            changed = true;
+          }
+          ImGui::PopID();
+          ImGui::SameLine();
+        }
+        if (ImGui::SmallButton("-")) {
+          if (list[i].mags.size() > 1) {
+            list[i].mags.pop();
+            changed = true;
+          }
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("+")) {
+          if (list[i].mags.size() < kMaxDims) {
+            list[i].mags.push(1);
+            changed = true;
+          }
         }
         int mode = list[i].mode == MoveMode::Slide
                        ? 0
@@ -600,6 +616,10 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
         if (canon.has_value()) list.push_back(*canon);
         changed = true;
       };
+      if (ImGui::SmallButton("+ new [1]")) {
+        addAtom({1}, 1, MoveMode::Leap, CapturePolicy::May, false);
+      }
+      ImGui::SameLine();
       if (ImGui::SmallButton("+ rook [1]inf")) {
         addAtom({1}, kUnlimited, MoveMode::Slide, CapturePolicy::May, false);
       }
@@ -659,24 +679,14 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   app::Settings& s = shell.settings();
   const app::Settings before = s;
 
-  // Opened from the main menu it is a screen of the shell and gets the shell's frame;
-  // opened over a game it is a panel on top of the position, which stays visible.
-  const bool overBoard = shell.showsBoard();
+  // Settings is a shell menu wherever it is opened from: same frame, pane and field as
+  // the main menu. Opened from pause it is a step further back from the game, not a card
+  // on top of it.
   ImVec2 menuMin, menuMax;
-  if (overBoard) {
-    // Clamped to the window: the old fixed plate at a large interface scale ran off the
-    // bottom of the screen and took its footer with it.
-    const ImGuiViewport* vp = ImGui::GetMainViewport();
-    beginPlate("##settings", t,
-               ImVec2(std::min(px(600.0f), vp->WorkSize.x - px(48.0f)),
-                      std::min(px(560.0f), vp->WorkSize.y - px(48.0f))),
-               0.5f);
-  } else {
-    drawShellFrame(shell, menuMin, menuMax);
-    const PaneMove move = paneMove();
-    beginPane("##settings", menuMin, menuMax, move.scale, move.alpha, px(46.0f),
-              !ghosting_);
-  }
+  drawShellFrame(shell, menuMin, menuMax);
+  const PaneMove move = paneMove();
+  beginPane("##settings", menuMin, menuMax, move.scale, move.alpha, px(46.0f),
+            !ghosting_);
   eyebrow("settings", t, mono, scale_);
   screenTitle("Settings", t, display, scale_, 2.0f);
   ImGui::Dummy(ImVec2(0, px(4)));
@@ -830,11 +840,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::PopFont();
   ImGui::EndChild();
   ImGui::PopStyleVar();
-  if (overBoard) {
-    endPlate();
-  } else {
-    endPane();
-  }
+  endPane();
 
   // Persist whenever anything actually moved, rather than on a Save button nobody
   // should have to find.
@@ -870,14 +876,19 @@ UiRequest Ui::buildGameInfo(app::Shell& shell) {
   }
   const VariantSpec& v = session->variant();
 
-  beginPlate("##gameinfo", t, ImVec2(px(620), px(520)), 0.5f);
+  ImVec2 menuMin, menuMax;
+  drawShellFrame(shell, menuMin, menuMax);
+  const PaneMove move = paneMove();
+  beginPane("##gameinfo", menuMin, menuMax, move.scale, move.alpha, px(46.0f),
+            !ghosting_);
   eyebrow("game mode", t, mono, scale_);
   screenTitle(v.name.c_str(), t, display, scale_, 2.0f);
   ImGui::Dummy(ImVec2(0, px(4)));
 
-  ImGui::BeginChild(
-      "##infobody",
-      ImVec2(0, std::max(px(120.0f), ImGui::GetContentRegionAvail().y - px(44.0f))));
+  const float footerH = controlHeight() + px(14.0f);
+  ImGui::BeginChild("##infobody",
+                    ImVec2(0, std::max(px(120.0f), ImGui::GetContentRegionAvail().y -
+                                                       footerH - px(8.0f))));
   heading("BOARD", t, small);
   ImGui::PushFont(small);
   for (std::uint8_t a = 0; a < v.dims.dims(); ++a) {
@@ -930,9 +941,12 @@ UiRequest Ui::buildGameInfo(app::Shell& shell) {
   }
   ImGui::EndChild();
 
-  ImGui::Dummy(ImVec2(0, px(4)));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(8.0f), px(4.0f)));
+  ImGui::BeginChild("##infofooter", ImVec2(0, footerH), ImGuiChildFlags_Border);
   if (button("BACK", t, px(120), true, false, true, display)) shell.back();
-  endPlate();
+  ImGui::EndChild();
+  ImGui::PopStyleVar();
+  endPane();
   return request;
 }
 
@@ -949,62 +963,111 @@ UiRequest Ui::buildPieceMoves(app::Shell& shell) {
   }
   const VariantSpec& v = session->variant();
 
-  beginPlate("##pieces", t, ImVec2(px(700), px(560)), 0.5f);
+  ImVec2 menuMin, menuMax;
+  drawShellFrame(shell, menuMin, menuMax);
+  if (v.pieces.size() <= 1) {
+    pieceMovesPick_ = 0;
+  } else if (pieceMovesPick_ < 1 ||
+             pieceMovesPick_ >= static_cast<int>(v.pieces.size())) {
+    pieceMovesPick_ = 1;
+  }
+
+  // The left half is the screen's object: the move diagram of whichever piece the menu on
+  // the right has selected. Drawing it where a deco would go is what makes the reference
+  // look like every other shell menu.
+  {
+    ImGui::SetNextWindowPos(decoMin_);
+    ImGui::SetNextWindowSize(ImVec2(decoMax_.x - decoMin_.x, decoMax_.y - decoMin_.y));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(24.0f), px(24.0f)));
+    ImGui::Begin("##movediagram", nullptr,
+                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+                     ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar |
+                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings |
+                     ImGuiWindowFlags_NoBackground |
+                     ImGuiWindowFlags_NoBringToFrontOnFocus);
+    const PieceTypeDef& piece = v.pieces[static_cast<std::size_t>(pieceMovesPick_)];
+    ImGui::PushFont(display);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.bone));
+    const std::string caption = upper(piece.name);
+    const float nameW = ImGui::CalcTextSize(caption.c_str()).x;
+    const float availW = ImGui::GetContentRegionAvail().x;
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
+                         std::max(0.0f, (availW - nameW) * 0.5f));
+    ImGui::TextUnformatted(caption.c_str());
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+    ImGui::Dummy(ImVec2(0, px(10)));
+
+    // The diagram draws a fixed 9-cell grid; size it to the room that is left and centre
+    // it rather than letting it sit in a corner.
+    constexpr float kSpan = 9.0f;
+    const ImVec2 avail = ImGui::GetContentRegionAvail();
+    const float cell = std::max(px(8.0f), std::min(avail.x, avail.y) / kSpan * 0.9f);
+    const float side = kSpan * cell;
+    ImGui::SetCursorPos(
+        ImVec2(ImGui::GetCursorPosX() + std::max(0.0f, (avail.x - side) * 0.5f),
+               ImGui::GetCursorPosY() + std::max(0.0f, (avail.y - side) * 0.5f)));
+    drawMoveDiagram(v, piece, t, cell);
+    ImGui::End();
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor();
+  }
+
+  // The right half is the menu: choose a piece, read its atoms.
+  const PaneMove move = paneMove();
+  beginPane("##pieces", menuMin, menuMax, move.scale, move.alpha, px(46.0f), !ghosting_);
   eyebrow("reference", t, mono, scale_);
   screenTitle("Piece moves", t, display, scale_, 1.9f);
   ImGui::PushFont(small);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
-  ImGui::TextUnformatted(
-      "filled dots are reached by sliding, rings by leaping over whatever is between");
+  ImGui::TextUnformatted("the diagram is on the left; pick a piece to read how it moves");
   ImGui::PopStyleColor();
   ImGui::PopFont();
   ImGui::Dummy(ImVec2(0, px(6)));
 
-  ImGui::BeginChild(
-      "##piecebody",
-      ImVec2(0, std::max(px(120.0f), ImGui::GetContentRegionAvail().y - px(44.0f))));
+  const float footerH = controlHeight() + px(14.0f);
+  ImGui::BeginChild("##piecebody",
+                    ImVec2(0, std::max(px(120.0f), ImGui::GetContentRegionAvail().y -
+                                                       footerH - px(8.0f))));
   for (std::size_t i = 1; i < v.pieces.size(); ++i) {
     const PieceTypeDef& piece = v.pieces[i];
+    const bool selected = static_cast<int>(i) == pieceMovesPick_;
     ImGui::PushID(static_cast<int>(i));
-    ImGui::BeginGroup();
-    drawMoveDiagram(v, piece, t, px(15.0f));
-    ImGui::EndGroup();
-    ImGui::SameLine();
-
-    ImGui::BeginGroup();
-    ImGui::PushFont(display);
-    ImGui::PushStyleColor(ImGuiCol_Text, col(t.bone));
-    ImGui::Text("%s", upper(piece.name).c_str());
-    ImGui::PopStyleColor();
-    ImGui::PopFont();
-
-    ImGui::PushFont(small);
-    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
-    ImGui::Text("symbol %c%s%s", piece.symbol, piece.royal ? "  -  royal" : "",
-                piece.promotesTo.empty() ? "" : "  -  promotes");
-    ImGui::Text("drawn as a %s", std::string(archetypeName(archetypeFor(piece))).c_str());
-    ImGui::PopStyleColor();
-
-    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
-    for (const MoveAtom& atom : piece.atoms) {
-      const std::uint32_t count = atom.dirCount(Color::White);
-      ImGui::Text("%s  ->  %u direction%s", atom.toString().c_str(), count,
-                  count == 1 ? "" : "s");
+    ImGui::PushStyleColor(ImGuiCol_Text, col(selected ? t.ember : t.bone));
+    if (ImGui::Selectable(upper(piece.name).c_str(), selected)) {
+      pieceMovesPick_ = static_cast<int>(i);
     }
     ImGui::PopStyleColor();
-    ImGui::PopFont();
-    ImGui::EndGroup();
-
     ImGui::PopID();
-    ImGui::Dummy(ImVec2(0, px(6)));
-    ImGui::Separator();
-    ImGui::Dummy(ImVec2(0, px(2)));
   }
+
+  // The selected piece's own atoms, under the list that chose it.
+  const PieceTypeDef& sel = v.pieces[static_cast<std::size_t>(pieceMovesPick_)];
+  ImGui::Dummy(ImVec2(0, px(10)));
+  heading("MOVES", t, small);
+  ImGui::PushFont(small);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::Text("symbol %c%s%s", sel.symbol, sel.royal ? "  -  royal" : "",
+              sel.promotesTo.empty() ? "" : "  -  promotes");
+  ImGui::Text("drawn as a %s", std::string(archetypeName(archetypeFor(sel))).c_str());
+  ImGui::PopStyleColor();
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
+  for (const MoveAtom& atom : sel.atoms) {
+    const std::uint32_t count = atom.dirCount(Color::White);
+    ImGui::Text("%s  ->  %u direction%s", atom.toString().c_str(), count,
+                count == 1 ? "" : "s");
+  }
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
   ImGui::EndChild();
 
-  ImGui::Dummy(ImVec2(0, px(4)));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(8.0f), px(4.0f)));
+  ImGui::BeginChild("##piecesfooter", ImVec2(0, footerH), ImGuiChildFlags_Border);
   if (button("BACK", t, px(120), true, false, true, display)) shell.back();
-  endPlate();
+  ImGui::EndChild();
+  ImGui::PopStyleVar();
+  endPane();
   return request;
 }
 

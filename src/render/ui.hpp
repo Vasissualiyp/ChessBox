@@ -120,6 +120,7 @@ class Ui {
   UiRequest buildSettings(app::Shell& shell);
   UiRequest buildEditor(app::Shell& shell);
   UiRequest buildQuitConfirm(app::Shell& shell);
+  UiRequest buildPauseQuitConfirm(app::Shell& shell);
   UiRequest buildGameInfo(app::Shell& shell);
   UiRequest buildPieceMoves(app::Shell& shell);
 
@@ -156,6 +157,13 @@ class Ui {
   /// True only while drawGhost is building the departing pane, so drawShellFrame skips
   /// the background it already drew and beginPane uses the departing move.
   bool ghosting_{false};
+  /// The half of the frame the object owns, remembered by drawShellFrame so a screen can
+  /// put its own thing there: the piece reference draws its move diagrams, not a deco.
+  ImVec2 decoMin_{0, 0};
+  ImVec2 decoMax_{0, 0};
+  /// Which piece the piece-moves reference shows on its left. View state, like the
+  /// editor's selected piece.
+  int pieceMovesPick_{0};
   /// The decoration of the screen being left, and which way the camera is going. One
   /// clock (`enter_`) drives the arriving object, the leaving ghost, the menu pane and
   /// the field, so none of them can disagree about where the camera is.

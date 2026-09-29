@@ -90,6 +90,10 @@ std::string Editor::description() const {
   return doc_.description();
 }
 
+int Editor::orientationAxis() const {
+  return doc_.orientationAxis();
+}
+
 void Editor::setDescription(std::string text) {
   (void)edit([&](VariantDoc& d) -> Result<void> {
     d.setDescription(std::move(text));
