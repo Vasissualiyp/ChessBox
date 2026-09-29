@@ -3,5 +3,5 @@ find_package(tomlplusplus REQUIRED)
 
 cb_layer(chessbox_io LEVEL 90
   SOURCES notation.cpp fen.cpp variant_toml.cpp ascii_board.cpp
-  DEPS chessbox_movegen
+  DEPS chessbox_movegen chessbox_view chessbox_game
   SYSTEM_DEPS tomlplusplus::tomlplusplus)

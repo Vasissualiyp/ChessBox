@@ -185,7 +185,7 @@ TEST_CASE("every test source is registered under a CTest label", "[arch]") {
     const std::string rel = fs::relative(f, kRoot / "tests").string();
     const std::string top = rel.substr(0, rel.find(fs::path::preferred_separator));
     const std::set<std::string> known{"unit", "property", "golden", "perft",
-                                      "arch", "support",  "oracle"};
+                                      "arch", "support",  "oracle", "render"};
     CAPTURE(rel);
     REQUIRE(known.contains(top));
   }

@@ -99,3 +99,72 @@ renderer code.
 5. Layout golden tests pass for 2-D..6-D; layout injectivity property holds.
 6. Move ghosts equal engine-generated moves for every shipped topology.
 7. Headless action-log tests cover select/move/promote/undo/variant-switch.
+
+---
+
+## Status: complete for its stated scope, with three deviations
+
+Recorded 2026-09-28.
+
+| Item | Status |
+|---|---|
+| M4.1 foundation | Done: Vulkan 1.3, dynamic rendering, synchronization2, validation-as-errors |
+| M4.2 engine/renderer boundary | Done: `view::PositionView` snapshots, isolation asserted by test |
+| M4.3 instanced rendering | Done: one draw call for the whole board, cells and pieces as instances |
+| M4.4 N-D projection | Done in `view::layout`, shared with the ASCII board, golden-tested to 6 axes |
+| M4.5 seam visualisation | **Not done** - see below |
+| M4.6 interaction | Done: `app::Session`, scripted action logs, pixel→cell picking |
+| M4.7 scope boundary | Held: one material, no shadows, no post-processing, no meshes |
+
+### Deviation 1: no VMA
+
+ADR-0006 named the Vulkan Memory Allocator. The renderer makes about five allocations -
+two images, three buffers - so a sub-allocator would be a dependency carrying no weight.
+Allocation goes through one helper and `VulkanContext::findMemoryType`, so introducing
+VMA later is a change in one place. Revisit when assets arrive (M8) and the allocation
+count stops being a handful.
+
+### Deviation 2: CPU picking rather than instance-id readback
+
+Recorded in ADR-0011. The short version: cells are axis-aligned boxes at known
+positions, so a ray-box test is exact, needs no GPU, and makes the whole click path
+testable headlessly - which an id-buffer readback would not be.
+
+### Deviation 3: the camera lives in `view`, not `render`
+
+It is presentation maths with no Vulkan in it. Putting it below the renderer means
+framing and picking are testable, and a front end can use them, with no graphics device.
+
+### The gap: seam visualisation
+
+M4.5 asked for seams to be drawn and for wrap previews. Not implemented. Glued boards
+render correctly and their legal moves highlight correctly - including moves that wrap,
+because highlights come from the engine rather than from the renderer's own idea of
+geometry, which `tests/unit/app` asserts. What is missing is the *explanation*: nothing
+on screen says that the a-file and the h-file are the same edge. `Geometry::faceTransform`
+already exposes the seam descriptors, so this is renderer work, not engine work.
+
+Playing a Klein bottle without it is genuinely hard, so this should land before anyone is
+asked to play one seriously.
+
+### Also delivered here, because M4 needed it
+
+`src/game` (L80) - history, undo, repetition, and result adjudication with the
+stalemate policy the variant declares. It was in the M1 plan and was skipped; the CLI
+had been keeping its own history instead. `app::Session` needed a real one.
+
+### Acceptance facts
+
+1. Standard chess, Raumschach-style `cube5`, 4-D `hyper4` and Klein-bottle boards all
+   render and are playable through the session layer. **Holds** - though "playable" here
+   means the interaction layer, which the windowed front end drives; only the window
+   itself is untested, by necessity.
+2. 60 fps at 1e6 cells. **Not measured.** No benchmark for the renderer exists yet;
+   the draw-call count is O(1) in board size by construction, but that is an argument,
+   not a measurement.
+3. Zero validation errors in a full session. **Holds** for every shipped variant, as a test.
+4. Snapshot isolation. **Holds.** TSan is still not meaningful - nothing is threaded yet.
+5. Layout goldens for 2-D..6-D and injectivity. **Holds.**
+6. Move ghosts equal engine moves. **Holds structurally**: highlights come from
+   `Game::legalMoves`, and the renderer has no move logic to disagree with.
+7. Headless action-log tests for select/move/promote/undo/variant-switch. **Holds.**

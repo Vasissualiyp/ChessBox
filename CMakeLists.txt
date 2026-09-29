@@ -49,3 +49,10 @@ if(CB_BUILD_BENCH)
 endif()
 
 cb_write_layer_manifest(${CMAKE_BINARY_DIR}/layers.manifest)
+
+# Variant definitions are data the binary needs at runtime, so they are installed
+# alongside it. Without an install rule at all, `nix flake check` fails at the install
+# phase even though every test passed - which is exactly what happened.
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/variants/
+        DESTINATION share/chessbox/variants
+        FILES_MATCHING PATTERN "*.toml")

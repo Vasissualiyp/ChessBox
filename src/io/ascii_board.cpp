@@ -3,6 +3,8 @@
 
 #include <vector>
 
+#include "view/layout.hpp"
+
 namespace cb {
 namespace {
 
@@ -30,25 +32,24 @@ std::string renderBoard(const Position& p, const AsciiView& view) {
   const std::uint8_t ax = view.axisX < n ? view.axisX : 0;
   const std::uint8_t ay = view.axisY < n && view.axisY != ax ? view.axisY : ax;
 
-  // Axes that are neither screen axis become the outer slice loop.
-  std::vector<std::uint8_t> outer;
+  // Slices come from the shared projection layer, so the text view and the renderer
+  // cannot disagree about which sub-boards exist or in what order.
+  view::ViewConfig cfg;
+  cfg.screenAxes.push(ax);
+  if (ay != ax) cfg.screenAxes.push(ay);
   for (std::uint8_t a = 0; a < n; ++a) {
-    if (a != ax && a != ay) outer.push_back(a);
+    if (a != ax && a != ay) cfg.gridAxes.push(a);
   }
-  std::vector<std::int16_t> at(n, 0);
+  const std::vector<view::Slice> slices = view::enumerateSlices(d, cfg);
 
   std::string out;
   const int rowLabelWidth = d.extent(ay) <= 9 ? 1 : 3;
 
-  const auto renderSlice = [&] {
-    if (!outer.empty() && view.labels) {
-      out += "slice";
-      for (std::uint8_t a : outer) {
-        out += ' ';
-        out += d.name(a);
-        out += '=';
-        out += std::to_string(at[a]);
-      }
+  for (std::size_t si = 0; si < slices.size(); ++si) {
+    const view::Slice& slice = slices[si];
+    if (!cfg.gridAxes.empty() && view.labels) {
+      out += "slice ";
+      out += slice.label(d, cfg);
       out += '\n';
     }
     for (int y = d.extent(ay) - 1; y >= 0; --y) {
@@ -60,7 +61,9 @@ std::string renderBoard(const Position& p, const AsciiView& view) {
       }
       for (int x = 0; x < d.extent(ax); ++x) {
         Coord c(n);
-        for (std::uint8_t a = 0; a < n; ++a) c.c[a] = at[a];
+        for (std::size_t i = 0; i < cfg.gridAxes.size(); ++i) {
+          c.c[cfg.gridAxes[i]] = slice.at[i];
+        }
         c.c[ax] = static_cast<std::int16_t>(x);
         c.c[ay] = static_cast<std::int16_t>(y);
         out += glyph(v, p.at(d.toCell(c)), view.empty);
@@ -76,28 +79,9 @@ std::string renderBoard(const Position& p, const AsciiView& view) {
       }
       out += '\n';
     }
-  };
-
-  if (outer.empty()) {
-    renderSlice();
-    return out;
+    if (si + 1 < slices.size()) out += '\n';
   }
-
-  // Odometer over the non-screen axes, lowest axis fastest.
-  for (;;) {
-    renderSlice();
-    std::size_t i = 0;
-    for (;; ++i) {
-      if (i >= outer.size()) return out;
-      const std::uint8_t a = outer[i];
-      if (at[a] + 1 < d.extent(a)) {
-        ++at[a];
-        break;
-      }
-      at[a] = 0;
-    }
-    out += '\n';
-  }
+  return out;
 }
 
 }  // namespace cb

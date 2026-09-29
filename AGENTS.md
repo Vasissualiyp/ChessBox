@@ -60,17 +60,23 @@ Each layer is a CMake target linking only to lower layers, so a violation is a
 
 | Layer | Dir | Holds |
 |---|---|---|
-| L10 | `src/cli` `src/render` `src/net` `src/app` | frontends |
-| L9 | `src/io` | variant TOML loader, notation, FEN-N, replay, packaging |
-| L8 | `src/game` | history, undo, adjudication, repetition, clocks |
-| L7 | `src/temporal` | turn/timeline axes, present, branching |
-| L6 | `src/rules` | effect VM: triggers, conditions, effects |
-| L5 | `src/movegen` | expansion, ray walk, staged gen, legality, perft |
-| L4 | `src/position` | cells, occupancy, field columns, hash, make/unmake |
-| L3 | `src/pieces`, `src/variant` | vector-move algebra, resolved `VariantSpec` |
-| L2 | `src/geometry` | identifications, transition group, transport |
-| L1 | `src/space` | `DimSpec`, `Coord`, `Direction`, strides, `CellId` |
-| L0 | `src/base`, `src/diag` | containers, arenas, `Result`, bitsets, RNG, Zobrist, tracing |
+| L110 | `src/cli` | the scriptable command-line front end |
+| L100 | `src/render` | Vulkan context, offscreen target, instanced board renderer, window |
+| L95 | `src/app` | interaction: actions in, snapshot out; no front end in it |
+| L90 | `src/io` | variant TOML loader, notation, FEN-N, ASCII board, replay |
+| L80 | `src/game` | history, undo, adjudication, repetition, clocks |
+| L70 | `src/temporal` | turn/timeline axes, present, branching (M6) |
+| L65 | `src/rules` | effect VM: triggers, conditions, effects (M5) |
+| L60 | `src/view` | N-D projection, camera, picking, position snapshots |
+| L50 | `src/movegen` | expansion, ray walk, staged gen, legality, perft |
+| L40 | `src/position` | cells, occupancy, field columns, hash, make/unmake |
+| L30/35 | `src/pieces`, `src/variant` | vector-move algebra, resolved `VariantSpec` |
+| L20 | `src/geometry` | identifications, transition group, transport |
+| L10 | `src/space` | `DimSpec`, `Coord`, `Direction`, strides, `CellId` |
+| L0/5 | `src/base`, `src/diag` | containers, arenas, `Result`, bitsets, RNG, Zobrist, tracing |
+
+Levels must be unique; an arch test enforces it. `src/view` and above may use floating
+point, the layers below may not - that boundary is the whole point of where `view` sits.
 
 ## Three representations of "a square" — get this right (ARCH §2)
 

@@ -28,6 +28,11 @@
 
           mkShell = extra: pkgs.mkShell {
             packages = core ++ extra;
+            # Validation layers are only discoverable if their manifest directory is on
+            # the layer path, and a renderer without validation is a renderer whose
+            # bugs surface as corrupted pixels instead of as messages.
+            VK_LAYER_PATH =
+              "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";
             # Debug builds are -O0, and _FORTIFY_SOURCE emits a #warning there -
             # which is fatal under -Werror. Drop the hardening flag in the shell
             # rather than weakening our own warning settings.
@@ -53,10 +58,11 @@
           buildInputs = with pkgs; [ catch2_3 tomlplusplus ];
           cmakeBuildType = "Release";
           doCheck = true;
-          # The deep perft counts and the wide property sweep are tagged [slow] and
-          # run as their own labels; a hermetic build checks everything else.
+          # Everything but the deep perft counts, which take minutes and are their own
+          # label. The wide property sweep is included: it is the test most likely to
+          # catch a real generalization bug, and it costs about two minutes.
           checkPhase = ''
-            ctest --output-on-failure -L 'unit|property|golden|arch' -E '^slow'
+            ctest --output-on-failure -L 'unit|property|golden|arch'
           '';
           meta = with pkgs.lib; {
             description = "Generalizable FOSS sandbox for chess-like variants";
@@ -68,7 +74,7 @@
 
       checks = forAll (pkgs: {
         # `nix flake check` is the gate. Keep it honest: it builds and tests.
-        build = self.packages.${pkgs.system}.default;
+        build = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
       });
 
       formatter = forAll (pkgs: pkgs.nixpkgs-fmt);

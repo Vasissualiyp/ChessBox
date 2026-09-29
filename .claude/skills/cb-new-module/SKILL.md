@@ -43,9 +43,10 @@ cb_layer(chessbox_<layer> LEVEL <n>
   DEPS chessbox_<lower> ...)
 ```
 
-Levels are spaced out (base 0, diag 5, space 10, geometry 20, pieces 30,
-variant 35, position 40, movegen 50, rules 60, temporal 70, game 80, io 90,
-cli/render/net 100) so a layer can be inserted without renumbering. Add
+Levels are spaced out and **must be unique** - an arch test asserts it, because two
+layers at the same level means the map no longer defines an order. Current levels:
+base 0, diag 5, space 10, geometry 20, pieces 30, variant 35, position 40, movegen 50,
+view 60, rules 65, temporal 70, game 80, io 90, app 95, render 100, cli 110. Add
 `add_subdirectory(<layer>)` to `src/CMakeLists.txt` **in bottom-up order** -
 `cb_layer()` requires dependencies to be declared before their users.
 

@@ -9,11 +9,11 @@ namespace cb {
 
 /// How to flatten an N-dimensional board onto a 2-D page.
 ///
-/// Two axes are drawn as a grid; every remaining axis becomes an outer loop, so the
-/// output is a sequence of labelled 2-D slices. This is the same projection model the
-/// Vulkan renderer will use - screen axes plus a laid-out grid of sub-boards (ARCH
-/// section 10) - which is why it lives here and is golden-tested in text rather than
-/// being written twice.
+/// Two axes are drawn as a grid; every remaining axis becomes a slice, exactly as in
+/// `view::ViewConfig`. The slices themselves come from `view::enumerateSlices`, so the
+/// text board and the Vulkan renderer share one definition of the projection (ARCH
+/// section 10) - and it is golden-tested here, in text, where a layout regression is a
+/// failing string comparison rather than a confusing picture.
 struct AsciiView {
   std::uint8_t axisX{0};
   std::uint8_t axisY{1};
