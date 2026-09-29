@@ -381,6 +381,31 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   const PaneMove move = paneMove();
   beginPane("##editor", menuMin, menuMax, move.scale, move.alpha, px(46.0f), !ghosting_);
   eyebrow("editor", t, mono, scale_);
+
+  // The editor's home: choose which designer. The piece designer is built; the board
+  // designer is not, so it is offered but does nothing yet.
+  if (editorPage_ == 0) {
+    screenTitle("Editor", t, display, scale_, 1.9f);
+    ImGui::PushFont(small);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
+    ImGui::TextWrapped(
+        "A variant is already data - axes, geometry, pieces and rules in one file. "
+        "These designers write that file for you.");
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+    ImGui::Dummy(ImVec2(0, px(12)));
+    const float homeWidth = ImGui::GetContentRegionAvail().x;
+    if (menuEntry("Piece designer", 1, t, display, homeWidth, true, scale_)) {
+      editorPage_ = 1;
+    }
+    if (menuEntry("Board designer", 2, t, display, homeWidth, true, scale_)) {
+    }
+    ImGui::Dummy(ImVec2(0, px(10)));
+    if (button("BACK", t, px(120), false, false, true, display)) shell.back();
+    endPane();
+    return request;
+  }
+
   screenTitle("Piece designer", t, display, scale_, 1.9f);
 
   app::Editor* editor = shell.editor();
@@ -391,7 +416,7 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     ImGui::PopStyleColor();
     ImGui::PopFont();
     ImGui::Dummy(ImVec2(0, px(10)));
-    if (button("BACK", t, px(120), false, false, true, display)) shell.back();
+    if (button("BACK", t, px(120), false, false, true, display)) editorPage_ = 0;
     endPane();
     return request;
   }
@@ -583,7 +608,7 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   }
 
   ImGui::Dummy(ImVec2(0, px(10)));
-  if (button("BACK", t, px(120), false, false, true, display)) shell.back();
+  if (button("BACK", t, px(120), false, false, true, display)) editorPage_ = 0;
   endPane();
   return request;
 }
@@ -602,7 +627,13 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   const bool overBoard = shell.showsBoard();
   ImVec2 menuMin, menuMax;
   if (overBoard) {
-    beginPlate("##settings", t, ImVec2(px(600), px(560)), 0.5f);
+    // Clamped to the window: the old fixed plate at a large interface scale ran off the
+    // bottom of the screen and took its footer with it.
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    beginPlate("##settings", t,
+               ImVec2(std::min(px(600.0f), vp->WorkSize.x - px(48.0f)),
+                      std::min(px(560.0f), vp->WorkSize.y - px(48.0f))),
+               0.5f);
   } else {
     drawShellFrame(shell, menuMin, menuMax);
     const PaneMove move = paneMove();
@@ -613,11 +644,13 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   screenTitle("Settings", t, display, scale_, 2.0f);
   ImGui::Dummy(ImVec2(0, px(4)));
 
-  // The body is the one scroller; the panel itself never scrolls, and the height leaves
-  // room for the Back button beneath it so it can never be clipped or hidden.
-  ImGui::BeginChild(
-      "##settingsbody",
-      ImVec2(0, std::max(px(120.0f), ImGui::GetContentRegionAvail().y - px(44.0f))));
+  // The body is the one scroller and takes whatever is left once a footer row's height
+  // has been reserved. The footer is a box of its own below, so its buttons keep their
+  // full height however large the interface scale grows - the body scrolls instead.
+  const float footerH = controlHeight() + px(14.0f);
+  ImGui::BeginChild("##settingsbody",
+                    ImVec2(0, std::max(px(120.0f), ImGui::GetContentRegionAvail().y -
+                                                       footerH - px(8.0f))));
   ImGui::PushItemWidth(px(220));
 
   heading("DISPLAY", t, small);
@@ -738,7 +771,11 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::PopItemWidth();
   ImGui::EndChild();
 
-  ImGui::Dummy(ImVec2(0, px(4)));
+  // A box of its own under the scroller. Reserving its height and drawing it here is what
+  // keeps the buttons whole as the scale grows: the body gives up the room instead, and
+  // scrolls if it must. The border is the box the buttons live in.
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(8.0f), px(4.0f)));
+  ImGui::BeginChild("##settingsfooter", ImVec2(0, footerH), ImGuiChildFlags_Border);
   if (button("BACK", t, px(120), true, false, true, display)) shell.back();
   ImGui::SameLine();
   if (button("RESET TO DEFAULTS", t, px(200), false, false, true, display)) {
@@ -754,6 +791,8 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::TextUnformatted("saved as you change them");
   ImGui::PopStyleColor();
   ImGui::PopFont();
+  ImGui::EndChild();
+  ImGui::PopStyleVar();
   if (overBoard) {
     endPlate();
   } else {

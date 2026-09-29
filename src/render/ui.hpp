@@ -141,6 +141,10 @@ class Ui {
   /// document is what matters and it lives in the shell; which row is highlighted is a
   /// view concern.
   int editorPiece_{0};
+  /// The editor's own page: its home (pick a designer) or the piece designer. Kept here
+  /// rather than as a Screen so stepping into a designer does not change the shell's
+  /// depth - the designers are panes of one screen, not destinations of their own.
+  int editorPage_{0};
   /// The screen being left, kept as a number so its own build can be re-run as a ghost,
   /// and the screen being built now, so `paneMove` knows whether this is a menu move.
   int leavingScreen_{-1};
