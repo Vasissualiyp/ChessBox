@@ -1,0 +1,197 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# atomic - a capture destroys everything around it.
+#
+# Standard chess plus three lines of rules. The piece definitions below are the
+# standard ones, unchanged: what makes this a different game is entirely in the
+# [[rule]] block at the end.
+name = "atomic"
+side_to_move = "white"
+en_passant = true
+stalemate = "draw"
+halfmove_draw_limit = 100
+orientation_axis = "rank"
+
+[[axis]]
+name = "file"
+extent = 8
+
+[[axis]]
+name = "rank"
+extent = 8
+
+[promotion]
+rank = 7
+
+
+[[piece]]
+name = "pawn"
+symbol = "P"
+resets_draw_clock = true
+promotes_to = ["knight", "bishop", "rook", "queen"]
+
+  # A single step forward, which may not capture.
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+  capture = "cannot"
+  forward = true
+
+  # Exactly two steps, sliding (so the intermediate cell must be empty), only
+  # from the home rank, and leaving an en-passant target behind. "min" is what
+  # keeps this from duplicating the single step above.
+  [[piece.move]]
+  vector = [1]
+  min = 2
+  max = 2
+  mode = "slide"
+  capture = "cannot"
+  forward = true
+  from_rank = 1
+  leaves_en_passant = true
+
+  # The diagonal capture: magnitudes {1,1}, forward, capture-only.
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+  capture = "must"
+  forward = true
+
+[[piece]]
+name = "knight"
+symbol = "N"
+
+  [[piece.move]]
+  vector = [1, 2]
+  max = 1
+  mode = "leap"
+
+[[piece]]
+name = "bishop"
+symbol = "B"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "rook"
+symbol = "R"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "queen"
+symbol = "Q"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "king"
+symbol = "K"
+royal = true
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+
+# ---------------------------------------------------------------------------
+# Castling: cell lists rather than "two squares to the right", so the same
+# template shape works in any dimension and on any topology.
+# ---------------------------------------------------------------------------
+
+[[castle]]
+name = "K"
+color = "white"
+king_from = "e1"
+king_to = "g1"
+rook_from = "h1"
+rook_to = "f1"
+empty = ["f1", "g1"]
+safe = ["e1", "f1", "g1"]
+rights_bit = 0
+
+[[castle]]
+name = "Q"
+color = "white"
+king_from = "e1"
+king_to = "c1"
+rook_from = "a1"
+rook_to = "d1"
+empty = ["b1", "c1", "d1"]
+safe = ["e1", "d1", "c1"]
+rights_bit = 1
+
+[[castle]]
+name = "k"
+color = "black"
+king_from = "e8"
+king_to = "g8"
+rook_from = "h8"
+rook_to = "f8"
+empty = ["f8", "g8"]
+safe = ["e8", "f8", "g8"]
+rights_bit = 2
+
+[[castle]]
+name = "q"
+color = "black"
+king_from = "e8"
+king_to = "c8"
+rook_from = "a8"
+rook_to = "d8"
+empty = ["b8", "c8", "d8"]
+safe = ["e8", "d8", "c8"]
+rights_bit = 3
+
+[start]
+board = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
+
+# ---------------------------------------------------------------------------
+# The rules that make it atomic. Three effects in order: the captured piece goes,
+# the capturing piece goes with it, and every non-pawn in the surrounding cells
+# goes too. Pawns are spared, which is what the "affects" filter says.
+#
+# Nothing declares that blowing up a king wins. It does not need to: the engine
+# already requires a move to leave your own royal piece alive and safe, so a
+# capture that destroys your own king is simply not a legal move, and one that
+# destroys the enemy's leaves them with no legal moves at all.
+# ---------------------------------------------------------------------------
+
+[[rule]]
+name = "atomic capture"
+when = "on_capture"
+
+  [[rule.effect]]
+  op = "destroy"
+  at = "move.capture_cell"
+
+  [[rule.effect]]
+  op = "destroy"
+  at = "move.to"
+
+  [[rule.effect]]
+  op = "destroy_region"
+  at = "move.to"
+  radius = 1
+  affects = "(ne (type_at cell) piece:pawn)"

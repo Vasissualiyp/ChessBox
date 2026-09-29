@@ -8,8 +8,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "render/board_renderer.hpp"
-#include "view/camera.hpp"
 #include "support/variants.hpp"
+#include "view/camera.hpp"
 #include "view/layout.hpp"
 
 using namespace cb;
@@ -53,7 +53,8 @@ TEST_CASE("a 2-D board round-trips every cell exactly", "[render][view]") {
     const view::Placement& p = placements[i];
     const Screen s = project(cam, view::Vec3{p.x, p.y, p.z}, 800.0f, 600.0f);
     REQUIRE(s.visible);
-    const int hit = view::pickBox(cam.pickRay(s.x, s.y, 800.0f, 600.0f), placements, half);
+    const int hit =
+        view::pickBox(cam.pickRay(s.x, s.y, 800.0f, 600.0f), placements, half);
     if (hit == static_cast<int>(i)) ++exact;
   }
   // A handful of cells can be clipped by the one in front of them at a grazing angle,
@@ -91,8 +92,8 @@ TEST_CASE("a solid N-D board picks the nearest cell, deterministically",
 
       // The hit must be no further from the camera than the cell we aimed at.
       const view::Vec3 hp{placements[static_cast<std::size_t>(hit)].x,
-                    placements[static_cast<std::size_t>(hit)].y,
-                    placements[static_cast<std::size_t>(hit)].z};
+                          placements[static_cast<std::size_t>(hit)].y,
+                          placements[static_cast<std::size_t>(hit)].z};
       const float dHit = view::length(hp - ray.origin);
       const float dAimed = view::length(view::Vec3{p.x, p.y, p.z} - ray.origin);
       REQUIRE(dHit <= dAimed + 1.0f);
@@ -114,7 +115,7 @@ TEST_CASE("a pick ray aimed at a cell hits a cell", "[render][view]") {
   const Screen s = project(cam, view::Vec3{3.0f, 3.0f, 0.0f}, 800.0f, 600.0f);
   REQUIRE(s.visible);
   REQUIRE(view::pickBox(cam.pickRay(s.x, s.y, 800.0f, 600.0f), placements,
-                  BoardRenderer::cellHalfExtent()) >= 0);
+                        BoardRenderer::cellHalfExtent()) >= 0);
 }
 
 TEST_CASE("the camera frames boards of every dimensionality", "[render][view]") {
@@ -139,7 +140,8 @@ TEST_CASE("the camera frames boards of every dimensionality", "[render][view]") 
 TEST_CASE("matrix helpers obey their algebra", "[render][view]") {
   // A wrong multiplication order here would show up as a board that is mirrored or
   // inside out, which is much harder to diagnose from a picture than from an assertion.
-  const view::Mat4 a = view::lookAt(view::Vec3{3, -4, 5}, view::Vec3{0, 0, 0}, view::Vec3{0, 0, 1});
+  const view::Mat4 a =
+      view::lookAt(view::Vec3{3, -4, 5}, view::Vec3{0, 0, 0}, view::Vec3{0, 0, 1});
   const view::Mat4 p = view::perspective(0.9f, 1.5f, 0.1f, 100.0f);
   const view::Mat4 both = view::multiply(p, a);
   const view::Vec3 point{1, 2, 0.5f};

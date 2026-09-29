@@ -3,6 +3,8 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "position/piece.hpp"
 
@@ -65,8 +67,20 @@ inline bool moveLess(const Move& a, const Move& b) {
   return a.castleIndex < b.castleIndex;
 }
 
+/// One custom-field value as it was before a move changed it.
+struct FieldChange {
+  bool cellField{false};  ///< false = a piece field
+  std::uint16_t index{0};
+  CellId cell{kInvalidCell};
+  std::int32_t oldValue{0};
+};
+
 /// State that a move destroys and unmake must restore. Kept beside the move
 /// rather than inside it so a Move stays a value that can be stored cheaply.
+///
+/// The two vectors stay empty - and therefore allocate nothing - for a variant with no
+/// custom fields and no rules, which is why standard chess keeps its no-allocation
+/// property while an exploding variant can still be undone exactly.
 struct Undo {
   Piece captured{};
   CellId epBefore{kInvalidCell};
@@ -74,6 +88,9 @@ struct Undo {
   std::uint8_t castleRightsBefore{0};
   std::int32_t halfmoveBefore{0};
   std::uint64_t hashBefore{0};
+  /// Cells a rule effect changed, with what stood there before.
+  std::vector<std::pair<CellId, Piece>> cellRestores;
+  std::vector<FieldChange> fieldChanges;
 };
 
 }  // namespace cb

@@ -1,0 +1,155 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# atomic_torus - the atomic rules on a board with no edges.
+#
+# The point of this variant is that it is not a feature. Nobody wrote code to make
+# explosions work on a torus: the rule says "destroy the cells around this one", the
+# geometry decides which cells those are, and an explosion on the h-file therefore
+# wraps onto the a-file automatically. Rules and geometry are orthogonal, and this
+# file is the test of that claim.
+name = "atomic_torus"
+side_to_move = "white"
+en_passant = true
+stalemate = "draw"
+halfmove_draw_limit = 100
+orientation_axis = "rank"
+
+[[axis]]
+name = "file"
+extent = 8
+
+[[axis]]
+name = "rank"
+extent = 8
+
+
+[[piece]]
+name = "pawn"
+symbol = "P"
+resets_draw_clock = true
+
+  # A single step forward, which may not capture.
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+  capture = "cannot"
+  forward = true
+
+  # Exactly two steps, sliding (so the intermediate cell must be empty), only
+  # from the home rank, and leaving an en-passant target behind. "min" is what
+  # keeps this from duplicating the single step above.
+  [[piece.move]]
+  vector = [1]
+  min = 2
+  max = 2
+  mode = "slide"
+  capture = "cannot"
+  forward = true
+  from_rank = 1
+  leaves_en_passant = true
+
+  # The diagonal capture: magnitudes {1,1}, forward, capture-only.
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+  capture = "must"
+  forward = true
+
+[[piece]]
+name = "knight"
+symbol = "N"
+
+  [[piece.move]]
+  vector = [1, 2]
+  max = 1
+  mode = "leap"
+
+[[piece]]
+name = "bishop"
+symbol = "B"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "rook"
+symbol = "R"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "queen"
+symbol = "Q"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "king"
+symbol = "K"
+royal = true
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+
+[[geometry.identify]]
+axis = "file"
+kind = "periodic"
+
+[[geometry.identify]]
+axis = "rank"
+kind = "periodic"
+
+# Four ranks apart: on a torus the usual array puts the back rows in contact.
+[start]
+board = "8/8/8/rnbqkbnr/pppppppp/8/PPPPPPPP/RNBQKBNR"
+
+# ---------------------------------------------------------------------------
+# The rules that make it atomic. Three effects in order: the captured piece goes,
+# the capturing piece goes with it, and every non-pawn in the surrounding cells
+# goes too. Pawns are spared, which is what the "affects" filter says.
+#
+# Nothing declares that blowing up a king wins. It does not need to: the engine
+# already requires a move to leave your own royal piece alive and safe, so a
+# capture that destroys your own king is simply not a legal move, and one that
+# destroys the enemy's leaves them with no legal moves at all.
+# ---------------------------------------------------------------------------
+
+[[rule]]
+name = "atomic capture"
+when = "on_capture"
+
+  [[rule.effect]]
+  op = "destroy"
+  at = "move.capture_cell"
+
+  [[rule.effect]]
+  op = "destroy"
+  at = "move.to"
+
+  [[rule.effect]]
+  op = "destroy_region"
+  at = "move.to"
+  radius = 1
+  affects = "(ne (type_at cell) piece:pawn)"

@@ -45,7 +45,8 @@ Gpu& gpu() {
 
 /// Where debug captures land, so a human can look at what a failing test saw.
 std::filesystem::path capturePath(const std::string& name) {
-  const std::filesystem::path dir = std::filesystem::path(CB_BINARY_DIR) / "render-captures";
+  const std::filesystem::path dir =
+      std::filesystem::path(CB_BINARY_DIR) / "render-captures";
   std::filesystem::create_directories(dir);
   return dir / (name + ".ppm");
 }
@@ -72,7 +73,8 @@ Frame renderVariant(const std::string& name, std::uint32_t w = 512, std::uint32_
   REQUIRE(renderer.has_value());
 
   const view::ViewConfig cfg = view::ViewConfig::forBoard(v.dims);
-  const view::OrbitCamera cam = view::OrbitCamera::frame(view::boundsOf(view::layout(v.dims, cfg)));
+  const view::OrbitCamera cam =
+      view::OrbitCamera::frame(view::boundsOf(view::layout(v.dims, cfg)));
 
   (void)gpu().ctx.takeValidationMessages();  // start from a clean slate
   auto img = renderer->renderToImage(*target, snap, cfg, cam);
@@ -92,7 +94,7 @@ TEST_CASE("a Vulkan device is available and validation is on", "[render][gpu]") 
   REQUIRE_FALSE(gpu().ctx.deviceName().empty());
   WARN("rendering on: " << gpu().ctx.deviceName()
                         << (gpu().ctx.validationEnabled() ? " (validation on)"
-                                                        : " (validation UNAVAILABLE)"));
+                                                          : " (validation UNAVAILABLE)"));
   REQUIRE(gpu().ctx.device() != VK_NULL_HANDLE);
 }
 
@@ -112,7 +114,8 @@ TEST_CASE("instances are built from a snapshot without a GPU", "[render]") {
 
   SECTION("highlighting recolours exactly the cells the engine named") {
     snap.setSelected(v.dims.toCell(Coord::of({4, 1})));
-    snap.setHighlighted({v.dims.toCell(Coord::of({4, 2})), v.dims.toCell(Coord::of({4, 3}))});
+    snap.setHighlighted(
+        {v.dims.toCell(Coord::of({4, 2})), v.dims.toCell(Coord::of({4, 3}))});
     const auto lit = renderer.buildInstances(snap, cfg);
     REQUIRE(lit.size() == instances.size());
 
@@ -198,8 +201,8 @@ TEST_CASE("3-D and 4-D boards render, and look different from each other",
 
 TEST_CASE("every shipped variant renders cleanly", "[render][gpu]") {
   if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
-  for (const char* name : {"standard", "cylinder", "torus", "mobius", "klein", "mirrorbox",
-                           "cube5", "hyper4", "torus3d"}) {
+  for (const char* name : {"standard", "cylinder", "torus", "mobius", "klein",
+                           "mirrorbox", "cube5", "hyper4", "torus3d"}) {
     CAPTURE(name);
     const Frame f = renderVariant(name, 256, 192);
     CAPTURE(f.messages);

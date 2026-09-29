@@ -13,6 +13,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "game/game.hpp"
 #include "io/fen.hpp"
 #include "io/variant_toml.hpp"
 #include "movegen/movegen.hpp"
@@ -97,6 +98,23 @@ TEST_CASE("shipped variant node counts", "[golden][variants]") {
     REQUIRE(gen.perft(p, 1) == c.depth1);
     REQUIRE(gen.perft(p, 2) == c.depth2);
   }
+}
+
+TEST_CASE("rule-carrying variants filter moves at the game level", "[golden][variants]") {
+  // The distinction the table above cannot express: MoveGen produces what the pieces can
+  // do, and Game produces what the *rules* allow. For a forced-capture variant those are
+  // different numbers, and it matters which one a front end asks for.
+  const VariantSpec must = test::loadVariant("mustcapture");
+  auto withCapture = fromFen(must, "4k3/8/3p4/8/4N3/8/8/4K3 w - - 0 1");
+  REQUIRE(withCapture.has_value());
+
+  Game g(must);
+  g.position() = *withCapture;
+  MoveList raw(must.moveUpperBound());
+  MoveGen(must).generateLegal(g.position(), raw);
+
+  REQUIRE(raw.size() > g.legalMoves().size());
+  REQUIRE(g.legalMoves().size() == 1);  // only the knight's capture survives the filter
 }
 
 TEST_CASE("the geometry of each shipped board is what its file claims",

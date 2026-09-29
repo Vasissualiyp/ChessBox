@@ -97,3 +97,71 @@ costs one effect primitive (~100 lines + tests) and is then reusable by everythi
    fuzz-tested to ≥ 1e6 cases with no hang, crash, or unbounded memory.
 5. Atomic-on-Klein and checkers-on-a-torus both work, proving orthogonality.
 6. The quantum ADR is written and merged.
+
+---
+
+## Status: the VM and fields ship; the variant catalogue is partial
+
+Recorded 2026-09-29.
+
+| Item | Status |
+|---|---|
+| M5.1 custom field system | Done: piece and cell columns, hashed, exactly reversible, free when unused |
+| M5.2 VM core | Done: typed tree expressions, ordered rule table, step budget, load-time validation |
+| M5.3 trigger and effect catalogue | Partial - see below |
+| M5.4 target variants | Partial: atomic, atomic-on-a-torus, compulsory captures, custom fields |
+| M5.5 quantum design study | Done, as [ADR-0012](../adr/0012-quantum-chess.md) |
+
+### What shipped
+
+Five triggers (`on_move_filter`, `on_capture`, `on_move_end`, `on_turn_end`,
+`on_result_query`) and nine effects (`destroy`, `destroy_region` with a per-cell filter,
+`transform`, `spawn`, `set_piece_field`, `set_cell_field`, `forbid_move`, `repeat_turn`,
+`end_game`), with an S-expression condition language. Four variants use them, and each
+was chosen to exercise a different part: `atomic` for region effects with a filter,
+`atomic_torus` for composition with geometry, `mustcapture` for pre-legality vetoes, and
+`charged` for fields and rule ordering.
+
+### The design consequence worth recording
+
+**Rules change legality, not just consequences.** In atomic chess a capture that would
+destroy your own king is illegal, and nothing in the variant file says so. Legality is
+now decided *after* a move's effects run: the move is played, its rules fire, and then
+the royal piece is checked. That one change made atomic chess's win condition fall out
+of the existing adjudication with no rule at all.
+
+It has a price: a rule-carrying variant runs its effects once per candidate move, so its
+move generation is markedly slower than a plain variant's. Plain variants are untouched -
+the engine takes the fast path when the rule set is empty.
+
+### Gaps, stated plainly
+
+- **Draughts is not shipped.** `repeat_turn` and `has_capture_from` both exist, and
+  `mustcapture` proves the forced-capture half, but no variant chains them into a
+  multi-jump - so that path is untested and should be assumed broken until a variant
+  uses it. Shipping a "checkers" whose capture chains had never been exercised would be
+  worse than not shipping one.
+- **Regional variants** (makruk, xiangqi's palace and river) are not shipped. The pieces
+  are expressible today; what is missing is region-restricted movement - an atom that
+  only applies inside a declared region. That is an atom-level feature, not a rule-VM
+  one, and it belongs with the vector-move algebra.
+- **Duck chess / neutral pieces** are not shipped: `spawn` exists, but colours are
+  White and Black, with no third party.
+- **Quantum chess** is not achievable with fields, and ADR-0012 explains why rather than
+  leaving it as an unexplained absence.
+
+### Acceptance facts
+
+1. Every shipped rule variant plays correctly with zero C++ added for any of them.
+   **Holds** - the four variants are data only.
+2. A field-carrying variant costs no measurable movegen time versus a plain one.
+   **Not measured**; the columns are allocated only when declared, and the plain path is
+   untouched, but no benchmark exists.
+3. Rule execution is bit-identical across compilers and optimisation levels.
+   **Partially**: determinism is structural (no floats, fixed order, no hash iteration)
+   and the suite passes on gcc and clang, but no test compares rule traces across builds.
+4. A hostile rule set is rejected at load or bounded at runtime. **Holds** for the
+   fourteen rejection cases tested; not fuzzed.
+5. Atomic-on-a-Klein-bottle and checkers-on-a-torus both work. **Half**: atomic on a
+   torus ships and is tested; checkers does not exist.
+6. The quantum ADR is written. **Holds.**

@@ -106,14 +106,16 @@ TEST_CASE("promotion follows the stated preference", "[unit][app]") {
     REQUIRE(s->loadFen(kAboutToPromote).has_value());
     REQUIRE(s->applyScript("click b7\nclick b8").has_value());
     REQUIRE(s->game().plyCount() == 1);
-    REQUIRE(s->game().position().at(cell(*s, "b8")).type == s->variant().findPiece("queen"));
+    REQUIRE(s->game().position().at(cell(*s, "b8")).type ==
+            s->variant().findPiece("queen"));
   }
 
   SECTION("an explicit preference is honoured") {
     auto s = open("standard");
     REQUIRE(s->loadFen(kAboutToPromote).has_value());
     REQUIRE(s->applyScript("promote knight\nclick b7\nclick b8").has_value());
-    REQUIRE(s->game().position().at(cell(*s, "b8")).type == s->variant().findPiece("knight"));
+    REQUIRE(s->game().position().at(cell(*s, "b8")).type ==
+            s->variant().findPiece("knight"));
   }
 
   SECTION("all four promotions are offered as one highlighted destination") {
@@ -191,8 +193,8 @@ TEST_CASE("camera actions stay within sane limits", "[unit][app]") {
 
 TEST_CASE("every shipped variant is playable through the session", "[unit][app]") {
   // The interaction layer must not assume two dimensions, a box board, or pawns.
-  for (const char* name : {"standard", "cylinder", "torus", "mobius", "klein", "mirrorbox",
-                           "cube5", "hyper4", "torus3d"}) {
+  for (const char* name : {"standard", "cylinder", "torus", "mobius", "klein",
+                           "mirrorbox", "cube5", "hyper4", "torus3d"}) {
     CAPTURE(name);
     auto s = open(name);
     REQUIRE(s->game().result() == GameResult::InProgress);

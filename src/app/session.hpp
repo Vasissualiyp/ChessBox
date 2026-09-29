@@ -14,13 +14,13 @@ namespace cb::app {
 
 enum class ActionKind : std::uint8_t {
   None,
-  ClickCell,     ///< the user clicked a cell (already resolved from a pixel)
+  ClickCell,  ///< the user clicked a cell (already resolved from a pixel)
   Undo,
   Reset,
-  Orbit,         ///< dx, dy in radians
-  Zoom,          ///< dx as a multiplier
-  SetScreenAxes, ///< text is a comma-separated axis name list
-  SetPromotion,  ///< text is a piece name
+  Orbit,          ///< dx, dy in radians
+  Zoom,           ///< dx as a multiplier
+  SetScreenAxes,  ///< text is a comma-separated axis name list
+  SetPromotion,   ///< text is a piece name
 };
 
 struct Action {

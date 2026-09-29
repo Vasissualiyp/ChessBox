@@ -1,0 +1,195 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# charged - pieces accumulate charge as they move, and a charged pawn becomes a knight.
+#
+# A demonstration of custom data fields: "charge" is a per-piece integer column that
+# travels with the piece, is part of the position's hash, and is restored exactly by
+# undo. The two rules are ordered, and the order matters - the charge is incremented
+# first, so the threshold below is tested against the new value.
+name = "charged"
+side_to_move = "white"
+en_passant = true
+stalemate = "draw"
+halfmove_draw_limit = 100
+orientation_axis = "rank"
+
+[[axis]]
+name = "file"
+extent = 8
+
+[[axis]]
+name = "rank"
+extent = 8
+
+[promotion]
+rank = 7
+
+[[piece_field]]
+name = "charge"
+default = 0
+min = 0
+max = 8
+
+
+[[piece]]
+name = "pawn"
+symbol = "P"
+resets_draw_clock = true
+promotes_to = ["knight", "bishop", "rook", "queen"]
+
+  # A single step forward, which may not capture.
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+  capture = "cannot"
+  forward = true
+
+  # Exactly two steps, sliding (so the intermediate cell must be empty), only
+  # from the home rank, and leaving an en-passant target behind. "min" is what
+  # keeps this from duplicating the single step above.
+  [[piece.move]]
+  vector = [1]
+  min = 2
+  max = 2
+  mode = "slide"
+  capture = "cannot"
+  forward = true
+  from_rank = 1
+  leaves_en_passant = true
+
+  # The diagonal capture: magnitudes {1,1}, forward, capture-only.
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+  capture = "must"
+  forward = true
+
+[[piece]]
+name = "knight"
+symbol = "N"
+
+  [[piece.move]]
+  vector = [1, 2]
+  max = 1
+  mode = "leap"
+
+[[piece]]
+name = "bishop"
+symbol = "B"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "rook"
+symbol = "R"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "queen"
+symbol = "Q"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "king"
+symbol = "K"
+royal = true
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+
+# ---------------------------------------------------------------------------
+# Castling: cell lists rather than "two squares to the right", so the same
+# template shape works in any dimension and on any topology.
+# ---------------------------------------------------------------------------
+
+[[castle]]
+name = "K"
+color = "white"
+king_from = "e1"
+king_to = "g1"
+rook_from = "h1"
+rook_to = "f1"
+empty = ["f1", "g1"]
+safe = ["e1", "f1", "g1"]
+rights_bit = 0
+
+[[castle]]
+name = "Q"
+color = "white"
+king_from = "e1"
+king_to = "c1"
+rook_from = "a1"
+rook_to = "d1"
+empty = ["b1", "c1", "d1"]
+safe = ["e1", "d1", "c1"]
+rights_bit = 1
+
+[[castle]]
+name = "k"
+color = "black"
+king_from = "e8"
+king_to = "g8"
+rook_from = "h8"
+rook_to = "f8"
+empty = ["f8", "g8"]
+safe = ["e8", "f8", "g8"]
+rights_bit = 2
+
+[[castle]]
+name = "q"
+color = "black"
+king_from = "e8"
+king_to = "c8"
+rook_from = "a8"
+rook_to = "d8"
+empty = ["b8", "c8", "d8"]
+safe = ["e8", "d8", "c8"]
+rights_bit = 3
+
+[start]
+board = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
+
+[[rule]]
+name = "moving charges a piece"
+when = "on_move_end"
+
+  [[rule.effect]]
+  op = "set_piece_field"
+  field = "charge"
+  at = "move.to"
+  value = "(add (piece_field charge move.to) 1)"
+
+[[rule]]
+name = "a thrice-charged pawn becomes a knight"
+when = "on_move_end"
+if = "(and (eq (type_at move.to) piece:pawn) (gt (piece_field charge move.to) 2))"
+
+  [[rule.effect]]
+  op = "transform"
+  at = "move.to"
+  piece = "knight"

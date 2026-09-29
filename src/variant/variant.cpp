@@ -31,6 +31,20 @@ PieceTypeId VariantSpec::findPiece(std::string_view n) const {
   return kNoPiece;
 }
 
+int VariantSpec::findPieceField(std::string_view n) const {
+  for (std::size_t i = 0; i < pieceFields.size(); ++i) {
+    if (pieceFields[i].name == n) return static_cast<int>(i);
+  }
+  return -1;
+}
+
+int VariantSpec::findCellField(std::string_view n) const {
+  for (std::size_t i = 0; i < cellFields.size(); ++i) {
+    if (cellFields[i].name == n) return static_cast<int>(i);
+  }
+  return -1;
+}
+
 PieceTypeId VariantSpec::findPieceBySymbol(char upper) const {
   for (std::size_t i = 1; i < pieces.size(); ++i) {
     if (pieces[i].symbol == upper) return static_cast<PieceTypeId>(i);
@@ -215,6 +229,23 @@ Result<void> VariantSpec::finalize() {
   bound = std::min<std::uint64_t>(bound, 1u << 22);
   moveBound_ = static_cast<std::uint32_t>(std::max<std::uint64_t>(bound, 256));
 
+  // ---- field validation ---------------------------------------------------
+  for (const auto* group : {&pieceFields, &cellFields}) {
+    for (const FieldDecl& f : *group) {
+      if (f.name.empty()) {
+        return fail(ErrorCode::ValidationError, "a custom field needs a name");
+      }
+      if (f.minValue > f.maxValue) {
+        return fail(ErrorCode::ValidationError,
+                    "field '" + f.name + "' has min above max");
+      }
+      if (f.defaultValue < f.minValue || f.defaultValue > f.maxValue) {
+        return fail(ErrorCode::ValidationError,
+                    "field '" + f.name + "' has a default outside its own range");
+      }
+    }
+  }
+
   // ---- identity ----------------------------------------------------------
   IdHasher h;
   h.add(name);
@@ -270,11 +301,22 @@ Result<void> VariantSpec::finalize() {
   h.add(enPassant ? 1u : 0u);
   h.add(static_cast<std::uint64_t>(stalemate));
   h.add(static_cast<std::uint64_t>(halfmoveDrawLimit));
+  for (const auto* group : {&pieceFields, &cellFields}) {
+    for (const FieldDecl& f : *group) {
+      h.add(f.name);
+      h.add(static_cast<std::uint64_t>(f.defaultValue));
+      h.add(static_cast<std::uint64_t>(f.minValue));
+      h.add(static_cast<std::uint64_t>(f.maxValue));
+      h.add(f.hashed ? 1u : 0u);
+    }
+  }
+  if (ruleSetDigest) h.add(ruleSetDigest());
   variantId_ = h.value();
 
   // Keys depend on the variant id, so two different variants never share a key
   // schedule and a hash always identifies (position, variant) together.
-  zob.init(variantId_, dims.cellCount(), pieceCodes(), 64);
+  zob.init(variantId_, dims.cellCount(), pieceCodes(),
+           static_cast<std::uint32_t>(pieceFields.size() + cellFields.size() + 64));
 
   finalized_ = true;
   return {};

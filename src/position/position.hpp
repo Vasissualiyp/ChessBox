@@ -51,6 +51,23 @@ class Position {
   void setCastleRights(std::uint8_t mask);
   void setClocks(std::int32_t halfmove, std::int32_t fullmove);
 
+  // ---- custom fields -------------------------------------------------------
+  [[nodiscard]] std::int32_t pieceField(int index, CellId c) const {
+    return pieceFields_[static_cast<std::size_t>(index)][c];
+  }
+  [[nodiscard]] std::int32_t cellField(int index, CellId c) const {
+    return cellFields_[static_cast<std::size_t>(index)][c];
+  }
+  /// Set a field, recording the previous value in \`u\` when one is supplied so that the
+  /// change can be undone exactly.
+  void setPieceField(int index, CellId c, std::int32_t value, Undo* u = nullptr);
+  void setCellField(int index, CellId c, std::int32_t value, Undo* u = nullptr);
+
+  /// Overwrite a cell with an exact piece (possibly empty), recording the previous
+  /// occupant. This is the primitive every rule effect that adds, removes or
+  /// transforms a piece is built from.
+  void setCell(CellId c, Piece p, Undo* u = nullptr);
+
   /// Recompute the hash from scratch. The incremental path must always agree with
   /// this; a property test asserts it after every move (M1.3).
   [[nodiscard]] std::uint64_t computeHash() const;
@@ -75,6 +92,9 @@ class Position {
 
   const VariantSpec* v_;
   std::vector<Piece> cells_;
+  /// One column per declared field, indexed by cell. Empty when a variant declares none.
+  std::vector<std::vector<std::int32_t>> pieceFields_;
+  std::vector<std::vector<std::int32_t>> cellFields_;
   BitWords occ_[kNumColors];
   BitWords occAll_;
   Color side_{Color::White};

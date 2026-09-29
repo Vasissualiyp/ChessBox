@@ -9,6 +9,14 @@ Position::Position(const VariantSpec& v)
     : v_(&v), cells_(v.dims.cellCount()), occAll_(v.dims.cellCount()) {
   assert(v.finalized() && "a variant must be finalized before a position uses it");
   for (auto& o : occ_) o.reset(v.dims.cellCount());
+  pieceFields_.resize(v.pieceFields.size());
+  for (std::size_t i = 0; i < pieceFields_.size(); ++i) {
+    pieceFields_[i].assign(v.dims.cellCount(), v.pieceFields[i].defaultValue);
+  }
+  cellFields_.resize(v.cellFields.size());
+  for (std::size_t i = 0; i < cellFields_.size(); ++i) {
+    cellFields_[i].assign(v.dims.cellCount(), v.cellFields[i].defaultValue);
+  }
   side_ = v.startSideToMove;
   hash_ = computeHash();
 }
@@ -25,6 +33,51 @@ Position Position::startPosition(const VariantSpec& v) {
   p.side_ = v.startSideToMove;
   p.hash_ = p.computeHash();
   return p;
+}
+
+void Position::setPieceField(int index, CellId c, std::int32_t value, Undo* u) {
+  auto& col = pieceFields_[static_cast<std::size_t>(index)];
+  const std::int32_t old = col[c];
+  if (old == value) return;
+  if (u != nullptr) {
+    u->fieldChanges.push_back(
+        FieldChange{false, static_cast<std::uint16_t>(index), c, old});
+  }
+  const FieldDecl& decl = v_->pieceFields[static_cast<std::size_t>(index)];
+  if (decl.hashed) {
+    // Only non-default values contribute, so a board with every field at its default
+    // hashes exactly like a board with no fields at all.
+    if (old != decl.defaultValue)
+      hash_ ^= v_->zob.field(static_cast<std::uint32_t>(index), c, old);
+    if (value != decl.defaultValue) {
+      hash_ ^= v_->zob.field(static_cast<std::uint32_t>(index), c, value);
+    }
+  }
+  col[c] = value;
+}
+
+void Position::setCellField(int index, CellId c, std::int32_t value, Undo* u) {
+  auto& col = cellFields_[static_cast<std::size_t>(index)];
+  const std::int32_t old = col[c];
+  if (old == value) return;
+  if (u != nullptr) {
+    u->fieldChanges.push_back(
+        FieldChange{true, static_cast<std::uint16_t>(index), c, old});
+  }
+  const FieldDecl& decl = v_->cellFields[static_cast<std::size_t>(index)];
+  if (decl.hashed) {
+    const auto slot = static_cast<std::uint32_t>(v_->pieceFields.size() +
+                                                 static_cast<std::size_t>(index));
+    if (old != decl.defaultValue) hash_ ^= v_->zob.field(slot, c, old);
+    if (value != decl.defaultValue) hash_ ^= v_->zob.field(slot, c, value);
+  }
+  col[c] = value;
+}
+
+void Position::setCell(CellId c, Piece p, Undo* u) {
+  if (u != nullptr) u->cellRestores.emplace_back(c, cells_[c]);
+  if (!cells_[c].empty()) removePiece(c);
+  if (!p.empty()) addPiece(c, p);
 }
 
 void Position::clear() {
@@ -90,6 +143,23 @@ void Position::setClocks(std::int32_t halfmove, std::int32_t fullmove) {
 
 std::uint64_t Position::computeHash() const {
   std::uint64_t h = 0;
+  for (std::size_t f = 0; f < pieceFields_.size(); ++f) {
+    if (!v_->pieceFields[f].hashed) continue;
+    for (CellId c = 0; c < cells_.size(); ++c) {
+      if (pieceFields_[f][c] != v_->pieceFields[f].defaultValue) {
+        h ^= v_->zob.field(static_cast<std::uint32_t>(f), c, pieceFields_[f][c]);
+      }
+    }
+  }
+  for (std::size_t f = 0; f < cellFields_.size(); ++f) {
+    if (!v_->cellFields[f].hashed) continue;
+    const auto slot = static_cast<std::uint32_t>(pieceFields_.size() + f);
+    for (CellId c = 0; c < cells_.size(); ++c) {
+      if (cellFields_[f][c] != v_->cellFields[f].defaultValue) {
+        h ^= v_->zob.field(slot, c, cellFields_[f][c]);
+      }
+    }
+  }
   for (CellId c = 0; c < cells_.size(); ++c) {
     const Piece p = cells_[c];
     if (!p.empty()) h ^= v_->zob.piece(c, pieceCode(p.type, p.colorOf()));
@@ -117,6 +187,17 @@ void Position::make(const Move& m, Undo& u) {
     assert(!u.captured.empty() && "capturing an empty cell");
     removePiece(m.captureCell);
     resetClock = true;
+  }
+
+  // A piece's fields travel with it, so they move from the origin to the destination and
+  // the origin returns to its default. Recorded so unmake puts them back.
+  for (std::size_t f = 0; f < pieceFields_.size(); ++f) {
+    const std::int32_t carried = pieceFields_[f][m.from];
+    if (carried != v_->pieceFields[f].defaultValue ||
+        pieceFields_[f][m.to] != v_->pieceFields[f].defaultValue) {
+      setPieceField(static_cast<int>(f), m.to, carried, &u);
+      setPieceField(static_cast<int>(f), m.from, v_->pieceFields[f].defaultValue, &u);
+    }
   }
 
   removePiece(m.from);
@@ -156,6 +237,22 @@ void Position::make(const Move& m, Undo& u) {
 }
 
 void Position::unmake(const Move& m, const Undo& u) {
+  // Rule effects and field changes are undone first, in reverse, so the board is back
+  // to what the plain move left before the move itself is reversed.
+  for (std::size_t i = u.cellRestores.size(); i-- > 0;) {
+    const auto& [cell, piece] = u.cellRestores[i];
+    if (!cells_[cell].empty()) removePiece(cell);
+    if (!piece.empty()) addPiece(cell, piece);
+  }
+  for (std::size_t i = u.fieldChanges.size(); i-- > 0;) {
+    const FieldChange& fc = u.fieldChanges[i];
+    if (fc.cellField) {
+      cellFields_[fc.index][fc.cell] = fc.oldValue;
+    } else {
+      pieceFields_[fc.index][fc.cell] = fc.oldValue;
+    }
+  }
+
   setSideToMove(opponent(side_));
   if (side_ == Color::Black) --fullmove_;
 

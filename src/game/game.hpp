@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "movegen/movegen.hpp"
+#include "rules/vm.hpp"
 
 namespace cb {
 
@@ -26,6 +27,7 @@ enum class EndReason : std::uint8_t {
   DrawClock,     ///< the variant's halfmove limit
   Repetition,    ///< the same position three times
   NoLegalMoves,  ///< no royal piece exists, so "checkmate" does not apply
+  RuleDeclared,  ///< a variant rule ended the game
 };
 
 std::string_view toString(EndReason r) noexcept;
@@ -59,6 +61,15 @@ class Game {
   [[nodiscard]] EndReason endReason() const;
   [[nodiscard]] bool inCheck() const;
 
+  /// The variant's rule engine. Empty for variants that declare no rules, in which case
+  /// nothing in the play path touches it at all.
+  [[nodiscard]] const rules::RuleEngine& ruleEngine() const noexcept { return engine_; }
+
+  /// Whether the last move left the same side to move again, as a multi-jump does.
+  [[nodiscard]] bool turnRepeated() const noexcept {
+    return !repeated_.empty() && repeated_.back();
+  }
+
   /// A one-line human-readable status, used by both front ends.
   [[nodiscard]] std::string statusLine() const;
 
@@ -66,9 +77,21 @@ class Game {
   void invalidate();
   [[nodiscard]] int repetitionCount() const;
 
+  /// Does this piece have a capture available? Supplied to the rule VM, which cannot
+  /// generate moves itself (see rules::RuleEnv).
+  [[nodiscard]] bool hasCaptureFrom(CellId c) const;
+  [[nodiscard]] rules::RuleEnv makeEnv(const Move* m, Color mover) const;
+
   const VariantSpec* v_;
   Position pos_;
   MoveGen gen_;
+  rules::RuleEngine engine_;
+  /// Per ply: did a rule keep the turn with the mover?
+  std::vector<bool> repeated_;
+  bool startHasRoyal_{false};
+  bool ruleEnded_{false};
+  rules::Outcome ruleOutcome_{rules::Outcome::Draw};
+  Color ruleOutcomeMover_{Color::White};
   std::vector<Undo> history_;
   std::vector<Move> played_;
   /// Position hashes after every ply, including the starting position, for repetition.

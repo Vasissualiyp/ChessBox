@@ -30,6 +30,22 @@ class Zobrist {
   /// Generic slot, used by hashed custom field columns (M5).
   [[nodiscard]] std::uint64_t extra(std::uint32_t slot) const { return extraKeys_[slot]; }
 
+  /// Key for "custom field `slot` on `cell` holds `value`".
+  ///
+  /// Derived rather than tabulated: a field can hold any 32-bit value, so a table would
+  /// be unbounded. Mixing is SplitMix64, which is deterministic everywhere and has no
+  /// structure a position could accidentally line up with.
+  [[nodiscard]] std::uint64_t field(std::uint32_t slot, std::uint32_t cell,
+                                    std::int32_t value) const {
+    std::uint64_t z = extraKeys_[slot % extraKeys_.size()];
+    z ^= static_cast<std::uint64_t>(cell) * 0x9E3779B97F4A7C15ULL;
+    z ^= static_cast<std::uint64_t>(static_cast<std::uint32_t>(value)) *
+         0xBF58476D1CE4E5B9ULL;
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+    return z ^ (z >> 31);
+  }
+
   [[nodiscard]] bool initialized() const noexcept { return pieceCodes_ != 0; }
   [[nodiscard]] std::uint32_t pieceCodes() const noexcept { return pieceCodes_; }
 

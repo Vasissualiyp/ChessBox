@@ -7,8 +7,11 @@
 
 #include <toml++/toml.hpp>
 
+#include "rules/vm.hpp"
+
 #include "io/fen_order.hpp"
 #include "io/notation.hpp"
+#include "io/rule_parse.hpp"
 
 namespace cb {
 namespace {
@@ -233,6 +236,40 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
       return fail(ErrorCode::ValidationError,
                   "orientation_axis names '" + *oa + "', which is not a declared axis");
     }
+  }
+
+  // ---- custom fields --------------------------------------------------------
+  // Parsed before pieces and rules so that both can refer to them by name.
+  const auto readFields = [&](const char* key,
+                              std::vector<FieldDecl>& out) -> Result<void> {
+    const auto* arr = tbl[key].as_array();
+    if (arr == nullptr) return {};
+    for (const auto& node : *arr) {
+      const auto* t = node.as_table();
+      if (t == nullptr) {
+        return fail(ErrorCode::ValidationError,
+                    std::string("[[") + key + "]] must be a table", lineOf(node));
+      }
+      FieldDecl f;
+      f.name = (*t)["name"].value_or(std::string{});
+      if (f.name.empty()) {
+        return fail(ErrorCode::ValidationError,
+                    std::string("every ") + key + " needs a name", lineOf(node));
+      }
+      f.defaultValue =
+          static_cast<std::int32_t>((*t)["default"].value_or<std::int64_t>(0));
+      f.minValue = static_cast<std::int32_t>((*t)["min"].value_or<std::int64_t>(-32768));
+      f.maxValue = static_cast<std::int32_t>((*t)["max"].value_or<std::int64_t>(32767));
+      f.hashed = (*t)["hashed"].value_or(true);
+      out.push_back(std::move(f));
+    }
+    return {};
+  };
+  if (auto r = readFields("piece_field", v.pieceFields); !r.has_value()) {
+    return fail(r.error().code, r.error().message, r.error().line);
+  }
+  if (auto r = readFields("cell_field", v.cellFields); !r.has_value()) {
+    return fail(r.error().code, r.error().message, r.error().line);
   }
 
   // ---- pieces --------------------------------------------------------------
@@ -468,6 +505,177 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
           static_cast<std::uint8_t>((*t)["rights_bit"].value_or<std::int64_t>(0));
       v.castles.push_back(std::move(ct));
     }
+  }
+
+  // ---- rules ----------------------------------------------------------------
+  // Parsed after pieces and fields, because an expression resolves names against them.
+  if (const auto* rulesNode = tbl["rule"].as_array()) {
+    rules::RuleSet set;
+    for (const auto& node : *rulesNode) {
+      const auto* t = node.as_table();
+      if (t == nullptr) {
+        return fail(ErrorCode::ValidationError, "[[rule]] must be a table", lineOf(node));
+      }
+      rules::Rule rule;
+      rule.name = (*t)["name"].value_or(std::string{});
+      const std::string when = (*t)["when"].value_or(std::string{});
+      if (when == "on_move_filter") {
+        rule.trigger = rules::Trigger::OnMoveFilter;
+      } else if (when == "on_capture") {
+        rule.trigger = rules::Trigger::OnCapture;
+      } else if (when == "on_move_end") {
+        rule.trigger = rules::Trigger::OnMoveEnd;
+      } else if (when == "on_turn_end") {
+        rule.trigger = rules::Trigger::OnTurnEnd;
+      } else if (when == "on_result_query") {
+        rule.trigger = rules::Trigger::OnResultQuery;
+      } else {
+        return fail(ErrorCode::ValidationError,
+                    "rule '" + rule.name +
+                        "': 'when' must be one of on_move_filter, "
+                        "on_capture, on_move_end, on_turn_end, on_result_query - not '" +
+                        when + "'",
+                    lineOf(node));
+      }
+
+      if (const auto cond = (*t)["if"].value<std::string>()) {
+        auto e = parseRuleExpr(v, *cond);
+        if (!e.has_value()) {
+          return fail(e.error().code,
+                      "rule '" + rule.name + "' condition: " + e.error().message,
+                      lineOf(node));
+        }
+        rule.condition.push_back(std::move(*e));
+      }
+
+      const auto* effects = (*t)["effect"].as_array();
+      if (effects == nullptr || effects->empty()) {
+        return fail(ErrorCode::ValidationError,
+                    "rule '" + rule.name + "' needs at least one [[rule.effect]]",
+                    lineOf(node));
+      }
+      for (const auto& enode : *effects) {
+        const auto* et = enode.as_table();
+        if (et == nullptr) {
+          return fail(ErrorCode::ValidationError, "[[rule.effect]] must be a table",
+                      lineOf(enode));
+        }
+        rules::Effect eff;
+        const std::string op = (*et)["op"].value_or(std::string{});
+        const std::string ewhere = "rule '" + rule.name + "', effect '" + op + "'";
+
+        const auto expr = [&](const char* key, bool required) -> Result<bool> {
+          const auto source = (*et)[key].value<std::string>();
+          if (!source.has_value()) {
+            if (!required) return false;
+            return fail(ErrorCode::ValidationError, ewhere + " needs '" + key + "'",
+                        lineOf(enode));
+          }
+          auto e = parseRuleExpr(v, *source);
+          if (!e.has_value()) {
+            return fail(e.error().code, ewhere + ": " + e.error().message, lineOf(enode));
+          }
+          eff.args.push_back(std::move(*e));
+          return true;
+        };
+
+        if (op == "destroy") {
+          eff.op = rules::EffectOp::Destroy;
+          if (auto r = expr("at", true); !r.has_value()) {
+            return fail(r.error().code, r.error().message, r.error().line);
+          }
+        } else if (op == "destroy_region") {
+          eff.op = rules::EffectOp::DestroyRegion;
+          if (auto r = expr("at", true); !r.has_value()) {
+            return fail(r.error().code, r.error().message, r.error().line);
+          }
+          eff.imm = (*et)["radius"].value_or<std::int64_t>(1);
+          if (const auto f = (*et)["affects"].value<std::string>()) {
+            auto e = parseRuleExpr(v, *f);
+            if (!e.has_value()) {
+              return fail(e.error().code, ewhere + " affects: " + e.error().message,
+                          lineOf(enode));
+            }
+            eff.filter.push_back(std::move(*e));
+          }
+        } else if (op == "transform" || op == "spawn") {
+          eff.op =
+              op == "transform" ? rules::EffectOp::Transform : rules::EffectOp::Spawn;
+          if (auto r = expr("at", true); !r.has_value()) {
+            return fail(r.error().code, r.error().message, r.error().line);
+          }
+          const std::string piece = (*et)["piece"].value_or(std::string{});
+          const PieceTypeId id = v.findPiece(piece);
+          if (id == kNoPiece) {
+            return fail(ErrorCode::ValidationError,
+                        ewhere + ": no piece is called '" + piece + "'", lineOf(enode));
+          }
+          eff.imm = id;
+          if (op == "spawn") {
+            if (auto r = expr("color", false); !r.has_value()) {
+              return fail(r.error().code, r.error().message, r.error().line);
+            }
+          }
+        } else if (op == "set_piece_field" || op == "set_cell_field") {
+          const bool piece = op == "set_piece_field";
+          eff.op = piece ? rules::EffectOp::SetPieceField : rules::EffectOp::SetCellField;
+          if (auto r = expr("at", true); !r.has_value()) {
+            return fail(r.error().code, r.error().message, r.error().line);
+          }
+          if (auto r = expr("value", true); !r.has_value()) {
+            return fail(r.error().code, r.error().message, r.error().line);
+          }
+          const std::string field = (*et)["field"].value_or(std::string{});
+          const int index = piece ? v.findPieceField(field) : v.findCellField(field);
+          if (index < 0) {
+            return fail(ErrorCode::ValidationError,
+                        ewhere + ": no field is called '" + field + "'", lineOf(enode));
+          }
+          eff.imm = index;
+        } else if (op == "forbid_move") {
+          eff.op = rules::EffectOp::ForbidMove;
+        } else if (op == "repeat_turn") {
+          eff.op = rules::EffectOp::RepeatTurn;
+        } else if (op == "end_game") {
+          eff.op = rules::EffectOp::EndGame;
+          const std::string outcome = (*et)["outcome"].value_or(std::string{"draw"});
+          if (outcome == "mover_wins") {
+            eff.imm = static_cast<std::int64_t>(rules::Outcome::MoverWins);
+          } else if (outcome == "mover_loses") {
+            eff.imm = static_cast<std::int64_t>(rules::Outcome::MoverLoses);
+          } else if (outcome == "draw") {
+            eff.imm = static_cast<std::int64_t>(rules::Outcome::Draw);
+          } else {
+            return fail(ErrorCode::ValidationError,
+                        ewhere + ": outcome must be mover_wins, mover_loses or draw",
+                        lineOf(enode));
+          }
+        } else {
+          return fail(ErrorCode::ValidationError,
+                      "rule '" + rule.name + "': unknown effect '" + op + "'",
+                      lineOf(enode));
+        }
+        rule.effects.push_back(std::move(eff));
+      }
+      set.rules.push_back(std::move(rule));
+    }
+
+    const rules::RuleEngine engine{set};
+    if (auto ok = engine.validate(v); !ok.has_value()) {
+      return fail(ok.error().code, ok.error().message);
+    }
+    auto shared = std::make_shared<const rules::RuleSet>(std::move(set));
+    v.ruleSet = shared;
+    v.ruleSetDigest = [shared] {
+      // Rules change what the game is, so they change its identity. Hashing the textual
+      // description keeps that stable without teaching the variant layer about rules.
+      const std::string description = shared->describe();
+      std::uint64_t h = 0xCBB0'0000'0000'0111ULL;
+      for (char c : description)
+        h = (h ^ static_cast<std::uint64_t>(static_cast<unsigned char>(c))) *
+            0x100000001B3ULL;
+      return h;
+    };
   }
 
   // ---- starting position ---------------------------------------------------

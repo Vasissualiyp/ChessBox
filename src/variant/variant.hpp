@@ -2,6 +2,8 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -12,6 +14,21 @@
 #include "space/dim_spec.hpp"
 
 namespace cb {
+
+/// A custom data field attached to pieces or to cells.
+///
+/// Columns, not per-piece maps: a variant declaring one field gets one array, and a
+/// variant declaring none pays nothing at all (ARCH section 5). This is what makes
+/// "explosive chess", "charged pieces" and the rest data rather than engine code.
+struct FieldDecl {
+  std::string name;
+  std::int32_t defaultValue{0};
+  std::int32_t minValue{-32768};
+  std::int32_t maxValue{32767};
+  /// Whether the field is part of the position's identity. An unhashed field is
+  /// cosmetic: two positions differing only in it are the same position.
+  bool hashed{true};
+};
 
 using PieceTypeId = std::uint16_t;
 constexpr PieceTypeId kNoPiece = 0;  ///< type 0 means "empty cell"
@@ -75,6 +92,22 @@ class VariantSpec {
   StalematePolicy stalemate{StalematePolicy::Draw};
   /// 0 disables the rule; standard chess uses 100 half-moves.
   int halfmoveDrawLimit{0};
+
+  /// Custom fields. Piece fields travel with the piece; cell fields stay put.
+  std::vector<FieldDecl> pieceFields;
+  std::vector<FieldDecl> cellFields;
+
+  /// The variant's rules, as data. Held by opaque pointer so that the position layer
+  /// does not need to know the rule VM exists.
+  std::shared_ptr<const void> ruleSet;
+
+  /// Digest of the rule set, supplied by whoever built it. Rules are part of a
+  /// variant's identity - two games with the same pieces and different rules are not
+  /// the same game - but this layer cannot see the rule types, so the owner hashes them.
+  std::function<std::uint64_t()> ruleSetDigest;
+
+  [[nodiscard]] int findPieceField(std::string_view n) const;
+  [[nodiscard]] int findCellField(std::string_view n) const;
 
   /// Global direction table. Atom spans index into this.
   std::vector<Direction> dirTable;
