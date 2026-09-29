@@ -7,7 +7,9 @@
 // here decides anything - which is the same rule the board follows, and is why the
 // transitions between screens are covered by tests that never open a window.
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -358,11 +360,10 @@ UiRequest Ui::buildPause(app::Shell& shell) {
   auto* display = static_cast<ImFont*>(fontDisplay_);
   auto* mono = static_cast<ImFont*>(fontMono_);
 
-  // Pause is a shell menu a step back from the game, not a panel floating over it: the
-  // same frame, pane and field as every other menu. Stepping back into the game is what
-  // "Continue" does; the board is not kept behind the menu.
+  // Pause sits over the position: the board keeps the left of the frame, pulled back and
+  // blurred, and the menu takes the right over a thin scrim.
   ImVec2 menuMin, menuMax;
-  drawShellFrame(shell, menuMin, menuMax);
+  pauseFrame(request, menuMin, menuMax);
   const PaneMove move = paneMove();
   beginPane("##pause", menuMin, menuMax, move.scale, move.alpha, px(46.0f), !ghosting_);
   eyebrow(shell.currentVariant().c_str(), t, mono, scale_);
@@ -401,6 +402,35 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
 
   ImVec2 menuMin, menuMax;
   drawShellFrame(shell, menuMin, menuMax);
+
+  // A transparent click target over the preview board: left-click a square to cycle it
+  // empty -> black piece -> white piece, so a capture can be tried before it is saved.
+  if (previewValid_) {
+    const float side = previewCell_ * static_cast<float>(kPreviewN);
+    ImGui::SetNextWindowPos(previewOrigin_, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(side, side), ImGuiCond_Always);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::Begin("##previewclicks", nullptr,
+                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoBackground |
+                     ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings |
+                     ImGuiWindowFlags_NoCollapse);
+    ImGui::InvisibleButton("##cells", ImVec2(side, side));
+    if (ImGui::IsItemClicked()) {
+      const ImVec2 m = ImGui::GetIO().MousePos;
+      const int x = static_cast<int>((m.x - previewOrigin_.x) / previewCell_);
+      const int y = static_cast<int>((m.y - previewOrigin_.y) / previewCell_);
+      if (x >= 0 && x < kPreviewN && y >= 0 && y < kPreviewN &&
+          !(x == kPreviewN / 2 && y == kPreviewN / 2)) {
+        auto& cell =
+            previewCells_[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)];
+        cell = static_cast<std::uint8_t>((cell + 1) % 3);
+      }
+    }
+    ImGui::End();
+    ImGui::PopStyleVar();
+  }
+
   const PaneMove move = paneMove();
   beginPane("##editor", menuMin, menuMax, move.scale, move.alpha, px(46.0f), !ghosting_);
   eyebrow("editor", t, mono, scale_);
@@ -437,24 +467,26 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
     ImGui::PushTextWrapPos(0.0f);
     ImGui::TextUnformatted(
-        "A piece is a list of atoms. An atom is a multiset of magnitudes - [1] is one "
-        "step, [1,2] is a knight's leap - expanded over every pair of axes and every "
-        "sign, so the same atom means the rook's four moves in 2-D and the knight's "
-        "twenty-four in 4-D.");
+        "A piece is a list of moves. Each move is a set of step sizes - [1] is one "
+        "square, [1,2] is a knight's jump - and the piece makes it in any direction, "
+        "along any combination of the board's axes. The same numbers give four moves on "
+        "a "
+        "flat board and many more in higher dimensions.");
     ImGui::Spacing();
     ImGui::TextUnformatted(
-        "Mode: slide runs until something blocks it, leap ignores whatever is between, "
-        "hop needs a hurdle to jump over. Capture: may takes or stays put, must only "
-        "takes, cannot only moves to an empty cell - a pawn's push is a cannot atom and "
-        "its capture is a must. Ride repeats the atom to the edge; forward keeps only "
-        "the half facing the orientation axis, which is what makes a piece pawn-like "
-        "in any number of dimensions.");
+        "Kind: slide runs along until something blocks it; leap jumps straight there; "
+        "hop jumps over exactly one piece. Capture: 'may' takes or moves quietly, 'must' "
+        "only takes, 'cannot' only moves to an empty square - a pawn's step is 'cannot' "
+        "and its capture is 'must'. Runs keeps going to the edge; forward keeps only the "
+        "half facing the board's forward direction, which is what makes a pawn in any "
+        "number of dimensions.");
     ImGui::Spacing();
     ImGui::TextUnformatted(
-        "Compose by adding atoms. Rook [1] plus bishop [1,1] is a queen in 2-D - the "
-        "same two atoms, reinterpreted, are a different piece on a higher-dimensional "
-        "board. The board on the left previews the selected piece's reach from the "
-        "centre: moss is a quiet move, red a capture.");
+        "Build a piece by adding moves. A rook plus a bishop is a queen on a flat board. "
+        "The board on the left shows the piece in white at the centre and where it can "
+        "go: green for a quiet move, red for a capture. Click the board to place black "
+        "and white pieces - a pawn's capture only lights up when there is something to "
+        "take. CLEAR empties the board again.");
     ImGui::PopTextWrapPos();
     ImGui::PopStyleColor();
     ImGui::PopFont();
@@ -495,6 +527,10 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   }
   ImGui::SameLine();
   if (button("HELP", t, px(84), false, true, true, display)) editorPage_ = 2;
+  ImGui::SameLine();
+  if (button("CLEAR", t, px(88), false, true, true, display)) {
+    for (auto& row : previewCells_) row.fill(0);
+  }
   ImGui::Dummy(ImVec2(0, px(8)));
 
   const std::vector<std::string> names = editor->pieceNames();
@@ -584,12 +620,12 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
         }
         ImGui::SameLine();
         bool rider = list[i].maxK == kUnlimited;
-        if (ImGui::Checkbox("ride", &rider)) {
+        if (ImGui::Checkbox("runs", &rider)) {
           list[i].maxK = rider ? kUnlimited : 1;
           changed = true;
         }
         ImGui::SameLine();
-        if (ImGui::Checkbox("fwd", &list[i].oriented)) changed = true;
+        if (ImGui::Checkbox("forward", &list[i].oriented)) changed = true;
         ImGui::SameLine();
         if (ImGui::SmallButton("x")) removeAt = i;
         ImGui::PopID();
@@ -616,35 +652,35 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
         if (canon.has_value()) list.push_back(*canon);
         changed = true;
       };
-      if (ImGui::SmallButton("+ new [1]")) {
+      if (ImGui::SmallButton("ADD MOVE")) {
         addAtom({1}, 1, MoveMode::Leap, CapturePolicy::May, false);
       }
       ImGui::SameLine();
-      if (ImGui::SmallButton("+ rook [1]inf")) {
+      if (ImGui::SmallButton("+ rook")) {
         addAtom({1}, kUnlimited, MoveMode::Slide, CapturePolicy::May, false);
       }
       ImGui::SameLine();
-      if (ImGui::SmallButton("+ bishop [1,1]inf")) {
+      if (ImGui::SmallButton("+ bishop")) {
         addAtom({1, 1}, kUnlimited, MoveMode::Slide, CapturePolicy::May, false);
       }
       ImGui::SameLine();
-      if (ImGui::SmallButton("+ knight [1,2]")) {
+      if (ImGui::SmallButton("+ knight")) {
         addAtom({1, 2}, 1, MoveMode::Leap, CapturePolicy::May, false);
       }
       ImGui::SameLine();
-      if (ImGui::SmallButton("+ king step [1]")) {
+      if (ImGui::SmallButton("+ king")) {
         addAtom({1}, 1, MoveMode::Leap, CapturePolicy::May, false);
       }
       ImGui::SameLine();
-      if (ImGui::SmallButton("+ diag [1,1]")) {
+      if (ImGui::SmallButton("+ diagonal step")) {
         addAtom({1, 1}, 1, MoveMode::Leap, CapturePolicy::May, false);
       }
       ImGui::SameLine();
-      if (ImGui::SmallButton("+ pawn push fwd")) {
+      if (ImGui::SmallButton("+ forward step")) {
         addAtom({1}, 1, MoveMode::Leap, CapturePolicy::Cannot, true);
       }
       ImGui::SameLine();
-      if (ImGui::SmallButton("+ pawn capture fwd")) {
+      if (ImGui::SmallButton("+ forward capture")) {
         addAtom({1, 1}, 1, MoveMode::Leap, CapturePolicy::Must, true);
       }
 

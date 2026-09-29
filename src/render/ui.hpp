@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -90,6 +92,10 @@ class Ui {
   /// The two-pane frame every menu screen sits in: the drifting field, the screen's
   /// own object, and the depth ladder. Returns the rectangle the menu itself gets.
   void drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax);
+  /// The pause section's frame: the board keeps the left of the screen behind a scrim
+  /// (the main loop draws it there, pulled back and blurred), and the menu pane takes
+  /// the right. Returns where the pane goes and leaves the board rectangle on `request`.
+  void pauseFrame(UiRequest& request, ImVec2& menuMin, ImVec2& menuMax);
   /// The piece designer's left half: a board with the selected piece at its centre and
   /// the cells it can reach marked quiet or capture. Reads the editor's atoms and walks
   /// them, so it shows the real movement rather than a picture of it.
@@ -146,10 +152,18 @@ class Ui {
   /// document is what matters and it lives in the shell; which row is highlighted is a
   /// view concern.
   int editorPiece_{0};
-  /// The editor's own page: its home (pick a designer) or the piece designer. Kept here
-  /// rather than as a Screen so stepping into a designer does not change the shell's
-  /// depth - the designers are panes of one screen, not destinations of their own.
+  /// The editor's own page: its home (pick a designer), the piece designer, or its help.
+  /// Kept here rather than as a Screen so stepping in does not change the shell's depth.
   int editorPage_{0};
+
+  /// The piece preview's board: the size, where it was drawn, and what the player has
+  /// placed on it (0 empty, 1 black, 2 white). The selected piece is white and stands at
+  /// the centre; the rest is a scratch board for trying captures.
+  static constexpr int kPreviewN = 10;
+  ImVec2 previewOrigin_{0.0f, 0.0f};
+  float previewCell_{0.0f};
+  bool previewValid_{false};
+  std::array<std::array<std::uint8_t, kPreviewN>, kPreviewN> previewCells_{};
   /// The screen being left, kept as a number so its own build can be re-run as a ghost,
   /// and the screen being built now, so `paneMove` knows whether this is a menu move.
   int leavingScreen_{-1};

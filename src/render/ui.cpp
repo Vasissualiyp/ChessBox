@@ -59,6 +59,9 @@ bool isMenuScreen(app::Screen s) noexcept {
     case app::Screen::Settings:
     case app::Screen::QuitConfirm:
     case app::Screen::PauseQuitConfirm:
+    case app::Screen::Paused:
+    case app::Screen::GameInfo:
+    case app::Screen::PieceMoves:
       return true;
     default:
       return false;
@@ -456,6 +459,7 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
 }
 
 void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& max) {
+  previewValid_ = false;
   const app::Editor* editor = shell.editor();
   if (editor == nullptr) return;
   const std::vector<std::string> names = editor->pieceNames();
@@ -464,16 +468,26 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
   auto atoms = editor->pieceAtoms(names[static_cast<std::size_t>(index)]);
   if (!atoms.has_value()) return;
 
-  constexpr int kN = 10;
+  constexpr int kN = kPreviewN;
   const ImVec2 span(max.x - min.x, max.y - min.y);
   const float side = std::min(span.x, span.y) * 0.72f;
   const float cell = side / static_cast<float>(kN);
   const ImVec2 origin(min.x + (span.x - side) * 0.5f, min.y + (span.y - side) * 0.5f);
+  previewOrigin_ = origin;
+  previewCell_ = cell;
+  previewValid_ = true;
+
   ImDrawList* dl = ImGui::GetBackgroundDrawList();
   const view::Theme& t = theme_;
-
   // The board replaces the decorative object here: the object *is* the board.
   dl->AddRectFilled(min, max, u32(t.ink));
+  const auto baseColour = [&](int x, int y) {
+    return ((x + y) & 1) != 0 ? t.boardDark : t.boardLight;
+  };
+  PieceTypeDef shapeDef;
+  shapeDef.atoms = *atoms;
+  const Archetype shape = archetypeFor(shapeDef);
+
   bool quiet[kN][kN] = {};
   bool capture[kN][kN] = {};
   const int cx = kN / 2;
@@ -481,14 +495,16 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
   // A 2-D preview only has two axes; the variant's forward axis is whichever of them it
   // declared (standard chess means the rank), and anything else reads as the second.
   const int orientIndex = editor->orientationAxis() == 0 ? 0 : 1;
+  const auto up = static_cast<std::size_t>(orientIndex);
+  const auto right = static_cast<std::size_t>(orientIndex == 0 ? 1 : 0);
   for (const MoveAtom& a : *atoms) {
-    if (a.mode == MoveMode::Hop) continue;  // needs a hurdle; none on an empty board
+    if (a.mode == MoveMode::Hop) continue;  // needs a hurdle; not modelled here
     const std::vector<Direction> dirs =
         a.oriented ? expandAtomOriented(a.mags, 2, static_cast<std::uint8_t>(orientIndex),
                                         Color::White)
                    : expandAtom(a.mags, 2);
-    // Step range from the atom's own min/max: a rider runs to the edge, an exact-n
-    // move like a pawn's double step lands only where it says.
+    // Step range from the move's own min/max: a rider runs to the edge, an exact-n move
+    // like a pawn's double step lands only where it says.
     const int first = std::max(1, static_cast<int>(a.minK));
     const int last =
         a.maxK == kUnlimited ? kN - 1 : std::min(static_cast<int>(a.maxK), kN - 1);
@@ -496,16 +512,19 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
       for (int n = first; n <= last; ++n) {
         // The forward axis is drawn up the screen and the other to the right, so a
         // forward-only piece reads as moving up, the way a player expects to see it.
-        const auto up = static_cast<std::size_t>(orientIndex);
-        const auto right = static_cast<std::size_t>(orientIndex == 0 ? 1 : 0);
         const int x = cx + n * d.v[right];
         const int y = cy - n * d.v[up];
         if (x < 0 || x >= kN || y < 0 || y >= kN) break;
-        if (a.capture == CapturePolicy::Must) {
-          capture[y][x] = true;
-        } else {
-          quiet[y][x] = true;
+        const std::uint8_t occ =
+            previewCells_[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)];
+        if (occ != 0) {
+          // A black piece here can be taken if the move allows it. A slider stops at it;
+          // a leap carries on over it.
+          if (occ == 1 && a.capture != CapturePolicy::Cannot) capture[y][x] = true;
+          if (a.mode != MoveMode::Leap) break;
+          continue;
         }
+        if (a.capture != CapturePolicy::Must) quiet[y][x] = true;
       }
     }
   }
@@ -515,23 +534,53 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
       const ImVec2 a(origin.x + static_cast<float>(x) * cell,
                      origin.y + static_cast<float>(y) * cell);
       const ImVec2 b(a.x + cell, a.y + cell);
-      dl->AddRectFilled(a, b, u32(((x + y) & 1) != 0 ? t.boardDark : t.boardLight));
+      dl->AddRectFilled(a, b, u32(baseColour(x, y)));
       if (capture[y][x]) {
-        dl->AddRectFilled(a, b, u32(t.blood, 0.55f));
+        dl->AddRectFilled(a, b, u32(t.blood, 0.5f));
       } else if (quiet[y][x]) {
-        dl->AddRectFilled(a, b, u32(t.moss, 0.5f));
+        dl->AddRectFilled(a, b, u32(t.moss, 0.45f));
       }
     }
   }
   dl->AddRect(origin, ImVec2(origin.x + side, origin.y + side), u32(t.rule, 0.8f));
 
-  PieceTypeDef def;
-  def.atoms = *atoms;
-  const Archetype shape = archetypeFor(def);
+  // Pieces the player placed, then the piece being designed, in white, at the centre.
+  for (int y = 0; y < kN; ++y) {
+    for (int x = 0; x < kN; ++x) {
+      const std::uint8_t occ =
+          previewCells_[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)];
+      if (occ == 0) continue;
+      const ImVec2 c(origin.x + (static_cast<float>(x) + 0.5f) * cell,
+                     origin.y + (static_cast<float>(y) + 0.5f) * cell);
+      const view::Rgba col = occ == 1 ? t.blackPiece : t.whitePiece;
+      drawPieceGlyph(dl, c, cell * 0.42f, u32(col), u32(baseColour(x, y)), shape,
+                     iconStyle_);
+    }
+  }
   const ImVec2 centre(origin.x + (static_cast<float>(cx) + 0.5f) * cell,
                       origin.y + (static_cast<float>(cy) + 0.5f) * cell);
-  drawPieceGlyph(dl, centre, cell * 0.42f, u32(t.bone), u32(t.boardLight), shape,
-                 iconStyle_);
+  drawPieceGlyph(dl, centre, cell * 0.42f, u32(t.whitePiece), u32(baseColour(cx, cy)),
+                 shape, iconStyle_);
+}
+
+void Ui::pauseFrame(UiRequest& request, ImVec2& menuMin, ImVec2& menuMax) {
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  const ImVec2 vmin = vp->WorkPos;
+  const ImVec2 vmax(vp->WorkPos.x + vp->WorkSize.x, vp->WorkPos.y + vp->WorkSize.y);
+  const float split = vmin.x + (vmax.x - vmin.x) * 0.52f;
+  menuMin = ImVec2(split, vmin.y);
+  menuMax = ImVec2(vmax.x, vmax.y);
+  // The board keeps the left of the frame; a screen that draws its own object - the move
+  // diagrams - puts it there.
+  decoMin_ = vmin;
+  decoMax_ = ImVec2(split, vmax.y);
+  // A departing ghost must not lay the scrim a second time.
+  if (ghosting_) return;
+  ImGui::GetBackgroundDrawList()->AddRectFilled(vmin, vmax, u32(theme_.ink, 0.42f));
+  request.boardRect[0] = vmin.x;
+  request.boardRect[1] = vmin.y;
+  request.boardRect[2] = split - vmin.x;
+  request.boardRect[3] = vmax.y - vmin.y;
 }
 
 float Ui::outEase() const noexcept {
@@ -591,6 +640,15 @@ void Ui::drawGhost(app::Shell& shell) {
       break;
     case app::Screen::PauseQuitConfirm:
       (void)buildPauseQuitConfirm(shell);
+      break;
+    case app::Screen::Paused:
+      (void)buildPause(shell);
+      break;
+    case app::Screen::GameInfo:
+      (void)buildGameInfo(shell);
+      break;
+    case app::Screen::PieceMoves:
+      (void)buildPieceMoves(shell);
       break;
     default:
       break;
