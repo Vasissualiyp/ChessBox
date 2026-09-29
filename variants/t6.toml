@@ -1,0 +1,155 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# t6 - chess on a six-torus.
+#
+# Six periodic axes: every face of the box is glued to its opposite, so the board is
+# a T^6. The motion is the same vector-move algebra as everywhere else - a rook is
+# still [1]^inf, a bishop [1,1]^inf - but at six axes an atom expands into far more
+# directions than a human board ever sees. A knight's [1,2] leaps to 120 cells; a
+# king's [1] and [1,1] moves to 132.
+#
+# This is the flat compactification the engine can actually express: a genuine
+# Calabi-Yau torus (the "string theory" manifold is the smoothed quintic, which is
+# not a box quotient and cannot be declared here - see docs/variants/t6.md).
+#
+# No promotion: every axis is a loop, so there is no last rank. Castling is absent
+# for the same reason it is absent on any glued board.
+
+name = "t6"
+description = "Six glued axes: a six-dimensional torus, where a knight reaches a hundred and twenty cells."
+side_to_move = "white"
+stalemate = "draw"
+halfmove_draw_limit = 100
+orientation_axis = "x1"
+
+[[axis]]
+name = "x1"
+extent = 4
+
+[[axis]]
+name = "x2"
+extent = 4
+
+[[axis]]
+name = "x3"
+extent = 4
+
+[[axis]]
+name = "x4"
+extent = 4
+
+[[axis]]
+name = "x5"
+extent = 4
+
+[[axis]]
+name = "x6"
+extent = 4
+
+[[geometry.identify]]
+axis = "x1"
+kind = "periodic"
+
+[[geometry.identify]]
+axis = "x2"
+kind = "periodic"
+
+[[geometry.identify]]
+axis = "x3"
+kind = "periodic"
+
+[[geometry.identify]]
+axis = "x4"
+kind = "periodic"
+
+[[geometry.identify]]
+axis = "x5"
+kind = "periodic"
+
+[[geometry.identify]]
+axis = "x6"
+kind = "periodic"
+
+[[piece]]
+name = "pawn"
+symbol = "P"
+resets_draw_clock = true
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+  capture = "cannot"
+  forward = true
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+  capture = "must"
+  forward = true
+
+[[piece]]
+name = "knight"
+symbol = "N"
+
+  [[piece.move]]
+  vector = [1, 2]
+  max = 1
+  mode = "leap"
+
+[[piece]]
+name = "bishop"
+symbol = "B"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "rook"
+symbol = "R"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "queen"
+symbol = "Q"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "king"
+symbol = "K"
+royal = true
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+
+# A small army a side - king, rook, knight - with the two armies close enough to
+# block one another. A full array is unplayable here for the reason it is on any
+# glued board (the back ranks are in contact), and at six axes it is unaffordable to
+# search as well: every extra piece multiplies a branching factor that is already in
+# the hundreds. Bishop, queen and pawn are declared so an edited position can still
+# contain them; only the knight's atom is needed to see how far a leap reaches here.
+[start]
+board = "7r1R2K1k13N1n4065"

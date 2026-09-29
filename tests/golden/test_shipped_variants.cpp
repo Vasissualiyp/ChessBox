@@ -92,6 +92,7 @@ TEST_CASE("shipped variant node counts", "[golden][variants]") {
       {"standard", 20, 400},  {"cylinder", 20, 392}, {"torus", 54, 2535},
       {"mobius", 69, 4003},   {"klein", 48, 1977},   {"torus3d", 34, 1028},
       {"mirrorbox", 20, 396}, {"cube5", 56, 3095},   {"hyper4", 39, 1380},
+      {"t6", 41, 2216},
   };
   for (const Expect& c : cases) {
     CAPTURE(c.name);

@@ -117,8 +117,8 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | Performance work | `bench/baselines/` first, then the hot path | `cb-bench-baseline` |
 
 Variants ship, all as data: `standard`, `cylinder`, `torus`, `mobius`, `klein`,
-`mirrorbox`, `cube5` (3-D), `hyper4` (4-D), `torus3d`, `atomic`, `atomic_torus`,
-`mustcapture`, `charged`, and `5d` (turn and timeline axes). See
+`mirrorbox`, `cube5` (3-D), `hyper4` (4-D), `torus3d`, `t6` (6-D torus), `atomic`,
+`atomic_torus`, `mustcapture`, `charged`, and `5d` (turn and timeline axes). See
 [`docs/variants/README.md`](docs/variants/README.md).
 
 Skills live in `.claude/skills/` and are catalogued in
