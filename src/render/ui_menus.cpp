@@ -533,6 +533,22 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   }
   ImGui::Dummy(ImVec2(0, px(8)));
 
+  // The controls are ImGui's, but they wear the game's clothes: rounded, panel-coloured,
+  // ember for the marks, so the designer sits in the same world as the menus rather than
+  // looking like a developer tool.
+  ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, px(4.0f));
+  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(6.0f), px(3.0f)));
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(px(5.0f), px(5.0f)));
+  ImGui::PushStyleColor(ImGuiCol_FrameBg, col(t.panelHi, 0.55f));
+  ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, col(t.panelHi));
+  ImGui::PushStyleColor(ImGuiCol_FrameBgActive, col(t.emberDeep, 0.75f));
+  ImGui::PushStyleColor(ImGuiCol_CheckMark, col(t.ember));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.bone));
+  ImGui::PushStyleColor(ImGuiCol_PopupBg, col(t.panel));
+  ImGui::PushStyleColor(ImGuiCol_Header, col(t.panelHi));
+  ImGui::PushStyleColor(ImGuiCol_HeaderHovered, col(t.panelHi));
+  ImGui::PushStyleColor(ImGuiCol_HeaderActive, col(t.emberDeep));
+
   const std::vector<std::string> names = editor->pieceNames();
   if (names.empty()) {
     ImGui::TextUnformatted("This variant declares no pieces.");
@@ -688,8 +704,17 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
       }
 
       if (changed) {
+        // Keep whatever the controls produced legal, so a write is never silently
+        // dropped and the control does not spring back: a leap cannot ask for two
+        // steps, a hop is single-step, and a minimum cannot exceed its maximum.
         bool ok = true;
         for (MoveAtom& a : list) {
+          if (a.mode == MoveMode::Leap && a.minK > 1) a.minK = 1;
+          if (a.mode == MoveMode::Hop) {
+            a.minK = 1;
+            a.maxK = 1;
+          }
+          if (a.maxK != kUnlimited && a.minK > a.maxK) a.minK = a.maxK;
           auto canon = MoveAtom::canonicalize(a);
           if (!canon.has_value()) {
             ok = false;
@@ -702,6 +727,8 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     }
     ImGui::EndTable();
   }
+  ImGui::PopStyleColor(9);
+  ImGui::PopStyleVar(3);
 
   ImGui::Dummy(ImVec2(0, px(10)));
   if (button("BACK", t, px(120), false, false, true, display)) editorPage_ = 0;
