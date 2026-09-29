@@ -164,19 +164,21 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   auto* small = static_cast<ImFont*>(fontSmall_);
   auto* mono = static_cast<ImFont*>(fontMono_);
 
-  ImVec2 menuMin, menuMax;
-  drawShellFrame(shell, menuMin, menuMax);
-  beginPane("##newgame", menuMin, menuMax, enter_, px(46.0f));
-  eyebrow("new game", t, mono, scale_);
-  screenTitle("Library", t, display, scale_, 2.2f);
-  ImGui::Dummy(ImVec2(0, px(6)));
-
+  // Settled before the frame is drawn: the decoration beside the menu is the selected
+  // variant's own lattice, and it is drawn first.
   if (pickedVariant_.empty()) {
     pickedVariant_ = shell.currentVariant();
     if (pickedVariant_.empty() && !shell.library().empty()) {
       pickedVariant_ = shell.library().front();
     }
   }
+
+  ImVec2 menuMin, menuMax;
+  drawShellFrame(shell, menuMin, menuMax);
+  beginPane("##newgame", menuMin, menuMax, enter_, px(46.0f));
+  eyebrow("new game", t, mono, scale_);
+  screenTitle("Library", t, display, scale_, 2.2f);
+  ImGui::Dummy(ImVec2(0, px(6)));
   // The description lives in the variant file, so it is read once per selection rather
   // than every frame. A variant that will not load simply has no blurb.
   if (describedFor_ != pickedVariant_) {
@@ -267,9 +269,24 @@ UiRequest Ui::buildPause(app::Shell& shell) {
   auto* display = static_cast<ImFont*>(fontDisplay_);
   auto* mono = static_cast<ImFont*>(fontMono_);
 
-  beginPlate("##pause", t, ImVec2(px(420), 0), 0.5f);
+  // Pause does not cover the board - the whole point of stepping the camera back and
+  // throwing the position out of focus is that you can still see it. So the menu takes
+  // one side, over a scrim thin enough to read through, and the board stays where it is.
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  const ImVec2 vmin = vp->WorkPos;
+  const ImVec2 vmax(vp->WorkPos.x + vp->WorkSize.x, vp->WorkPos.y + vp->WorkSize.y);
+  ImGui::GetBackgroundDrawList()->AddRectFilled(vmin, vmax, u32(t.ink, 0.42f));
+  const float split = vmin.x + (vmax.x - vmin.x) * 0.52f;
+  beginPane("##pause", ImVec2(split, vmin.y), ImVec2(vmax.x, vmax.y), enter_,
+            px(46.0f));
+  // The board keeps the other side, so the position sits clear of the menu rather than
+  // half behind it.
+  request.boardRect[0] = vmin.x;
+  request.boardRect[1] = vmin.y;
+  request.boardRect[2] = split - vmin.x;
+  request.boardRect[3] = vmax.y - vmin.y;
   eyebrow(shell.currentVariant().c_str(), t, mono, scale_);
-  screenTitle("Paused", t, display, scale_, 2.0f);
+  screenTitle("Paused", t, display, scale_, 1.8f);
   ImGui::Dummy(ImVec2(0, px(8)));
 
   const float width = ImGui::GetContentRegionAvail().x;
@@ -287,7 +304,7 @@ UiRequest Ui::buildPause(app::Shell& shell) {
     shell.go(app::Screen::MainMenu);
   }
   if (menuEntry("Quit", 6, t, display, width, true, scale_)) request.quit = true;
-  endPlate();
+  endPane();
   return request;
 }
 

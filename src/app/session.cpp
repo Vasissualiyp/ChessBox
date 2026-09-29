@@ -130,6 +130,11 @@ void Session::refreshTemporalView() {
   const float pitch = camera_.pitch;
   const float distance = camera_.distance;
   refreshView();
+  // refreshView() has just framed whatever boards now exist. Keeping the player's own
+  // zoom is right until a new board will not fit in it - so take whichever is further
+  // out. Without this the multiverse grows off the edge of the screen and the board a
+  // move is expected on ends up half outside the frame.
+  const float framed = camera_.distance;
   // Center on the board(s) to answer on, so the newly created board the player must move
   // on is in view rather than off to the side.
   float cx = 0.0f;
@@ -151,7 +156,7 @@ void Session::refreshTemporalView() {
     camera_.yaw = yaw;
     camera_.pitch = pitch;
   }
-  camera_.distance = distance;
+  camera_.distance = std::max(distance, framed);
 }
 
 void Session::setTheme(const view::Theme& t) {
@@ -176,6 +181,12 @@ void Session::applyViewMode() {
     camera_.pitch = 1.5707963f;
     camera_.yaw = 0.0f;
   }
+}
+
+view::OrbitCamera Session::camera() const noexcept {
+  view::OrbitCamera out = camera_;
+  out.distance *= 1.0f + 0.18f * pullBack_;
+  return out;
 }
 
 bool Session::advanceAnimation(float dt) {

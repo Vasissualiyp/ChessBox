@@ -18,7 +18,7 @@ endif()
 # Shaders are compiled to SPIR-V at build time and embedded as arrays: nothing is
 # compiled at runtime and nothing has to be found on disk next to the binary.
 set(CB_SPV_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/shaders.hpp)
-set(CB_SHADERS board.vert board.frag backdrop.vert backdrop.frag)
+set(CB_SHADERS board.vert board.frag backdrop.vert backdrop.frag blur.vert blur.frag)
 set(CB_SPV_FILES "")
 foreach(shader IN LISTS CB_SHADERS)
   set(src ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${shader})

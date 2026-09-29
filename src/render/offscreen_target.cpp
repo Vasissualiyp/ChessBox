@@ -72,10 +72,18 @@ Result<OffscreenTarget> OffscreenTarget::create(const VulkanContext& ctx,
 }
 
 Result<void> OffscreenTarget::allocate(const VulkanContext& ctx) {
-  if (auto r =
-          makeImage(ctx, width_, height_, kColorFormat,
-                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-                    VK_IMAGE_ASPECT_COLOR_BIT, color_, colorMem_, colorView_);
+  if (auto r = makeImage(ctx, width_, height_, kColorFormat,
+                         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                             VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                             VK_IMAGE_USAGE_SAMPLED_BIT,
+                         VK_IMAGE_ASPECT_COLOR_BIT, color_, colorMem_, colorView_);
+      !r.has_value()) {
+    return r;
+  }
+  if (auto r = makeImage(
+          ctx, width_, height_, kColorFormat,
+          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+          VK_IMAGE_ASPECT_COLOR_BIT, scratch_, scratchMem_, scratchView_);
       !r.has_value()) {
     return r;
   }
@@ -92,6 +100,9 @@ OffscreenTarget& OffscreenTarget::operator=(OffscreenTarget&& o) noexcept {
   std::swap(color_, o.color_);
   std::swap(colorMem_, o.colorMem_);
   std::swap(colorView_, o.colorView_);
+  std::swap(scratch_, o.scratch_);
+  std::swap(scratchMem_, o.scratchMem_);
+  std::swap(scratchView_, o.scratchView_);
   std::swap(depth_, o.depth_);
   std::swap(depthMem_, o.depthMem_);
   std::swap(depthView_, o.depthView_);
@@ -104,6 +115,9 @@ OffscreenTarget::~OffscreenTarget() {
   if (colorView_ != VK_NULL_HANDLE) vkDestroyImageView(d, colorView_, nullptr);
   if (color_ != VK_NULL_HANDLE) vkDestroyImage(d, color_, nullptr);
   if (colorMem_ != VK_NULL_HANDLE) vkFreeMemory(d, colorMem_, nullptr);
+  if (scratchView_ != VK_NULL_HANDLE) vkDestroyImageView(d, scratchView_, nullptr);
+  if (scratch_ != VK_NULL_HANDLE) vkDestroyImage(d, scratch_, nullptr);
+  if (scratchMem_ != VK_NULL_HANDLE) vkFreeMemory(d, scratchMem_, nullptr);
   if (depthView_ != VK_NULL_HANDLE) vkDestroyImageView(d, depthView_, nullptr);
   if (depth_ != VK_NULL_HANDLE) vkDestroyImage(d, depth_, nullptr);
   if (depthMem_ != VK_NULL_HANDLE) vkFreeMemory(d, depthMem_, nullptr);

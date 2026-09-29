@@ -322,18 +322,25 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
   menuMin = ImVec2(decoLeft ? split : min.x, min.y);
   menuMax = ImVec2(decoLeft ? max.x : split, max.y);
 
+  // The library's lattice is the *selected* variant's, not the running game's - the
+  // whole point of it is to show you the shape of the board you are about to choose.
+  const VariantSpec* subject =
+      shell.screen() == app::Screen::NewGame
+          ? shell.preview(pickedVariant_)
+          : (shell.hasGame() ? &shell.session()->variant() : nullptr);
   drawDeco(dl, decoForScreen(static_cast<int>(shell.screen())), decoMin, decoMax, theme_,
-           iconStyle_, clock_, shell.hasGame() ? &shell.session()->variant() : nullptr);
+           iconStyle_, clock_, subject);
 
   // A hairline between the object and the menu, and the depth ladder on the far left.
   dl->AddLine(ImVec2(split, min.y), ImVec2(split, max.y), u32(theme_.rule, 0.6f));
 
-  // The ladder lives on the menu side's outer edge. On the decoration side it would sit
-  // on top of the object, which is the one thing on screen that wants a clear field.
+  // The ladder lives on the decoration side's outer edge. The menu side is full of
+  // list rows and buttons that reach the margins; the object is centred in its own half
+  // and leaves the edge clear.
   const int depth = app::screenDepth(shell.screen());
   const char* rungs[]{"shell", "choose", "play"};
   auto* small = static_cast<ImFont*>(fontMono_);
-  const float ladderX = decoLeft ? max.x - px(80.0f) : min.x + px(20.0f);
+  const float ladderX = decoLeft ? min.x + px(20.0f) : max.x - px(80.0f);
   for (int i = 0; i < 3; ++i) {
     const float y = max.y - px(96.0f) + static_cast<float>(i) * px(20.0f);
     const bool on = i <= depth;
@@ -397,10 +404,10 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
       return out;
     }
     case app::Screen::Paused: {
-      UiRequest out = buildGameHud(shell, fps);
-      const UiRequest pause = buildPause(shell);
-      out.quit = out.quit || pause.quit;
-      return out;
+      // No heads-up display behind the pause menu. The readouts are for a player who is
+      // moving; a paused board wants the position visible and nothing else competing
+      // with the menu for the corners.
+      return buildPause(shell);
     }
     case app::Screen::Game:
       break;
@@ -672,6 +679,10 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   // the panels, so a pause menu covers them rather than the other way round.
   if (session.flatView()) {
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    // These are drawn after the board, and therefore after the defocus pass. Fading them
+    // out as the board goes soft is what stops a paused board showing sharp pieces
+    // standing on blurred squares.
+    const float focus = 1.0f - session.pullBack();
     const float w = vp->Size.x;
     const float h = vp->Size.y;
     const view::OrbitCamera& cam = session.camera();
@@ -691,10 +702,12 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       const bool white = piece.colorOf() == Color::White;
       const view::Rgba token = white ? t.whitePiece : t.blackPiece;
       const ImVec2 centre(sp.x, sp.y);
-      dl->AddCircleFilled(centre, radius, u32(token), 24);
-      dl->AddCircle(centre, radius, u32(t.boardRim), 24, px(1.5f));
-      drawPieceGlyph(dl, centre, radius * 0.82f, u32(white ? t.blackPiece : t.whitePiece),
-                     u32(token), archetypeFor(v.pieces[piece.type]), iconStyle_);
+      if (focus <= 0.01f) return;
+      dl->AddCircleFilled(centre, radius, u32(token, focus), 24);
+      dl->AddCircle(centre, radius, u32(t.boardRim, focus), 24, px(1.5f));
+      drawPieceGlyph(dl, centre, radius * 0.82f,
+                     u32(white ? t.blackPiece : t.whitePiece, focus), u32(token, focus),
+                     archetypeFor(v.pieces[piece.type]), iconStyle_);
     };
 
     const view::MoveAnimation& anim = session.animation();

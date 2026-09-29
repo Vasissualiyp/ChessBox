@@ -210,9 +210,12 @@ void drawLattice(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& them
   int n = 8;
   if (variant != nullptr) {
     n = std::clamp<int>(variant->dims.extent(0), 3, 10);
+    // Capped at two: the picture has to say "this variant has more boards than one",
+    // and a three-by-three grid says it no better while making every cell too small to
+    // read as a board at all.
     int extra = 0;
     for (std::uint8_t a = 2; a < variant->dims.dims(); ++a) {
-      const int e = std::clamp<int>(variant->dims.extent(a), 1, 3);
+      const int e = std::clamp<int>(variant->dims.extent(a), 1, 2);
       if (extra == 0) {
         across = e;
       } else if (extra == 1) {
@@ -223,22 +226,67 @@ void drawLattice(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& them
       ++extra;
     }
     if (variant->dims.dims() == 3) {
-      layers = std::clamp<int>(variant->dims.extent(2), 1, 5);
+      layers = std::clamp<int>(variant->dims.extent(2), 1, 3);
       across = 1;
     }
   }
 
+  // Size the whole arrangement to the space it has, rather than picking a per-cell
+  // scale and hoping: a nine-board lattice is nearly four times the width of one board,
+  // and a constant that suits one of them runs the other off the edge of the pane.
+  const float unitsX =
+      static_cast<float>(n) + static_cast<float>(across - 1) * (static_cast<float>(n) + 3);
+  const float unitsY =
+      static_cast<float>(n) + static_cast<float>(down - 1) * (static_cast<float>(n) + 3);
   Camera cam;
-  cam.centre = ImVec2((min.x + max.x) * 0.5f, (min.y + max.y) * 0.52f);
-  const float span = std::min(max.x - min.x, max.y - min.y);
-  cam.scale = span * (across > 1 || down > 1 ? 0.050f : 0.082f);
+  cam.centre = ImVec2(0, 0);
+  cam.scale = 1.0f;
   cam.yaw = t * 0.16f;
-  cam.pitch = 0.95f + std::sin(t * 0.09f) * 0.10f;
+  cam.pitch = 0.82f + std::sin(t * 0.09f) * 0.09f;
   cam.perspective = 0.06f;
+
+  // Fit by measuring, not by guessing a constant: the arrangement turns, and a lattice
+  // seen nearly edge-on is a very different shape on screen from the same lattice seen
+  // flat. Projecting its eight corners at unit scale gives the exact extent to divide by.
+  {
+    const float zSpan = static_cast<float>(layers - 1) * 1.2f + 0.6f;
+    float extX = 0.001f;
+    float extY = 0.001f;
+    for (const float sx : {-1.0f, 1.0f}) {
+      for (const float sy : {-1.0f, 1.0f}) {
+        for (const float sz : {-1.0f, 1.0f}) {
+          const Projected c =
+              cam({sx * unitsX * 0.5f, sy * unitsY * 0.5f, sz * zSpan});
+          extX = std::max(extX, std::abs(c.at.x));
+          extY = std::max(extY, std::abs(c.at.y));
+        }
+      }
+    }
+    cam.scale = std::min((max.x - min.x) * 0.46f / extX, (max.y - min.y) * 0.46f / extY);
+    cam.centre = ImVec2((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
+  }
 
   const view::Rgba dark = theme.light ? theme.bone : theme.ink;
   const view::Rgba pale = theme.light ? theme.panel : theme.bone;
   const float half = static_cast<float>(n) * 0.5f;
+
+  // Every cell of every board, painted far to near. Without the sort, boards at
+  // different depths overwrite one another wherever the projection overlaps them, which
+  // is what put dark patches across a nine-board 5D lattice at some angles.
+  struct Tile {
+    ImVec2 p[4];
+    float depth{0};
+    bool light{false};
+  };
+  struct Token {
+    ImVec2 at;
+    float depth{0};
+    int shape{0};
+    bool white{false};
+  };
+  std::vector<Tile> tiles;
+  std::vector<Token> tokens;
+  tiles.reserve(static_cast<std::size_t>(across * down * layers * n * n));
 
   for (int bx = 0; bx < across; ++bx) {
     for (int by = 0; by < down; ++by) {
@@ -252,28 +300,43 @@ void drawLattice(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& them
           for (int j = 0; j < n; ++j) {
             const float x = ox - half + static_cast<float>(i);
             const float y = oy - half + static_cast<float>(j);
-            const ImVec2 a = cam({x, y, oz}).at;
-            const ImVec2 b = cam({x + 1, y, oz}).at;
-            const ImVec2 c = cam({x + 1, y + 1, oz}).at;
-            const ImVec2 d = cam({x, y + 1, oz}).at;
-            const bool light = (i + j) % 2 != 0;
-            dl->AddQuadFilled(a, b, c, d,
-                              u32(withAlpha(light ? pale : dark, light ? 0.20f : 0.34f)));
+            const Projected a = cam({x, y, oz});
+            const Projected b = cam({x + 1, y, oz});
+            const Projected c = cam({x + 1, y + 1, oz});
+            const Projected d = cam({x, y + 1, oz});
+            Tile tile;
+            tile.p[0] = a.at;
+            tile.p[1] = b.at;
+            tile.p[2] = c.at;
+            tile.p[3] = d.at;
+            tile.depth = (a.depth + b.depth + c.depth + d.depth) * 0.25f;
+            tile.light = (i + j) % 2 != 0;
+            tiles.push_back(tile);
           }
         }
-        // Pieces on cell centres, sized to the cell. Scaling them off anything else is
-        // how a nine-board lattice turns into a heap of overlapping shapes.
         for (int g = 0; g < 4; ++g) {
           const float x = ox - half + 0.5f + static_cast<float>(g) * 2.0f;
           const float y = oy - half + 0.5f + static_cast<float>((g + bx + by) % 3);
-          const ImVec2 at = cam({x, y, oz}).at;
-          const bool white = g % 2 == 0;
-          icon(dl, iconStyle, kPieceShapes[static_cast<std::size_t>(g)],
-               ImVec2(at.x, at.y - cam.scale * 0.2f), cam.scale * 0.92f,
-               u32(white ? pale : dark, 0.95f), u32(white ? dark : pale, 0.6f));
+          const Projected at = cam({x, y, oz});
+          // Just in front of the cell it stands on, so it is never sorted behind it.
+          tokens.push_back(Token{at.at, at.depth - 0.01f, g, g % 2 == 0});
         }
       }
     }
+  }
+
+  std::sort(tiles.begin(), tiles.end(),
+            [](const Tile& a, const Tile& b) { return a.depth < b.depth; });
+  for (const Tile& tile : tiles) {
+    dl->AddQuadFilled(tile.p[0], tile.p[1], tile.p[2], tile.p[3],
+                      u32(withAlpha(tile.light ? pale : dark, tile.light ? 0.20f : 0.34f)));
+  }
+  std::sort(tokens.begin(), tokens.end(),
+            [](const Token& a, const Token& b) { return a.depth < b.depth; });
+  for (const Token& tok : tokens) {
+    icon(dl, iconStyle, kPieceShapes[static_cast<std::size_t>(tok.shape)],
+         ImVec2(tok.at.x, tok.at.y - cam.scale * 0.2f), cam.scale * 0.92f,
+         u32(tok.white ? pale : dark, 0.95f), u32(tok.white ? dark : pale, 0.6f));
   }
 }
 

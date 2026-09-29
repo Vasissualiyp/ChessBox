@@ -76,6 +76,14 @@ class Shell {
   /// pitch before the game itself is started.
   [[nodiscard]] std::string variantDescription(const std::string& name) const;
 
+  /// The spec of a variant the player is *looking at* but has not started.
+  ///
+  /// The library screen draws the lattice of whichever variant is selected, which means
+  /// it needs a loaded spec for a game that does not exist yet. One is cached, because
+  /// the alternative is parsing a file every frame; a name that will not load gives
+  /// nullptr and the screen falls back to a plain board.
+  [[nodiscard]] const VariantSpec* preview(const std::string& name) const;
+
   void pause();
   void resume();
 
@@ -95,6 +103,8 @@ class Shell {
   Screen previous_{Screen::MainMenu};
   bool quit_{false};
   VariantLoader loader_;
+  mutable std::unique_ptr<VariantSpec> preview_;
+  mutable std::string previewName_;
 };
 
 }  // namespace cb::app

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <map>
 
 #include "shaders.hpp"
 
@@ -21,6 +22,14 @@ struct BackdropPush {
   float params[4]{0.5f, 0.34f, 1.25f, 0.62f};
 };
 static_assert(sizeof(BackdropPush) == 48);
+
+struct BlurPush {
+  float direction[2]{};
+  float strength{0};
+  float dim{0};
+  float ground[4]{};
+};
+static_assert(sizeof(BlurPush) == 32);
 
 void toFloat4(const view::Rgba& c, float out[4]) {
   out[0] = c.r;
@@ -86,6 +95,8 @@ Result<BoardRenderer> BoardRenderer::create(const VulkanContext& ctx) {
   r.ctx_ = &ctx;
   r.meshes_ = MeshLibrary::build();
   if (auto ok = r.buildPipeline(); !ok.has_value())
+    return fail(ok.error().code, ok.error().message);
+  if (auto ok = r.buildBlurPipeline(); !ok.has_value())
     return fail(ok.error().code, ok.error().message);
   if (auto ok = r.uploadGeometry(); !ok.has_value())
     return fail(ok.error().code, ok.error().message);
@@ -211,6 +222,178 @@ Result<void> BoardRenderer::buildPipeline() {
     return fail(ErrorCode::Internal,
                 "cannot create the graphics pipeline: " + describe(r));
   }
+  return {};
+}
+
+Result<void> BoardRenderer::buildBlurPipeline() {
+  const auto vs = makeShader(*ctx_, spv::blur_vert_spv_span());
+  if (!vs.has_value()) return fail(vs.error().code, vs.error().message);
+  blurVert_ = *vs;
+  const auto fs = makeShader(*ctx_, spv::blur_frag_spv_span());
+  if (!fs.has_value()) return fail(fs.error().code, fs.error().message);
+  blurFrag_ = *fs;
+
+  VkSamplerCreateInfo sci{};
+  sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+  sci.magFilter = VK_FILTER_LINEAR;
+  sci.minFilter = VK_FILTER_LINEAR;
+  // Clamped, not wrapped: a blur that samples past the edge must not fetch the far side
+  // of the frame and smear it back in.
+  sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  sci.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+  if (const VkResult r = vkCreateSampler(ctx_->device(), &sci, nullptr, &blurSampler_);
+      r != VK_SUCCESS) {
+    return fail(ErrorCode::Internal, "cannot create the blur sampler: " + describe(r));
+  }
+
+  VkDescriptorSetLayoutBinding binding{};
+  binding.binding = 0;
+  binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  binding.descriptorCount = 1;
+  binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  VkDescriptorSetLayoutCreateInfo dlci{};
+  dlci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  dlci.bindingCount = 1;
+  dlci.pBindings = &binding;
+  if (const VkResult r =
+          vkCreateDescriptorSetLayout(ctx_->device(), &dlci, nullptr, &blurSetLayout_);
+      r != VK_SUCCESS) {
+    return fail(ErrorCode::Internal, "cannot create the blur set layout: " + describe(r));
+  }
+
+  VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2};
+  VkDescriptorPoolCreateInfo dpci{};
+  dpci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  dpci.maxSets = 2;
+  dpci.poolSizeCount = 1;
+  dpci.pPoolSizes = &size;
+  if (const VkResult r =
+          vkCreateDescriptorPool(ctx_->device(), &dpci, nullptr, &blurPool_);
+      r != VK_SUCCESS) {
+    return fail(ErrorCode::Internal, "cannot create the blur pool: " + describe(r));
+  }
+
+  const VkDescriptorSetLayout layouts[2]{blurSetLayout_, blurSetLayout_};
+  VkDescriptorSetAllocateInfo dsai{};
+  dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  dsai.descriptorPool = blurPool_;
+  dsai.descriptorSetCount = 2;
+  dsai.pSetLayouts = layouts;
+  VkDescriptorSet sets[2]{};
+  if (const VkResult r = vkAllocateDescriptorSets(ctx_->device(), &dsai, sets);
+      r != VK_SUCCESS) {
+    return fail(ErrorCode::Internal, "cannot allocate the blur sets: " + describe(r));
+  }
+  blurFromColor_ = sets[0];
+  blurFromScratch_ = sets[1];
+
+  VkPushConstantRange push{};
+  push.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  push.size = sizeof(BlurPush);
+  VkPipelineLayoutCreateInfo plci{};
+  plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  plci.setLayoutCount = 1;
+  plci.pSetLayouts = &blurSetLayout_;
+  plci.pushConstantRangeCount = 1;
+  plci.pPushConstantRanges = &push;
+  if (const VkResult r =
+          vkCreatePipelineLayout(ctx_->device(), &plci, nullptr, &blurLayout_);
+      r != VK_SUCCESS) {
+    return fail(ErrorCode::Internal, "cannot create the blur layout: " + describe(r));
+  }
+
+  // No vertex input at all: the shader builds a full-screen triangle from its index.
+  VkPipelineVertexInputStateCreateInfo vi{};
+  vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+  VkPipelineInputAssemblyStateCreateInfo ia{};
+  ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+  ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  VkPipelineViewportStateCreateInfo vp{};
+  vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+  vp.viewportCount = 1;
+  vp.scissorCount = 1;
+  VkPipelineRasterizationStateCreateInfo rs{};
+  rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+  rs.polygonMode = VK_POLYGON_MODE_FILL;
+  rs.cullMode = VK_CULL_MODE_NONE;
+  rs.lineWidth = 1.0f;
+  VkPipelineMultisampleStateCreateInfo ms{};
+  ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+  ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+  VkPipelineDepthStencilStateCreateInfo ds{};
+  ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+  VkPipelineColorBlendAttachmentState blend{};
+  blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                         VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+  VkPipelineColorBlendStateCreateInfo cb{};
+  cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+  cb.attachmentCount = 1;
+  cb.pAttachments = &blend;
+  const VkDynamicState dynamics[2]{VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+  VkPipelineDynamicStateCreateInfo dy{};
+  dy.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+  dy.dynamicStateCount = 2;
+  dy.pDynamicStates = dynamics;
+
+  VkPipelineShaderStageCreateInfo stages[2]{};
+  stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+  stages[0].module = blurVert_;
+  stages[0].pName = "main";
+  stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+  stages[1].module = blurFrag_;
+  stages[1].pName = "main";
+
+  const VkFormat colorFormat = OffscreenTarget::kColorFormat;
+  VkPipelineRenderingCreateInfo rendering{};
+  rendering.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+  rendering.colorAttachmentCount = 1;
+  rendering.pColorAttachmentFormats = &colorFormat;
+
+  VkGraphicsPipelineCreateInfo gpi{};
+  gpi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+  gpi.pNext = &rendering;
+  gpi.stageCount = 2;
+  gpi.pStages = stages;
+  gpi.pVertexInputState = &vi;
+  gpi.pInputAssemblyState = &ia;
+  gpi.pViewportState = &vp;
+  gpi.pRasterizationState = &rs;
+  gpi.pMultisampleState = &ms;
+  gpi.pDepthStencilState = &ds;
+  gpi.pColorBlendState = &cb;
+  gpi.pDynamicState = &dy;
+  gpi.layout = blurLayout_;
+  if (const VkResult r = vkCreateGraphicsPipelines(ctx_->device(), VK_NULL_HANDLE, 1,
+                                                   &gpi, nullptr, &blurPipeline_);
+      r != VK_SUCCESS) {
+    return fail(ErrorCode::Internal, "cannot create the blur pipeline: " + describe(r));
+  }
+  return {};
+}
+
+Result<void> BoardRenderer::bindBlurTarget(const OffscreenTarget& target) {
+  if (blurBoundColor_ == target.colorView()) return {};
+
+  VkDescriptorImageInfo fromColor{blurSampler_, target.colorView(),
+                                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+  VkDescriptorImageInfo fromScratch{blurSampler_, target.scratchView(),
+                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+  VkWriteDescriptorSet writes[2]{};
+  for (int i = 0; i < 2; ++i) {
+    writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[i].dstSet = i == 0 ? blurFromColor_ : blurFromScratch_;
+    writes[i].descriptorCount = 1;
+    writes[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[i].pImageInfo = i == 0 ? &fromColor : &fromScratch;
+  }
+  // The sets are rewritten only when the target itself was recreated - a window resize.
+  vkDeviceWaitIdle(ctx_->device());
+  vkUpdateDescriptorSets(ctx_->device(), 2, writes, 0, nullptr);
+  blurBoundColor_ = target.colorView();
   return {};
 }
 
@@ -479,15 +662,19 @@ InstanceSet BoardRenderer::buildInstances(
     emitPiece(piece, pl.x, pl.y, pl.z, pl.cell == checkCell_);
   }
 
+  // Where each sub-board ended up. Measured once and used twice: by the plinths, and by
+  // the rails that run under a timeline.
+  struct Extent {
+    float minX{0}, maxX{0}, minY{0}, maxY{0}, z{0};
+    bool seen{false};
+    bool present{false};
+  };
+  std::vector<Extent> extentsBySlice(view::enumerateSlices(v.dims, cfg).size());
+
   // A plinth under each sub-board, so the cells sit on something instead of floating in
   // the dark. One per slice, because a grid of sub-boards should read as separate boards.
   {
-    struct Extent {
-      float minX{0}, maxX{0}, minY{0}, maxY{0}, z{0};
-      bool seen{false};
-      bool present{false};
-    };
-    std::vector<Extent> extents(view::enumerateSlices(v.dims, cfg).size());
+    std::vector<Extent>& extents = extentsBySlice;
     for (const view::Placement& pl : placements) {
       Extent& e = extents[pl.slice];
       if (present && present(pl.cell)) e.present = true;
@@ -523,6 +710,101 @@ InstanceSet BoardRenderer::buildInstances(
                plinth.edge);
       plinth.edgeMask = 15.0f;
       byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(plinth);
+    }
+  }
+
+  // Time's arrow, drawn under each timeline.
+  //
+  // A grid of boards says nothing about *which way* the game runs through it. On a board
+  // with a temporal axis that is the first thing a player needs: these boards are a
+  // sequence, those ones beside them are a different history of the same game. So each
+  // row of boards gets a rail beneath it with a head on the end, and the timeline the
+  // game started on is drawn in the accent while the branches are dimmer.
+  {
+    int temporalGrid = -1;
+    for (std::size_t i = 0; i < cfg.gridAxes.size(); ++i) {
+      if (v.dims.kind(cfg.gridAxes[i]) == AxisKind::Temporal) temporalGrid = static_cast<int>(i);
+    }
+    if (temporalGrid >= 0) {
+      const auto slices = view::enumerateSlices(v.dims, cfg);
+      const bool alongX = (temporalGrid % 2 == 0) != cfg.gridVertical;
+
+      // One rail per timeline: every slice that differs only in its turn coordinate.
+      std::map<std::vector<std::int16_t>, std::pair<float, float>> rails;
+      std::map<std::vector<std::int16_t>, bool> origin;
+      for (std::uint32_t si = 0; si < slices.size(); ++si) {
+        if (si >= extentsBySlice.size() || !extentsBySlice[si].seen) continue;
+        std::vector<std::int16_t> key;
+        bool isOrigin = true;
+        for (std::size_t i = 0; i < slices[si].at.size(); ++i) {
+          if (static_cast<int>(i) == temporalGrid) continue;
+          key.push_back(slices[si].at[i]);
+          if (slices[si].at[i] != 0) isOrigin = false;
+        }
+        const Extent& e = extentsBySlice[si];
+        const float lo = alongX ? e.minX : e.minY;
+        const float hi = alongX ? e.maxX : e.maxY;
+        const auto it = rails.find(key);
+        if (it == rails.end()) {
+          rails.emplace(key, std::pair{lo, hi});
+        } else {
+          it->second.first = std::min(it->second.first, lo);
+          it->second.second = std::max(it->second.second, hi);
+        }
+        origin[key] = origin.count(key) != 0 ? (origin[key] && isOrigin) : isOrigin;
+      }
+
+      for (const auto& [key, span] : rails) {
+        // The rail runs along the row's near edge rather than through its middle: under
+        // the boards it would be hidden by the very plinths it is meant to run beneath.
+        float across = 0;
+        float floorZ = 0;
+        bool seen = false;
+        for (std::uint32_t si = 0; si < slices.size(); ++si) {
+          if (si >= extentsBySlice.size() || !extentsBySlice[si].seen) continue;
+          std::vector<std::int16_t> k;
+          for (std::size_t i = 0; i < slices[si].at.size(); ++i) {
+            if (static_cast<int>(i) == temporalGrid) continue;
+            k.push_back(slices[si].at[i]);
+          }
+          if (k != key) continue;
+          const Extent& e = extentsBySlice[si];
+          const float edge = alongX ? e.minY : e.minX;
+          across = seen ? std::min(across, edge) : edge;
+          floorZ = seen ? std::min(floorZ, e.z) : e.z;
+          seen = true;
+        }
+        if (!seen) continue;
+
+        const bool isOrigin = origin[key];
+        const view::Rgba tint = isOrigin ? theme_.ember : mix(theme_.ember, theme_.rule, 0.6f);
+        across -= 1.35f;
+        const float z = floorZ - half.z - 0.10f;
+        const float head = 1.1f;
+        const float lo = span.first - 0.9f;
+        const float hi = span.second + 0.9f;
+
+        Instance rail{};
+        rail.center[0] = alongX ? (lo + hi - head) * 0.5f : across;
+        rail.center[1] = alongX ? across : (lo + hi - head) * 0.5f;
+        rail.center[2] = z;
+        rail.scale[0] = (alongX ? (hi - lo - head) * 0.5f : 0.10f) / half.x;
+        rail.scale[1] = (alongX ? 0.10f : (hi - lo - head) * 0.5f) / half.y;
+        rail.scale[2] = 0.05f / half.z;
+        toFloat4(tint, rail.color);
+        byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(rail);
+
+        // The head, as a wedge standing on the rail: it points the way the game runs.
+        Instance point{};
+        point.center[0] = alongX ? hi - head * 0.5f : across;
+        point.center[1] = alongX ? across : hi - head * 0.5f;
+        point.center[2] = z;
+        point.scale[0] = (alongX ? head * 0.5f : 0.34f) / half.x;
+        point.scale[1] = (alongX ? 0.34f : head * 0.5f) / half.y;
+        point.scale[2] = 0.05f / half.z;
+        toFloat4(tint, point.color);
+        byShape[static_cast<std::size_t>(Archetype::Wedge)].push_back(point);
+      }
     }
   }
 
@@ -592,6 +874,8 @@ Result<void> BoardRenderer::render(const OffscreenTarget& target, const Instance
     std::memcpy(mapped, set.instances.data(), set.instances.size() * sizeof(Instance));
     vkUnmapMemory(ctx_->device(), instanceMem_);
   }
+
+  if (auto r = bindBlurTarget(target); !r.has_value()) return r;
 
   const BoardRect board = boardRect.valid()
                               ? boardRect
@@ -684,19 +968,109 @@ Result<void> BoardRenderer::render(const OffscreenTarget& target, const Instance
                          range.vertexOffset, batch.first);
       }
     }
+    vkCmdEndRendering(cmd);
+
+    const VkViewport full{0,
+                          0,
+                          static_cast<float>(target.width()),
+                          static_cast<float>(target.height()),
+                          0.0f,
+                          1.0f};
+    const VkRect2D fullScissor{{0, 0}, {target.width(), target.height()}};
+
+    // Defocus, in two separable passes that ping-pong between the target's two colour
+    // images and therefore leave the result back in the first one. Skipped entirely when
+    // nothing is out of focus, so a game in play pays for none of this.
+    if (blur_ > 0.001f) {
+      const auto blurPass = [&](VkImageView into, VkDescriptorSet from, float dx,
+                                float dy) {
+        VkRenderingAttachmentInfo att{};
+        att.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        att.imageView = into;
+        att.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        att.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        VkRenderingInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+        info.renderArea = fullScissor;
+        info.layerCount = 1;
+        info.colorAttachmentCount = 1;
+        info.pColorAttachments = &att;
+
+        BlurPush bp{};
+        bp.direction[0] = dx;
+        bp.direction[1] = dy;
+        bp.strength = std::clamp(blur_, 0.0f, 1.0f);
+        // Only the second pass dims: doing it in both would square the effect.
+        bp.dim = dy != 0.0f ? 0.22f * bp.strength : 0.0f;
+        toFloat4(theme_.ink, bp.ground);
+
+        vkCmdBeginRendering(cmd, &info);
+        vkCmdSetViewport(cmd, 0, 1, &full);
+        vkCmdSetScissor(cmd, 0, 1, &fullScissor);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, blurPipeline_);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, blurLayout_, 0, 1,
+                                &from, 0, nullptr);
+        vkCmdPushConstants(cmd, blurLayout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                           sizeof(BlurPush), &bp);
+        vkCmdDraw(cmd, 3, 1, 0, 0);
+        vkCmdEndRendering(cmd);
+      };
+
+      // Across, into the scratch image.
+      barrier(target.colorImage(), VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+              VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+              VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+      barrier(target.scratchImage(), VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
+              VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+              VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+      const float radius = 2.6f;
+      blurPass(target.scratchView(), blurFromColor_,
+               radius / static_cast<float>(target.width()), 0.0f);
+
+      // And down, back into the image everything else expects to find the frame in.
+      barrier(target.scratchImage(), VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+              VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+              VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+      barrier(target.colorImage(), VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+              VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+              VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+      blurPass(target.colorView(), blurFromScratch_, 0.0f,
+               radius / static_cast<float>(target.height()));
+    }
+
+    // The interface is drawn last and never blurred: the menu in front of a defocused
+    // board is the one thing on screen that has to stay sharp.
     if (overlay) {
-      VkViewport full{0,
-                      0,
-                      static_cast<float>(target.width()),
-                      static_cast<float>(target.height()),
-                      0.0f,
-                      1.0f};
-      VkRect2D fullScissor{{0, 0}, {target.width(), target.height()}};
+      VkRenderingAttachmentInfo att{};
+      att.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+      att.imageView = target.colorView();
+      att.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+      att.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+      att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+      VkRenderingInfo info{};
+      info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+      info.renderArea = fullScissor;
+      info.layerCount = 1;
+      info.colorAttachmentCount = 1;
+      info.pColorAttachments = &att;
+      vkCmdBeginRendering(cmd, &info);
       vkCmdSetViewport(cmd, 0, 1, &full);
       vkCmdSetScissor(cmd, 0, 1, &fullScissor);
       overlay(cmd);
+      vkCmdEndRendering(cmd);
     }
-    vkCmdEndRendering(cmd);
 
     barrier(target.colorImage(), VK_IMAGE_ASPECT_COLOR_BIT,
             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -736,6 +1110,17 @@ BoardRenderer& BoardRenderer::operator=(BoardRenderer&& o) noexcept {
   std::swap(frag_, o.frag_);
   std::swap(layout_, o.layout_);
   std::swap(pipeline_, o.pipeline_);
+  std::swap(blurVert_, o.blurVert_);
+  std::swap(blurFrag_, o.blurFrag_);
+  std::swap(blurLayout_, o.blurLayout_);
+  std::swap(blurPipeline_, o.blurPipeline_);
+  std::swap(blurSetLayout_, o.blurSetLayout_);
+  std::swap(blurPool_, o.blurPool_);
+  std::swap(blurSampler_, o.blurSampler_);
+  std::swap(blurFromColor_, o.blurFromColor_);
+  std::swap(blurFromScratch_, o.blurFromScratch_);
+  std::swap(blurBoundColor_, o.blurBoundColor_);
+  std::swap(blur_, o.blur_);
   std::swap(backdropVert_, o.backdropVert_);
   std::swap(backdropFrag_, o.backdropFrag_);
   std::swap(backdropLayout_, o.backdropLayout_);
@@ -759,6 +1144,14 @@ BoardRenderer::~BoardRenderer() {
     vkDestroyPipeline(d, backdropPipeline_, nullptr);
   if (backdropLayout_ != VK_NULL_HANDLE)
     vkDestroyPipelineLayout(d, backdropLayout_, nullptr);
+  if (blurPipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(d, blurPipeline_, nullptr);
+  if (blurLayout_ != VK_NULL_HANDLE) vkDestroyPipelineLayout(d, blurLayout_, nullptr);
+  if (blurPool_ != VK_NULL_HANDLE) vkDestroyDescriptorPool(d, blurPool_, nullptr);
+  if (blurSetLayout_ != VK_NULL_HANDLE)
+    vkDestroyDescriptorSetLayout(d, blurSetLayout_, nullptr);
+  if (blurSampler_ != VK_NULL_HANDLE) vkDestroySampler(d, blurSampler_, nullptr);
+  if (blurVert_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, blurVert_, nullptr);
+  if (blurFrag_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, blurFrag_, nullptr);
   if (backdropVert_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, backdropVert_, nullptr);
   if (backdropFrag_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, backdropFrag_, nullptr);
   if (vert_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, vert_, nullptr);

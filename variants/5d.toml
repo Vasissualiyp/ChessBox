@@ -33,6 +33,12 @@ extent = 8
 name = "turn"
 extent = 10
 kind = "temporal"
+# Every half-move appends a board, so boards along this axis alternate whose move it is
+# and one *turn* of travel is two of them. Without this a knight going one turn back
+# arrives on a board where it is the opponent to move - which is not a board it may be
+# on at all. Contrast the line axis: a timeline hop keeps the turn, and so keeps whose
+# move it is, and therefore has the ordinary pitch of one.
+pitch = 2
 
 [[axis]]
 name = "line"

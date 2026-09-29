@@ -157,6 +157,10 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
     if (!kind.has_value())
       return fail(kind.error().code, kind.error().message, kind.error().line);
     a.kind = *kind;
+    // How many boards one unit of movement along this axis covers. Stated rather than
+    // inferred from the kind: "temporal axes step two" would be the engine knowing what
+    // time is, and the whole point of ADR-0007 is that it does not.
+    a.pitch = (*t)["pitch"].value_or(1);
     if (a.name.empty()) {
       return fail(ErrorCode::ValidationError, "every axis needs a 'name'", lineOf(node));
     }

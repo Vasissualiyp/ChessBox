@@ -23,6 +23,18 @@ struct AxisDecl {
   std::int32_t extent{0};
   AxisKind kind{AxisKind::Spatial};
   std::string name;
+  /// How many lattice cells one *unit of movement* along this axis covers.
+  ///
+  /// Almost always 1: a rook moving one square along a file moves one cell. The turn
+  /// axis is the exception that forced it to exist. Every half-move appends a board, so
+  /// boards along that axis alternate whose move it is, and one turn of travel is two
+  /// boards - a piece stepping a single board through time would arrive on a board
+  /// where it is the opponent to move, which is not a board it may be on at all.
+  ///
+  /// It is a property of the *axis*, not of the piece: every piece that can move through
+  /// time does so in whole turns, so stating it once beside the axis is both shorter and
+  /// impossible to declare inconsistently.
+  std::int32_t pitch{1};
 };
 
 /// The shape of a lattice: extents, kinds, and the row-major strides that turn a
@@ -34,6 +46,7 @@ class DimSpec {
   [[nodiscard]] std::uint8_t dims() const noexcept { return n_; }
   [[nodiscard]] std::int16_t extent(std::size_t a) const noexcept { return extent_[a]; }
   [[nodiscard]] AxisKind kind(std::size_t a) const noexcept { return kind_[a]; }
+  [[nodiscard]] std::int16_t pitch(std::size_t a) const noexcept { return pitch_[a]; }
   [[nodiscard]] const std::string& name(std::size_t a) const noexcept {
     return names_[a];
   }
@@ -82,6 +95,7 @@ class DimSpec {
   std::uint8_t n_{0};
   std::array<std::int16_t, kMaxDims> extent_{};
   std::array<AxisKind, kMaxDims> kind_{};
+  std::array<std::int16_t, kMaxDims> pitch_{};
   std::array<std::uint32_t, kMaxDims> stride_{};
   std::array<std::string, kMaxDims> names_{};
   std::uint32_t cellCount_{0};

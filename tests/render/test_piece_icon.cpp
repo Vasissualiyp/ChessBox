@@ -114,3 +114,35 @@ TEST_CASE("a style name survives a round trip through the settings file", "[rend
   // build must still load.
   CHECK(iconStyleFromName("nonsense") == IconStyle::Faceted);
 }
+
+// ---------------------------------------------------------------------------
+// Time's arrow. A grid of boards does not say which way the game runs through it, and on
+// a board with a turn axis that is the first thing a player has to know.
+// ---------------------------------------------------------------------------
+#ifdef CB_HAVE_VULKAN
+#include "render/board_renderer.hpp"
+#include "support/variants.hpp"
+#include "view/snapshot.hpp"
+
+TEST_CASE("a temporal board draws a rail under each timeline", "[render]") {
+  using namespace cb;
+  BoardRenderer renderer;
+
+  const VariantSpec flat = test::loadVariant("standard");
+  const Position fp = Position::startPosition(flat);
+  const InstanceSet plain = renderer.buildInstances(view::PositionView::capture(fp),
+                                                    view::ViewConfig::forBoard(flat.dims));
+  // A board with no turn axis has no arrow to draw: the wedge batch is pieces only, and
+  // standard chess has exactly two knights per side.
+  const std::uint32_t knights =
+      plain.batches[static_cast<std::size_t>(Archetype::Wedge)].count;
+  CHECK(knights == 4);
+
+  const VariantSpec five = test::loadVariant("5d");
+  const Position sp = Position::startPosition(five);
+  const InstanceSet temporal = renderer.buildInstances(
+      view::PositionView::capture(sp), view::ViewConfig::forBoard(five.dims));
+  // Every timeline gets a head, so there are more wedges here than there are knights.
+  CHECK(temporal.batches[static_cast<std::size_t>(Archetype::Wedge)].count > 4);
+}
+#endif

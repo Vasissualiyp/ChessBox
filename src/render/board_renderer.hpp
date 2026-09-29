@@ -80,6 +80,14 @@ class BoardRenderer {
 
   [[nodiscard]] const view::Theme& theme() const noexcept { return theme_; }
   void setTheme(const view::Theme& t) noexcept { theme_ = t; }
+  /// How far out of focus the board is, 0 to 1.
+  ///
+  /// Pause steps the camera back and throws the board out of focus so the menu in front
+  /// of it is what the eye lands on. Zero costs nothing at all - the passes are skipped,
+  /// not run with a zero radius - so a game in play pays for none of it.
+  void setBlur(float strength) noexcept { blur_ = strength; }
+  [[nodiscard]] float blur() const noexcept { return blur_; }
+
   [[nodiscard]] const BoardOptions& options() const noexcept { return options_; }
   void setOptions(const BoardOptions& o) noexcept { options_ = o; }
 
@@ -120,6 +128,10 @@ class BoardRenderer {
  private:
   Result<void> buildPipeline();
   Result<void> buildBackdropPipeline();
+  Result<void> buildBlurPipeline();
+  /// Point the two descriptor sets at this target's images. Cheap and idempotent: it
+  /// only does work when the target has been recreated, which happens on a resize.
+  Result<void> bindBlurTarget(const OffscreenTarget& target);
   Result<void> uploadGeometry();
   Result<void> ensureInstanceCapacity(std::size_t count);
 
@@ -141,6 +153,20 @@ class BoardRenderer {
   VkShaderModule backdropFrag_{VK_NULL_HANDLE};
   VkPipelineLayout backdropLayout_{VK_NULL_HANDLE};
   VkPipeline backdropPipeline_{VK_NULL_HANDLE};
+
+  // The defocus pass. One pipeline, one sampler, and two descriptor sets that ping-pong
+  // between the target's two colour images.
+  VkShaderModule blurVert_{VK_NULL_HANDLE};
+  VkShaderModule blurFrag_{VK_NULL_HANDLE};
+  VkPipelineLayout blurLayout_{VK_NULL_HANDLE};
+  VkPipeline blurPipeline_{VK_NULL_HANDLE};
+  VkDescriptorSetLayout blurSetLayout_{VK_NULL_HANDLE};
+  VkDescriptorPool blurPool_{VK_NULL_HANDLE};
+  VkSampler blurSampler_{VK_NULL_HANDLE};
+  VkDescriptorSet blurFromColor_{VK_NULL_HANDLE};
+  VkDescriptorSet blurFromScratch_{VK_NULL_HANDLE};
+  VkImageView blurBoundColor_{VK_NULL_HANDLE};
+  float blur_{0.0f};
 
   VkBuffer vertexBuffer_{VK_NULL_HANDLE};
   VkDeviceMemory vertexMem_{VK_NULL_HANDLE};

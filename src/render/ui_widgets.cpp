@@ -2,6 +2,7 @@
 #include "render/ui_widgets.hpp"
 
 #include <algorithm>
+#include <map>
 #include <cstdio>
 #include <cmath>
 
@@ -249,6 +250,32 @@ bool menuEntry(const char* label, int index, const view::Theme& theme, ImFont* l
   return pressed && enabled;
 }
 
+namespace {
+
+/// How tall each pane's content was last frame, so it can be centred this frame.
+///
+/// Measured rather than declared: the content is laid out by ImGui and depends on the
+/// interface scale, the fonts and the text itself, so the only honest height is the one
+/// it actually came out at. One frame of lag is invisible; a menu whose last row falls
+/// off the bottom at a large interface scale is not.
+std::map<std::string, float>& paneHeights() {
+  static std::map<std::string, float> heights;
+  return heights;
+}
+std::string& currentPane() {
+  static std::string id;
+  return id;
+}
+/// Where this pane's content actually began. Subtracted again when the height is
+/// recorded, or centring would feed back into its own measurement and creep down the
+/// screen a little further every frame.
+float& currentPaneTop() {
+  static float top = 0;
+  return top;
+}
+
+}  // namespace
+
 void beginPane(const char* id, ImVec2 min, ImVec2 max, float enter, float pad) {
   const float e = std::clamp(enter, 0.0f, 1.0f);
   const float eased = e * e * (3.0f - 2.0f * e);
@@ -269,9 +296,18 @@ void beginPane(const char* id, ImVec2 min, ImVec2 max, float enter, float pad) {
                    ImGuiWindowFlags_NoBackground);
   // Text has to travel with the pane or only the boxes move.
   ImGui::SetWindowFontScale(k);
+
+  currentPane() = id;
+  currentPaneTop() = ImGui::GetCursorPosY();
+  const auto it = paneHeights().find(id);
+  if (it != paneHeights().end() && it->second < size.y) {
+    currentPaneTop() = (size.y - it->second) * 0.5f;
+    ImGui::SetCursorPosY(currentPaneTop());
+  }
 }
 
 void endPane() {
+  paneHeights()[currentPane()] = ImGui::GetCursorPosY() - currentPaneTop();
   ImGui::SetWindowFontScale(1.0f);
   ImGui::End();
   ImGui::PopStyleColor(2);

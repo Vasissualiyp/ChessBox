@@ -21,6 +21,11 @@ time-travel rules subtly wrong, which is the dominant risk of this milestone.
   `AxisKind::Temporal` / `Multiverse`. Movegen already treats them as ordinary
   axes — a time jump is a direction with a nonzero `t` component. Nothing in
   L4/L5 changes; this is the payoff of ARCH §3.
+- **One correction to that, found in play and recorded as ADR-0013.** Boards along
+  the turn axis alternate whose move it is, so one *turn* of travel is two boards.
+  The axis declares `pitch = 2` and the scaling is applied once, where the direction
+  table is built. Without it a knight going one turn back arrived on a board where
+  it was the opponent to move — a board it may not stand on at all.
 - Boards are the (t, l) slices of the single lattice, not separate objects. This
   is what makes cross-board check fall out of ordinary attack generation.
 - Sparse timelines: the `l` extent is a capacity; an allocation map tracks which

@@ -70,6 +70,19 @@ const std::vector<Direction>& directionsFor(const VariantSpec& v, const MoveAtom
           ? expandAtomOriented(atom.mags, v.dims.dims(),
                                static_cast<std::uint8_t>(v.orientationAxis), side)
           : expandAtom(atom.mags, v.dims.dims());
+
+  // An atom's magnitudes are units of *movement*; a direction is in lattice cells, and
+  // an axis may be sampled more finely than a piece moves along it - the turn axis holds
+  // two boards per turn, one for each player. Written out here rather than shared with
+  // the engine's own scaling: the oracle is only worth having while it is an independent
+  // implementation of the same rule.
+  for (Direction& d : dirs) {
+    std::array<std::int16_t, kMaxDims> v2{};
+    for (std::uint8_t a = 0; a < d.n; ++a) {
+      v2[a] = static_cast<std::int16_t>(d.v[a] * v.dims.pitch(a));
+    }
+    d = Direction::make(v2, d.n);
+  }
   return cache.emplace(key, std::move(dirs)).first->second;
 }
 

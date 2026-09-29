@@ -162,6 +162,12 @@ These are the ones that have actually cost time here, not hypotheticals.
   support (1–3 axes), not the dimension count; `docs/plan/M2-nd-generalization.md`
   records the measurement reasoning.
 - `kMaxDims = 8` lives in `src/space/dims.hpp` and nowhere else.
+- **An atom's magnitudes are units of *movement*, not cells** - see ADR-0013. An axis
+  declares a `pitch` for how many cells one unit covers; the turn axis uses 2, because
+  boards along it alternate whose move it is and one turn of travel is two boards. The
+  scaling is applied once, where the direction table is built, so nothing below the
+  variant layer ever sees anything but lattice cells. The oracle applies the same rule
+  from its own code, deliberately.
 - **Pieces have no model files.** A shape is assembled from primitives against an
   archetype (`src/render/piece_mesh.cpp`); a variant may name one, and anything it
   leaves out is derived from how the piece moves. An unknown name falls back rather

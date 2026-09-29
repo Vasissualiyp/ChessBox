@@ -50,8 +50,8 @@ std::vector<std::string> variantLibrary() {
   return names;
 }
 
-std::unique_ptr<app::Shell> makeShell() {
-  auto shell = app::Shell::create(variantLibrary());
+std::unique_ptr<app::Shell> makeShell(const std::filesystem::path& settings = {}) {
+  auto shell = app::Shell::create(variantLibrary(), settings);
   shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
     auto v = loadVariantFile(variantDir() / (name + ".toml"));
     if (!v.has_value()) return fail(v.error().code, v.error().message);
@@ -93,7 +93,11 @@ void syncMarks(render::BoardRenderer& renderer, const app::Session& session) {
 /// how the interface gets reviewed at all.
 int captureFrame(const std::string& variantName, const std::string& path,
                  const std::string& script, const std::string& screen) {
-  auto shell = makeShell();
+  // Captures use default settings, never the person's own. A screenshot that changes
+  // because whoever ran it likes a larger interface is not a screenshot of the game -
+  // and `ctest -R gui-` would then pass or fail by whose machine it ran on.
+  auto shell = makeShell(std::filesystem::temp_directory_path() /
+                         "chessbox-capture-defaults.conf");
   if (auto ok = shell->startGame(variantName); !ok.has_value()) {
     std::fprintf(stderr, "cannot load '%s': %s\n", variantName.c_str(),
                  ok.error().format().c_str());
@@ -169,6 +173,12 @@ int captureFrame(const std::string& variantName, const std::string& path,
                                  request.boardRect[2], request.boardRect[3]};
     render::InstanceSet instances;
     if (shell->showsBoard()) {
+      // A capture of a screen that sits over the board shows it exactly as a player
+      // would see it - stepped back and out of focus - which is also what puts the blur
+      // passes under the validation layers in `ctest -R gui-pause`.
+      const float away = shell->screen() == app::Screen::Game ? 0.0f : 1.0f;
+      shell->session()->setPullBack(away);
+      renderer->setBlur(away);
       if (rect.valid()) shell->session()->setBoardAspect(rect.width / rect.height);
       syncMarks(*renderer, *shell->session());
       instances = renderer->buildInstances(
@@ -298,7 +308,8 @@ int main(int argc, char** argv) {
                               static_cast<float>(window->height())};
   // How far the camera has stepped back off the board. Pause is not a dialog landing on
   // top of the position - it is the player looking up from it - so the view pulls away
-  // rather than being covered.
+  // rather than being covered. It lives on the session so that the board, the flat
+  // board's pieces and the picking ray all see the same camera.
   float steppedBack = 0.0f;
   bool running = true;
   bool orbiting = false;
@@ -376,7 +387,7 @@ int main(int argc, char** argv) {
           }
           break;
         case SDL_EVENT_MOUSE_WHEEL: {
-          if (consumed || !shell->hasGame()) break;
+          if (consumed || !inGame) break;
           app::Action a;
           a.kind = app::ActionKind::Zoom;
           const float step = 0.1f * settings.zoomSensitivity;
@@ -422,6 +433,18 @@ int main(int argc, char** argv) {
     lastFrame = now;
     if (dt > 0.0f) fps = fps * 0.9f + (1.0f / dt) * 0.1f;
 
+    // Stepping back off the board, and coming back to it. Held on the session so the
+    // board, the flat board's pieces and the picking ray cannot disagree about where
+    // the camera is.
+    if (shell->hasGame()) {
+      const float want = shell->screen() == app::Screen::Game ? 0.0f : 1.0f;
+      steppedBack += std::clamp(want - steppedBack, -dt * 3.4f, dt * 3.4f);
+      shell->session()->setPullBack(steppedBack);
+      // Out of focus by the same amount the camera has stepped back, so the two read as
+      // one movement rather than as two effects that happen to coincide.
+      renderer->setBlur(steppedBack);
+    }
+
 #ifdef CB_HAVE_IMGUI
     (*ui)->tick(dt);
     (*ui)->newFrame();
@@ -463,10 +486,6 @@ int main(int argc, char** argv) {
           [&](CellId c) { return shell->session()->boardVisible(c); },
           [&](CellId c) { return shell->session()->game().cellInPresent(c); });
       camera = shell->session()->camera();
-      const bool away = shell->screen() != app::Screen::Game;
-      const float want = away ? 1.0f : 0.0f;
-      steppedBack += std::clamp(want - steppedBack, -dt * 3.2f, dt * 3.2f);
-      camera.distance *= 1.0f + 0.16f * steppedBack;
     }
 
     const auto overlay = [&](VkCommandBuffer cmd) {

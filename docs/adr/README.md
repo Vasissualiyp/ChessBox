@@ -23,3 +23,4 @@ Template: [`template.md`](template.md).
 | [0010](0010-closed-surface-ray-semantics.md) | Ray termination, dedup, and attack queries on glued boards | Accepted |
 | [0011](0011-headless-first-renderer.md) | Headless-first renderer; the window is a blit | Accepted |
 | [0012](0012-quantum-chess.md) | Quantum chess needs an ensemble; not built, and why | Accepted |
+| [0013](0013-axis-pitch.md) | An axis may be sampled more finely than a piece moves along it | Accepted |

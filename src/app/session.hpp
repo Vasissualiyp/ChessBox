@@ -52,7 +52,18 @@ class Session {
   [[nodiscard]] const Game& game() const noexcept { return *game_; }
   [[nodiscard]] const view::PositionView& snapshot() const noexcept { return snapshot_; }
   [[nodiscard]] const view::ViewConfig& viewConfig() const noexcept { return viewCfg_; }
-  [[nodiscard]] const view::OrbitCamera& camera() const noexcept { return camera_; }
+  /// The camera to draw and to pick with.
+  ///
+  /// Returned by value because it is not simply the stored one: pausing steps the view
+  /// back off the board, and *everything* that places something on screen has to agree
+  /// about that. Handing out the stored camera is how the board once pulled away while
+  /// the pieces drawn on top of it stayed put.
+  [[nodiscard]] view::OrbitCamera camera() const noexcept;
+
+  /// How far the view has stepped back off the board, 0 to 1. Pause is the player
+  /// looking up from the position, not a panel landing on top of it.
+  void setPullBack(float t) noexcept { pullBack_ = std::clamp(t, 0.0f, 1.0f); }
+  [[nodiscard]] float pullBack() const noexcept { return pullBack_; }
   /// Where the board is glued to itself, and in what colour. Built once per variant.
   [[nodiscard]] const view::SeamMap& seams() const noexcept { return seams_; }
   /// The palette the seams and the move animation are coloured from. Held here rather
@@ -152,6 +163,7 @@ class Session {
   bool flat_{false};
   CellId selected_{kInvalidCell};
   float boardAspect_{1.3f};
+  float pullBack_{0.0f};
   bool framedOnce_{false};
   PendingPromotion pending_;
   std::string promotionPreference_;

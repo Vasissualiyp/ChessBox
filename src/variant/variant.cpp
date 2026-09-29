@@ -52,6 +52,28 @@ PieceTypeId VariantSpec::findPieceBySymbol(char upper) const {
   return kNoPiece;
 }
 
+namespace {
+
+/// Turn a direction expressed in *units of movement* into one in lattice cells.
+///
+/// The expansion is pure combinatorics over magnitudes and axes, and it stays that way:
+/// the pitch is applied once here, on the way into the direction table, so every layer
+/// below this one goes on seeing directions in the only units it cares about. A board
+/// whose axes all have pitch 1 - which is every variant but the temporal ones - gets
+/// back exactly what it put in.
+Direction scaleByPitch(const DimSpec& dims, const Direction& d) {
+  bool scaled = false;
+  std::array<std::int16_t, kMaxDims> v{};
+  for (std::uint8_t a = 0; a < d.n; ++a) {
+    const std::int16_t p = dims.pitch(a);
+    v[a] = static_cast<std::int16_t>(d.v[a] * p);
+    if (p != 1 && d.v[a] != 0) scaled = true;
+  }
+  return scaled ? Direction::make(v, d.n) : d;
+}
+
+}  // namespace
+
 Result<void> VariantSpec::finalize() {
   if (finalized_) return fail(ErrorCode::Internal, "variant finalized twice");
   if (pieces.empty() || !pieces[0].name.empty()) {
@@ -114,7 +136,7 @@ Result<void> VariantSpec::finalize() {
         }
 
         const auto begin = static_cast<std::uint32_t>(dirTable.size());
-        for (const Direction& d : dirs) dirTable.push_back(d);
+        for (const Direction& d : dirs) dirTable.push_back(scaleByPitch(dims, d));
         atom.dirBegin[ci] = begin;
         atom.dirEnd[ci] = static_cast<std::uint32_t>(dirTable.size());
 
@@ -134,7 +156,9 @@ Result<void> VariantSpec::finalize() {
       // already is its threat span.
       if (atom.oriented && !geom.isBox()) {
         const auto begin = static_cast<std::uint32_t>(dirTable.size());
-        for (const Direction& d : expandAtom(atom.mags, nd)) dirTable.push_back(d);
+        for (const Direction& d : expandAtom(atom.mags, nd)) {
+          dirTable.push_back(scaleByPitch(dims, d));
+        }
         const auto end = static_cast<std::uint32_t>(dirTable.size());
         for (int ci = 0; ci < kNumColors; ++ci) {
           atom.threatBegin[ci] = begin;

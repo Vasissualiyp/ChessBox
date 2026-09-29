@@ -34,6 +34,15 @@ class OffscreenTarget {
   [[nodiscard]] VkImage colorImage() const noexcept { return color_; }
   [[nodiscard]] VkImage depthImage() const noexcept { return depth_; }
 
+  /// A second colour image the same size as the first.
+  ///
+  /// A separable blur needs somewhere to put the horizontal pass before the vertical one
+  /// reads it back, and ping-ponging between two images means the result lands in the
+  /// first one again with no copy. Nothing else uses it, and a frame that does not blur
+  /// never touches it.
+  [[nodiscard]] VkImage scratchImage() const noexcept { return scratch_; }
+  [[nodiscard]] VkImageView scratchView() const noexcept { return scratchView_; }
+
   static constexpr VkFormat kColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
   static constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
 
@@ -49,6 +58,9 @@ class OffscreenTarget {
   VkImage color_{VK_NULL_HANDLE};
   VkDeviceMemory colorMem_{VK_NULL_HANDLE};
   VkImageView colorView_{VK_NULL_HANDLE};
+  VkImage scratch_{VK_NULL_HANDLE};
+  VkDeviceMemory scratchMem_{VK_NULL_HANDLE};
+  VkImageView scratchView_{VK_NULL_HANDLE};
   VkImage depth_{VK_NULL_HANDLE};
   VkDeviceMemory depthMem_{VK_NULL_HANDLE};
   VkImageView depthView_{VK_NULL_HANDLE};

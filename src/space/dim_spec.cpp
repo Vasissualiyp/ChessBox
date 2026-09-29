@@ -49,7 +49,13 @@ Result<DimSpec> DimSpec::create(std::span<const AxisDecl> axes) {
         return fail(ErrorCode::ValidationError, "duplicate axis name '" + a.name + "'");
       }
     }
+    if (a.pitch < 1 || a.pitch > 0x7FFF) {
+      return fail(ErrorCode::ValidationError,
+                  "axis '" + a.name + "' has pitch " + std::to_string(a.pitch) +
+                      "; a unit of movement must cover at least one cell");
+    }
     out.extent_[i] = static_cast<std::int16_t>(a.extent);
+    out.pitch_[i] = static_cast<std::int16_t>(a.pitch);
     out.kind_[i] = a.kind;
     out.names_[i] = a.name;
     total *= static_cast<std::uint64_t>(a.extent);

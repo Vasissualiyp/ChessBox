@@ -143,6 +143,18 @@ std::string Shell::variantDescription(const std::string& name) const {
   return v.has_value() ? v->description : std::string{};
 }
 
+const VariantSpec* Shell::preview(const std::string& name) const {
+  if (name.empty()) return nullptr;
+  // A running game already holds the spec, and it is the same one.
+  if (session_ != nullptr && currentVariant_ == name) return &session_->variant();
+  if (previewName_ == name) return preview_.get();
+  if (!loader_) return nullptr;
+  auto v = loader_(name);
+  previewName_ = name;
+  preview_ = v.has_value() ? std::make_unique<VariantSpec>(std::move(*v)) : nullptr;
+  return preview_.get();
+}
+
 void Shell::resume() {
   if (session_ != nullptr) go(Screen::Game);
 }
