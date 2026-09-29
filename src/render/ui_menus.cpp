@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Every screen that is not the board: the main menu, the variant picker, pause,
-// settings, the creator, and the two reference screens.
+// settings, the editor, and the two reference screens.
 //
 // They read state from app::Shell and report intent back through UiRequest. Nothing
 // here decides anything - which is the same rule the board follows, and is why the
@@ -116,53 +116,44 @@ UiRequest Ui::buildMainMenu(app::Shell& shell) {
   const view::Theme& t = theme_;
   auto* display = static_cast<ImFont*>(fontDisplay_);
   auto* small = static_cast<ImFont*>(fontSmall_);
+  auto* mono = static_cast<ImFont*>(fontMono_);
 
-  beginPlate("##mainmenu", t, ImVec2(px(430), 0), 0.5f);
-  ImGui::PushFont(display);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.ember));
-  ImGui::TextUnformatted("CHESSBOX");
-  ImGui::PopStyleColor();
-  ImGui::PopFont();
-
+  ImVec2 menuMin, menuMax;
+  drawShellFrame(shell, menuMin, menuMax);
+  beginPane("##mainmenu", menuMin, menuMax, enter_, px(46.0f));
+  eyebrow("chessbox", t, mono, scale_);
+  screenTitle("Every board", t, display, scale_, 2.4f);
+  screenTitle("you can define.", t, display, scale_, 2.4f);
   ImGui::PushFont(small);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
-  ImGui::TextUnformatted("a sandbox for games on boards of any shape");
+  ImGui::TextWrapped(
+      "Any number of axes. Any gluing. Pieces as vectors. Time as another direction to "
+      "move in.");
   ImGui::PopStyleColor();
   ImGui::PopFont();
-  ImGui::Dummy(ImVec2(0, px(10)));
+  ImGui::Dummy(ImVec2(0, px(14)));
 
   const float width = ImGui::GetContentRegionAvail().x;
-  if (menuEntry("New game", t, display, width, true, scale_)) {
+  if (menuEntry("New game", 1, t, display, width, true, scale_)) {
     shell.go(app::Screen::NewGame);
   }
-  if (menuEntry("Continue", t, display, width, false, scale_)) {
+  // Disabled rows stay in the list, marked and nothing more. A menu that hides what is
+  // coming is dishonest; one that explains itself every time the pointer crosses it is
+  // just noisy.
+  if (menuEntry("Continue", 2, t, display, width, false, scale_)) {
     // unreachable while disabled, but kept so enabling it is a one-word change
   }
-  if (ImGui::IsItemHovered()) shell.noteUnbuilt(app::Unbuilt::Continue);
-  if (menuEntry("Multiplayer", t, display, width, false, scale_)) {
+  if (menuEntry("Multiplayer", 3, t, display, width, false, scale_)) {
   }
-  if (ImGui::IsItemHovered()) shell.noteUnbuilt(app::Unbuilt::Multiplayer);
-  if (menuEntry("Creator", t, display, width, true, scale_)) {
-    shell.go(app::Screen::Creator);
+  if (menuEntry("Editor", 4, t, display, width, true, scale_)) {
+    shell.go(app::Screen::Editor);
   }
-  if (menuEntry("Settings", t, display, width, true, scale_)) {
+  if (menuEntry("Settings", 5, t, display, width, true, scale_)) {
     shell.go(app::Screen::Settings);
   }
-  if (menuEntry("Quit", t, display, width, true, scale_)) request.quit = true;
+  if (menuEntry("Quit", 6, t, display, width, true, scale_)) request.quit = true;
 
-  // Hovering something unbuilt explains where the game actually stands, rather than
-  // leaving a dead entry with no reason attached.
-  const app::Unbuilt pending = shell.lastUnbuiltAttempt();
-  if (pending != app::Unbuilt::None) {
-    ImGui::Dummy(ImVec2(0, px(6)));
-    ImGui::PushFont(small);
-    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
-    ImGui::TextWrapped("%s: %s", std::string(app::unbuiltName(pending)).c_str(),
-                       std::string(app::unbuiltNote(pending)).c_str());
-    ImGui::PopStyleColor();
-    ImGui::PopFont();
-  }
-  endPlate();
+  endPane();
   return request;
 }
 
@@ -171,14 +162,14 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   const view::Theme& t = theme_;
   auto* display = static_cast<ImFont*>(fontDisplay_);
   auto* small = static_cast<ImFont*>(fontSmall_);
+  auto* mono = static_cast<ImFont*>(fontMono_);
 
-  beginPlate("##newgame", t, ImVec2(px(690), px(534)), 0.5f);
-  ImGui::PushFont(display);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.ember));
-  ImGui::TextUnformatted("NEW GAME");
-  ImGui::PopStyleColor();
-  ImGui::PopFont();
-  ImGui::Dummy(ImVec2(0, px(8)));
+  ImVec2 menuMin, menuMax;
+  drawShellFrame(shell, menuMin, menuMax);
+  beginPane("##newgame", menuMin, menuMax, enter_, px(46.0f));
+  eyebrow("new game", t, mono, scale_);
+  screenTitle("Library", t, display, scale_, 2.2f);
+  ImGui::Dummy(ImVec2(0, px(6)));
 
   if (pickedVariant_.empty()) {
     pickedVariant_ = shell.currentVariant();
@@ -194,9 +185,13 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   }
 
   const float rowH = px(26.0f);
+  // Proportional, not a pixel count: the pane is half the window, and a width chosen
+  // for a fixed plate squeezes the description to one letter per line.
+  const float listW = ImGui::GetContentRegionAvail().x * 0.44f;
+  const float listH = ImGui::GetContentRegionAvail().y - px(70.0f);
   ImGui::PushStyleColor(ImGuiCol_ChildBg, col(t.ink, 0.45f));
   ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
-  ImGui::BeginChild("##library", ImVec2(px(240), px(384)), ImGuiChildFlags_Border);
+  ImGui::BeginChild("##library", ImVec2(listW, listH), ImGuiChildFlags_Border);
   for (const std::string& name : shell.library()) {
     const bool active = name == pickedVariant_;
     ImGui::PushID(name.c_str());
@@ -224,7 +219,7 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   ImGui::PopStyleColor();
 
   ImGui::SameLine();
-  ImGui::BeginChild("##details", ImVec2(0, px(384)));
+  ImGui::BeginChild("##details", ImVec2(0, listH));
   ImGui::PushFont(display);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.bone));
   ImGui::TextUnformatted(upper(pickedVariant_).c_str());
@@ -262,7 +257,7 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
     ImGui::PopStyleColor();
     ImGui::PopFont();
   }
-  endPlate();
+  endPane();
   return request;
 }
 
@@ -270,52 +265,44 @@ UiRequest Ui::buildPause(app::Shell& shell) {
   UiRequest request;
   const view::Theme& t = theme_;
   auto* display = static_cast<ImFont*>(fontDisplay_);
-  auto* small = static_cast<ImFont*>(fontSmall_);
+  auto* mono = static_cast<ImFont*>(fontMono_);
 
-  beginPlate("##pause", t, ImVec2(px(400), 0), 0.5f);
-  ImGui::PushFont(display);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.ember));
-  ImGui::TextUnformatted("PAUSED");
-  ImGui::PopStyleColor();
-  ImGui::PopFont();
-  ImGui::PushFont(small);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
-  ImGui::TextUnformatted(upper(shell.currentVariant()).c_str());
-  ImGui::PopStyleColor();
-  ImGui::PopFont();
-  ImGui::Dummy(ImVec2(0, px(10)));
+  beginPlate("##pause", t, ImVec2(px(420), 0), 0.5f);
+  eyebrow(shell.currentVariant().c_str(), t, mono, scale_);
+  screenTitle("Paused", t, display, scale_, 2.0f);
+  ImGui::Dummy(ImVec2(0, px(8)));
 
   const float width = ImGui::GetContentRegionAvail().x;
-  if (menuEntry("Continue", t, display, width, true, scale_)) shell.resume();
-  if (menuEntry("Game mode", t, display, width, true, scale_)) {
+  if (menuEntry("Continue", 1, t, display, width, true, scale_)) shell.resume();
+  if (menuEntry("Game mode", 2, t, display, width, true, scale_)) {
     shell.go(app::Screen::GameInfo);
   }
-  if (menuEntry("Piece moves", t, display, width, true, scale_)) {
+  if (menuEntry("Piece moves", 3, t, display, width, true, scale_)) {
     shell.go(app::Screen::PieceMoves);
   }
-  if (menuEntry("Settings", t, display, width, true, scale_)) {
+  if (menuEntry("Settings", 4, t, display, width, true, scale_)) {
     shell.go(app::Screen::Settings);
   }
-  if (menuEntry("Main menu", t, display, width, true, scale_)) {
+  if (menuEntry("Main menu", 5, t, display, width, true, scale_)) {
     shell.go(app::Screen::MainMenu);
   }
-  if (menuEntry("Quit", t, display, width, true, scale_)) request.quit = true;
+  if (menuEntry("Quit", 6, t, display, width, true, scale_)) request.quit = true;
   endPlate();
   return request;
 }
 
-UiRequest Ui::buildCreator(app::Shell& shell) {
+UiRequest Ui::buildEditor(app::Shell& shell) {
   UiRequest request;
   const view::Theme& t = theme_;
   auto* display = static_cast<ImFont*>(fontDisplay_);
   auto* small = static_cast<ImFont*>(fontSmall_);
+  auto* mono = static_cast<ImFont*>(fontMono_);
 
-  beginPlate("##creator", t, ImVec2(px(560), 0), 0.5f);
-  ImGui::PushFont(display);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.ember));
-  ImGui::TextUnformatted("CREATOR");
-  ImGui::PopStyleColor();
-  ImGui::PopFont();
+  ImVec2 menuMin, menuMax;
+  drawShellFrame(shell, menuMin, menuMax);
+  beginPane("##editor", menuMin, menuMax, enter_, px(46.0f));
+  eyebrow("editor", t, mono, scale_);
+  screenTitle("Editor", t, display, scale_, 2.0f);
   ImGui::PushFont(small);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
   ImGui::TextWrapped(
@@ -326,26 +313,14 @@ UiRequest Ui::buildCreator(app::Shell& shell) {
   ImGui::Dummy(ImVec2(0, px(10)));
 
   const float width = ImGui::GetContentRegionAvail().x;
-  if (menuEntry("Board designer", t, display, width, false, scale_)) {
+  if (menuEntry("Board designer", 1, t, display, width, false, scale_)) {
   }
-  if (ImGui::IsItemHovered()) shell.noteUnbuilt(app::Unbuilt::BoardDesigner);
-  if (menuEntry("Piece designer", t, display, width, false, scale_)) {
-  }
-  if (ImGui::IsItemHovered()) shell.noteUnbuilt(app::Unbuilt::PieceDesigner);
-
-  const app::Unbuilt pending = shell.lastUnbuiltAttempt();
-  if (pending != app::Unbuilt::None) {
-    ImGui::Dummy(ImVec2(0, px(6)));
-    ImGui::PushFont(small);
-    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
-    ImGui::TextWrapped("%s", std::string(app::unbuiltNote(pending)).c_str());
-    ImGui::PopStyleColor();
-    ImGui::PopFont();
+  if (menuEntry("Piece designer", 2, t, display, width, false, scale_)) {
   }
 
   ImGui::Dummy(ImVec2(0, px(8)));
   if (button("BACK", t, px(120))) shell.back();
-  endPlate();
+  endPane();
   return request;
 }
 
@@ -354,16 +329,23 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   const view::Theme& t = theme_;
   auto* display = static_cast<ImFont*>(fontDisplay_);
   auto* small = static_cast<ImFont*>(fontSmall_);
+  auto* mono = static_cast<ImFont*>(fontMono_);
   app::Settings& s = shell.settings();
   const app::Settings before = s;
 
-  beginPlate("##settings", t, ImVec2(px(600), px(560)), 0.5f);
-  ImGui::PushFont(display);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.ember));
-  ImGui::TextUnformatted("SETTINGS");
-  ImGui::PopStyleColor();
-  ImGui::PopFont();
-  ImGui::Dummy(ImVec2(0, px(6)));
+  // Opened from the main menu it is a screen of the shell and gets the shell's frame;
+  // opened over a game it is a panel on top of the position, which stays visible.
+  const bool overBoard = shell.showsBoard();
+  ImVec2 menuMin, menuMax;
+  if (overBoard) {
+    beginPlate("##settings", t, ImVec2(px(600), px(560)), 0.5f);
+  } else {
+    drawShellFrame(shell, menuMin, menuMax);
+    beginPane("##settings", menuMin, menuMax, enter_, px(46.0f));
+  }
+  eyebrow("settings", t, mono, scale_);
+  screenTitle("Settings", t, display, scale_, 2.0f);
+  ImGui::Dummy(ImVec2(0, px(4)));
 
   ImGui::BeginChild("##settingsbody", ImVec2(0, px(430)));
   ImGui::PushItemWidth(px(220));
@@ -378,6 +360,24 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::PushFont(small);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
   ImGui::TextUnformatted("look straight down, pieces as tokens: cheaper to draw");
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
+  ImGui::Dummy(ImVec2(0, px(8)));
+
+  heading("LOOKS", t, small);
+  {
+    // Two sets, and the choice is stored by name so a settings file stays readable and
+    // a set added later needs no migration.
+    const char* kSets[]{"faceted", "primitive"};
+    int current = s.pieceIcons == "primitive" ? 1 : 0;
+    if (ImGui::Combo("Piece icons", &current, kSets, 2)) {
+      s.pieceIcons = kSets[current];
+      request.applyLooks = true;
+    }
+  }
+  ImGui::PushFont(small);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::TextUnformatted("faceted silhouettes, or a handful of flat shapes each");
   ImGui::PopStyleColor();
   ImGui::PopFont();
   ImGui::Dummy(ImVec2(0, px(8)));
@@ -484,7 +484,11 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::TextUnformatted("saved as you change them");
   ImGui::PopStyleColor();
   ImGui::PopFont();
-  endPlate();
+  if (overBoard) {
+    endPlate();
+  } else {
+    endPane();
+  }
 
   // Persist whenever anything actually moved, rather than on a Save button nobody
   // should have to find.
@@ -496,6 +500,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       before.showLastMove != s.showLastMove || before.showCheck != s.showCheck ||
       before.showSeams != s.showSeams || before.showCoordinates != s.showCoordinates ||
       before.pieceHeightScale != s.pieceHeightScale || before.flatView != s.flatView ||
+      before.pieceIcons != s.pieceIcons ||
       before.animateMoves != s.animateMoves ||
       before.animationSpeed != s.animationSpeed ||
       before.orbitSensitivity != s.orbitSensitivity ||
@@ -512,6 +517,7 @@ UiRequest Ui::buildGameInfo(app::Shell& shell) {
   const view::Theme& t = theme_;
   auto* display = static_cast<ImFont*>(fontDisplay_);
   auto* small = static_cast<ImFont*>(fontSmall_);
+  auto* mono = static_cast<ImFont*>(fontMono_);
   const app::Session* session = shell.session();
   if (session == nullptr) {
     shell.back();
@@ -520,12 +526,9 @@ UiRequest Ui::buildGameInfo(app::Shell& shell) {
   const VariantSpec& v = session->variant();
 
   beginPlate("##gameinfo", t, ImVec2(px(620), px(520)), 0.5f);
-  ImGui::PushFont(display);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.ember));
-  ImGui::TextUnformatted(upper(v.name).c_str());
-  ImGui::PopStyleColor();
-  ImGui::PopFont();
-  ImGui::Dummy(ImVec2(0, px(6)));
+  eyebrow("game mode", t, mono, scale_);
+  screenTitle(v.name.c_str(), t, display, scale_, 2.0f);
+  ImGui::Dummy(ImVec2(0, px(4)));
 
   ImGui::BeginChild("##infobody", ImVec2(0, px(400)));
   heading("BOARD", t, small);
@@ -591,6 +594,7 @@ UiRequest Ui::buildPieceMoves(app::Shell& shell) {
   const view::Theme& t = theme_;
   auto* display = static_cast<ImFont*>(fontDisplay_);
   auto* small = static_cast<ImFont*>(fontSmall_);
+  auto* mono = static_cast<ImFont*>(fontMono_);
   const app::Session* session = shell.session();
   if (session == nullptr) {
     shell.back();
@@ -599,11 +603,8 @@ UiRequest Ui::buildPieceMoves(app::Shell& shell) {
   const VariantSpec& v = session->variant();
 
   beginPlate("##pieces", t, ImVec2(px(700), px(560)), 0.5f);
-  ImGui::PushFont(display);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.ember));
-  ImGui::TextUnformatted("PIECE MOVES");
-  ImGui::PopStyleColor();
-  ImGui::PopFont();
+  eyebrow("reference", t, mono, scale_);
+  screenTitle("Piece moves", t, display, scale_, 1.9f);
   ImGui::PushFont(small);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
   ImGui::TextUnformatted(

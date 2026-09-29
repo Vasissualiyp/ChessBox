@@ -14,6 +14,8 @@
 
 #include "io/notation.hpp"
 #include "render/offscreen_target.hpp"
+#include "render/deco.hpp"
+#include "render/piece_icon.hpp"
 #include "render/piece_mesh.hpp"
 #include "render/ui_widgets.hpp"
 
@@ -49,62 +51,29 @@ std::filesystem::path findFont(const char* name) {
 
 /// A piece drawn as a flat icon, for the top-down view where a model would be a blob.
 ///
-/// The shape follows the piece's archetype, so a variant's pieces are distinguishable
-/// without anyone drawing art for them: a pawn is a ball, a rook a crenellated block, a
-/// knight a wedge, and so on. It is deliberately not a lettered tile - the flat board is
-/// meant to read as a board, not as a spreadsheet.
-void drawPieceGlyph(ImDrawList* dl, ImVec2 c, float r, ImU32 col, Archetype shape) {
-  switch (shape) {
-    case Archetype::Dome:  // pawn
-      dl->AddCircleFilled(ImVec2(c.x, c.y - r * 0.15f), r * 0.5f, col, 16);
-      dl->AddRectFilled(ImVec2(c.x - r * 0.7f, c.y + r * 0.35f),
-                        ImVec2(c.x + r * 0.7f, c.y + r * 0.62f), col, r * 0.15f);
-      break;
-    case Archetype::Tower:  // rook
-      dl->AddRectFilled(ImVec2(c.x - r * 0.62f, c.y - r * 0.45f),
-                        ImVec2(c.x + r * 0.62f, c.y + r * 0.7f), col, r * 0.1f);
-      for (int i = -1; i <= 1; ++i) {
-        dl->AddRectFilled(
-            ImVec2(c.x + static_cast<float>(i) * r * 0.42f - r * 0.16f, c.y - r * 0.85f),
-            ImVec2(c.x + static_cast<float>(i) * r * 0.42f + r * 0.16f, c.y - r * 0.45f),
-            col);
-      }
-      break;
-    case Archetype::Wedge:  // knight
-      dl->AddTriangleFilled(ImVec2(c.x, c.y - r * 0.8f),
-                            ImVec2(c.x - r * 0.75f, c.y + r * 0.65f),
-                            ImVec2(c.x + r * 0.75f, c.y + r * 0.65f), col);
-      break;
-    case Archetype::Spire:  // bishop
-      dl->AddTriangleFilled(ImVec2(c.x, c.y - r * 0.9f),
-                            ImVec2(c.x - r * 0.5f, c.y + r * 0.2f),
-                            ImVec2(c.x + r * 0.5f, c.y + r * 0.2f), col);
-      dl->AddCircleFilled(ImVec2(c.x, c.y + r * 0.4f), r * 0.48f, col, 16);
-      break;
-    case Archetype::Crown:  // queen
-      dl->AddRectFilled(ImVec2(c.x - r * 0.7f, c.y + r * 0.25f),
-                        ImVec2(c.x + r * 0.7f, c.y + r * 0.65f), col);
-      for (int i = -1; i <= 1; ++i) {
-        const float dx = static_cast<float>(i) * r * 0.6f;
-        dl->AddTriangleFilled(ImVec2(c.x + dx, c.y - r * 0.85f),
-                              ImVec2(c.x + dx - r * 0.24f, c.y + r * 0.25f),
-                              ImVec2(c.x + dx + r * 0.24f, c.y + r * 0.25f), col);
-      }
-      break;
-    case Archetype::Monolith:  // king, or anything royal
-      dl->AddRectFilled(ImVec2(c.x - r * 0.17f, c.y - r * 0.9f),
-                        ImVec2(c.x + r * 0.17f, c.y + r * 0.9f), col);
-      dl->AddRectFilled(ImVec2(c.x - r * 0.7f, c.y - r * 0.35f),
-                        ImVec2(c.x + r * 0.7f, c.y + r * 0.0f), col);
-      break;
-    case Archetype::Horn:  // unicorn and friends
-      dl->AddQuadFilled(ImVec2(c.x, c.y - r * 0.9f), ImVec2(c.x + r * 0.5f, c.y),
-                        ImVec2(c.x, c.y + r * 0.9f), ImVec2(c.x - r * 0.5f, c.y), col);
-      break;
-    default:
-      dl->AddCircleFilled(c, r * 0.6f, col, 16);
-      break;
-  }
+/// The outlines come from a table rather than from a switch full of drawing calls, so
+/// the two styles differ only in which table is read, a variant could eventually ship
+/// its own, and the shapes themselves are covered by tests that need no GPU.
+///
+/// `behind` is what the icon is drawn on: the cut-outs are painted in it, which is how
+/// a knight gets an eye out of a single-colour silhouette.
+void drawPieceGlyph(ImDrawList* dl, ImVec2 c, float r, ImU32 col, ImU32 behind,
+                    Archetype shape, IconStyle style) {
+  const PieceIcon icon = pieceIcon(style, shape);
+  // The box is 100 wide; r is the icon's half-size on screen.
+  const float k = r / 50.0f;
+  const auto trace = [&](const IconPoly& poly, ImU32 fill) {
+    if (poly.size() < 3) return;
+    dl->PathClear();
+    for (const IconPoint& p : poly) {
+      dl->PathLineTo(ImVec2(c.x + (p.x - 50.0f) * k, c.y + (p.y - 50.0f) * k));
+    }
+    // Concave: a rook's crenellations and a queen's points are not convex hulls, and
+    // the convex filler turns them into blocks.
+    dl->PathFillConcave(fill);
+  };
+  for (const IconPoly& poly : icon.fills) trace(poly, col);
+  for (const IconPoly& poly : icon.cuts) trace(poly, behind);
 }
 
 }  // namespace
@@ -179,27 +148,33 @@ Result<std::unique_ptr<Ui>> Ui::create(const VulkanContext& ctx, SDL_Window* win
 
 Result<void> Ui::loadFonts() {
   ImGuiIO& io = ImGui::GetIO();
-  const auto display = findFont("Cinzel-Bold.ttf");
-  const auto body = findFont("JetBrainsMono-Regular.ttf");
+  // Three voices, three jobs: Chakra Petch names things, Public Sans explains them, and
+  // JetBrains Mono is reserved for anything the engine computed. That last rule is what
+  // makes a number look like a measurement rather than like prose.
+  const auto display = findFont("ChakraPetch-Bold.ttf");
+  const auto body = findFont("PublicSans-Regular.ttf");
+  const auto light = findFont("PublicSans-Light.ttf");
+  const auto mono = findFont("JetBrainsMono-Regular.ttf");
 
-  if (!body.empty()) {
-    fontBody_ = io.Fonts->AddFontFromFileTTF(body.string().c_str(), 15.0f * scale_);
-    fontSmall_ = io.Fonts->AddFontFromFileTTF(body.string().c_str(), 12.0f * scale_);
-  } else {
-    fontBody_ = io.Fonts->AddFontDefault();
-    fontSmall_ = fontBody_;
-  }
-  if (!display.empty()) {
+  const auto load = [&](const std::filesystem::path& path, float size,
+                        float tracking = 0.0f) -> void* {
+    if (path.empty()) return nullptr;
     ImFontConfig cfg;
-    // Cinzel is used only for uppercase names, and tracking it out is what makes it
-    // read as struck into brass rather than typed.
-    cfg.GlyphExtraSpacing.x = 1.4f * scale_;
-    fontDisplay_ =
-        io.Fonts->AddFontFromFileTTF(display.string().c_str(), 17.0f * scale_, &cfg);
-  } else {
-    // A missing typeface must not stop the game starting; it just looks plainer.
-    fontDisplay_ = fontBody_;
-  }
+    cfg.GlyphExtraSpacing.x = tracking * scale_;
+    return io.Fonts->AddFontFromFileTTF(path.string().c_str(), size * scale_, &cfg);
+  };
+
+  fontBody_ = load(body, 15.5f);
+  if (fontBody_ == nullptr) fontBody_ = io.Fonts->AddFontDefault();
+  fontSmall_ = load(light.empty() ? body : light, 12.5f);
+  if (fontSmall_ == nullptr) fontSmall_ = fontBody_;
+  fontMono_ = load(mono, 12.0f, 0.2f);
+  if (fontMono_ == nullptr) fontMono_ = fontSmall_;
+  // Tracked out a little: Chakra Petch is set in caps here, and caps need the air.
+  fontDisplay_ = load(display, 17.0f, 0.9f);
+  // A missing typeface must not stop the game starting; it just looks plainer.
+  if (fontDisplay_ == nullptr) fontDisplay_ = fontBody_;
+
   io.FontDefault = static_cast<ImFont*>(fontBody_);
   return {};
 }
@@ -312,20 +287,92 @@ bool Ui::capturesKeyboard() const {
   return ImGui::GetIO().WantCaptureKeyboard;
 }
 
+void Ui::tick(float dt) {
+  clock_ += dt;
+  field_.advance(dt);
+  // Ease the arrival rather than run it linearly: a screen that stops dead has not
+  // travelled anywhere.
+  if (enter_ < 1.0f) enter_ = std::min(1.0f, enter_ + dt * 2.2f);
+}
+
 void Ui::newFrame() {
   ImGui_ImplVulkan_NewFrame();
   ImGui_ImplSDL3_NewFrame();
   ImGui::NewFrame();
 }
 
+void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  ImDrawList* dl = ImGui::GetBackgroundDrawList();
+  const ImVec2 min = vp->WorkPos;
+  const ImVec2 max = ImVec2(vp->WorkPos.x + vp->WorkSize.x, vp->WorkPos.y + vp->WorkSize.y);
+
+  // The ground. A light shell has to paint its own, or the board's clear colour shows
+  // through where nothing else is drawn.
+  dl->AddRectFilled(min, max, u32(theme_.ink));
+  field_.draw(dl, min, max, theme_, iconStyle_, true, true);
+
+  // Deeper screens put their object on the other side. Alternating by depth is what
+  // makes each level a distinct place rather than a fade, and it needs no per-screen
+  // authoring: it falls out of the depth alone.
+  const bool decoLeft = app::screenDepth(shell.screen()) % 2 == 0;
+  const float split = (min.x + max.x) * 0.5f;
+  const ImVec2 decoMin(decoLeft ? min.x : split, min.y);
+  const ImVec2 decoMax(decoLeft ? split : max.x, max.y);
+  menuMin = ImVec2(decoLeft ? split : min.x, min.y);
+  menuMax = ImVec2(decoLeft ? max.x : split, max.y);
+
+  drawDeco(dl, decoForScreen(static_cast<int>(shell.screen())), decoMin, decoMax, theme_,
+           iconStyle_, clock_, shell.hasGame() ? &shell.session()->variant() : nullptr);
+
+  // A hairline between the object and the menu, and the depth ladder on the far left.
+  dl->AddLine(ImVec2(split, min.y), ImVec2(split, max.y), u32(theme_.rule, 0.6f));
+
+  // The ladder lives on the menu side's outer edge. On the decoration side it would sit
+  // on top of the object, which is the one thing on screen that wants a clear field.
+  const int depth = app::screenDepth(shell.screen());
+  const char* rungs[]{"shell", "choose", "play"};
+  auto* small = static_cast<ImFont*>(fontMono_);
+  const float ladderX = decoLeft ? max.x - px(80.0f) : min.x + px(20.0f);
+  for (int i = 0; i < 3; ++i) {
+    const float y = max.y - px(96.0f) + static_cast<float>(i) * px(20.0f);
+    const bool on = i <= depth;
+    const ImVec2 c(ladderX, y);
+    const float r = px(3.5f);
+    const ImVec2 quad[4]{ImVec2(c.x, c.y - r), ImVec2(c.x + r, c.y), ImVec2(c.x, c.y + r),
+                         ImVec2(c.x - r, c.y)};
+    if (on) {
+      dl->AddConvexPolyFilled(quad, 4, u32(theme_.ember));
+    } else {
+      dl->AddPolyline(quad, 4, u32(theme_.rule), ImDrawFlags_Closed, 1.0f);
+    }
+    if (small != nullptr) {
+      dl->AddText(small, small->FontSize, ImVec2(c.x + px(10.0f), y - px(6.0f)),
+                  u32(on ? theme_.boneDim : theme_.rule), rungs[i]);
+    }
+  }
+}
+
 UiRequest Ui::build(app::Shell& shell, float fps) {
+  // A screen change starts the camera moving and shoves the field towards the viewer -
+  // or away from it, on the way back out.
+  const int screen = static_cast<int>(shell.screen());
+  if (screen != lastScreen_) {
+    const bool deeper = lastScreen_ < 0 || app::screenDepth(shell.screen()) >=
+                                               app::screenDepth(
+                                                   static_cast<app::Screen>(lastScreen_));
+    field_.push(deeper ? 3.1f : -2.6f);
+    enter_ = 0.0f;
+    lastScreen_ = screen;
+  }
+
   switch (shell.screen()) {
     case app::Screen::MainMenu:
       return buildMainMenu(shell);
     case app::Screen::NewGame:
       return buildNewGame(shell);
-    case app::Screen::Creator:
-      return buildCreator(shell);
+    case app::Screen::Editor:
+      return buildEditor(shell);
     case app::Screen::Settings: {
       // Opened over a game, the rails stay up so the position behind stays readable.
       UiRequest out;
@@ -645,9 +692,9 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       const view::Rgba token = white ? t.whitePiece : t.blackPiece;
       const ImVec2 centre(sp.x, sp.y);
       dl->AddCircleFilled(centre, radius, u32(token), 24);
-      dl->AddCircle(centre, radius, u32(t.ink), 24, px(1.5f));
-      drawPieceGlyph(dl, centre, radius * 0.82f, u32(white ? t.ink : t.bone),
-                     archetypeFor(v.pieces[piece.type]));
+      dl->AddCircle(centre, radius, u32(t.boardRim), 24, px(1.5f));
+      drawPieceGlyph(dl, centre, radius * 0.82f, u32(white ? t.blackPiece : t.whitePiece),
+                     u32(token), archetypeFor(v.pieces[piece.type]), iconStyle_);
     };
 
     const view::MoveAnimation& anim = session.animation();

@@ -55,6 +55,11 @@ class Session {
   [[nodiscard]] const view::OrbitCamera& camera() const noexcept { return camera_; }
   /// Where the board is glued to itself, and in what colour. Built once per variant.
   [[nodiscard]] const view::SeamMap& seams() const noexcept { return seams_; }
+  /// The palette the seams and the move animation are coloured from. Held here rather
+  /// than read from the renderer so a session can be driven, and tested, with no
+  /// renderer at all.
+  [[nodiscard]] const view::Theme& theme() const noexcept { return theme_; }
+  void setTheme(const view::Theme& t);
   /// The move currently being drawn, if any.
   [[nodiscard]] const view::MoveAnimation& animation() const noexcept { return anim_; }
   /// Move the animation on. Returns true while something is still moving, which is how
@@ -141,6 +146,7 @@ class Session {
   view::OrbitCamera camera_;
   std::vector<view::Placement> placements_;
   view::SeamMap seams_;
+  view::Theme theme_{view::Theme::manifold()};
   view::MoveAnimation anim_;
   float animSeconds_{0.085f};
   bool flat_{false};

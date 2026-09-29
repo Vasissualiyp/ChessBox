@@ -4,6 +4,8 @@
 // got where it got. On a glued board that is the difference between "the rook teleported"
 // and "the rook left here and came back in there", so the route is traced from the
 // variant's own atoms and pinned here.
+#include <cmath>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include "io/fen.hpp"
@@ -300,5 +302,62 @@ TEST_CASE("an ordinary move opens no portal", "[unit][view]") {
   while (anim.active()) {
     CHECK(anim.openPortals().empty());
     anim.advance(0.02f);
+  }
+}
+
+TEST_CASE("an en-passant capture animates like the move it is", "[unit][view]") {
+  // The capturing pawn steps diagonally onto an empty square while the pawn it takes
+  // stands beside it. The route is the pawn's own capture atom - and getting this wrong
+  // crashed the game, because a path with no steps left the animation with a one-point
+  // polyline to interpolate along.
+  const VariantSpec v = test::loadVariant("standard");
+  const PieceTypeId pawn = v.findPiece("pawn");
+  Move m;
+  m.from = v.dims.toCell(Coord::of({4, 4}));   // e5
+  m.to = v.dims.toCell(Coord::of({3, 5}));     // d6
+  m.captureCell = v.dims.toCell(Coord::of({3, 4}));  // the pawn on d5
+  m.flags = MoveFlag::Capture | MoveFlag::EnPassant;
+
+  // White pawn on e5, black pawn that has just stepped two squares to d5.
+  const Position pos = board(v, "8/8/8/3pP3/8/8/8/8 w - d6 0 1");
+  const MovePath p = tracePath(v, pos, pawn, Color::White, m);
+  REQUIRE_FALSE(p.unexplained);
+  REQUIRE(p.steps.size() == 1);
+  CHECK(p.steps[0].to == m.to);
+
+  const ViewConfig cfg = ViewConfig::forBoard(v.dims);
+  const auto placements = layout(v.dims, cfg);
+  const Theme theme = Theme::manifold();
+  const SeamMap seams = SeamMap::build(v, cfg, theme);
+  MoveAnimation anim;
+  anim.start(cfg, placements, seams, theme, p, 0.12f);
+  while (anim.active()) {
+    (void)anim.sample();
+    anim.advance(0.01f);
+  }
+}
+
+TEST_CASE("a move no atom explains is animated, not crashed on", "[unit][view]") {
+  // Castling, a rule effect that displaces a piece, a variant whose atoms were edited
+  // under a running game: whatever the cause, the animation has to cope. A route with no
+  // steps is a straight glide from one cell to the other, never a one-point polyline.
+  const VariantSpec v = test::loadVariant("standard");
+  const PieceTypeId rook = v.findPiece("rook");
+  const Position pos = board(v, "8/8/8/8/8/8/8/R7 w - - 0 1");
+  const MovePath p = tracePath(v, pos, rook, Color::White, slide(v, {0, 0}, {3, 5}));
+  REQUIRE(p.unexplained);
+
+  const ViewConfig cfg = ViewConfig::forBoard(v.dims);
+  const auto placements = layout(v.dims, cfg);
+  const Theme theme = Theme::manifold();
+  const SeamMap seams = SeamMap::build(v, cfg, theme);
+  MoveAnimation anim;
+  anim.start(cfg, placements, seams, theme, p, 0.12f);
+  // It either glides or does nothing, but it never reads past the end of a run.
+  for (int i = 0; i < 400 && anim.active(); ++i) {
+    const MoveAnimation::Sample at = anim.sample();
+    CHECK(std::isfinite(at.x));
+    CHECK(std::isfinite(at.y));
+    anim.advance(0.01f);
   }
 }

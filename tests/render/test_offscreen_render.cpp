@@ -8,6 +8,8 @@
 
 #ifdef CB_HAVE_VULKAN
 
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
 
 #include "io/fen.hpp"
@@ -284,9 +286,15 @@ TEST_CASE("a 2-D board renders with no validation errors", "[render][gpu]") {
   REQUIRE(f.image.height == 384);
   REQUIRE(f.image.rgba.size() == 512u * 384u * 4u);
 
-  // Something was actually drawn, and it is not a solid fill.
-  // The theme's ground: a brown-biased near-black, not a neutral grey.
-  const Image::Rgba background{13, 11, 10, 255};
+  // Something was actually drawn, and it is not a solid fill. The ground comes from the
+  // theme rather than being written out here: a retheme is allowed, a board that stops
+  // being drawn is not.
+  const view::Theme theme = BoardRenderer{}.theme();
+  const auto byte = [](float v) {
+    return static_cast<std::uint8_t>(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f));
+  };
+  const Image::Rgba background{byte(theme.ink.r), byte(theme.ink.g), byte(theme.ink.b),
+                               255};
   const int coverage = f.image.coveragePerMille(background);
   CAPTURE(coverage);
   REQUIRE(coverage > 200);

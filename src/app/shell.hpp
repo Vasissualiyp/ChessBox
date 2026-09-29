@@ -17,27 +17,19 @@ enum class Screen : std::uint8_t {
   Game,
   Paused,
   Settings,
-  Creator,     ///< board and piece designers, not built yet
+  Editor,      ///< board and piece designers, not built yet
   GameInfo,    ///< what the loaded variant's rules actually are
   PieceMoves,  ///< how each piece in the loaded variant moves
 };
 
 std::string_view screenName(Screen s) noexcept;
 
-/// Parts of the game that are announced but not built. Naming them in one place keeps
-/// the menus honest: a disabled entry says what it will be, rather than pretending the
-/// feature is a click away or hiding it until it exists.
-enum class Unbuilt : std::uint8_t {
-  None,
-  Continue,
-  Multiplayer,
-  BoardDesigner,
-  PieceDesigner,
-};
-
-std::string_view unbuiltName(Unbuilt f) noexcept;
-/// One sentence on what the thing will do and, honestly, when.
-std::string_view unbuiltNote(Unbuilt f) noexcept;
+/// How far in from the front door a screen is.
+///
+/// The shell uses it for two things at once: the camera pushes forward when the depth
+/// increases and back when it decreases, and the decoration changes sides on every
+/// step. Both fall out of this number, so neither needs per-screen authoring.
+int screenDepth(Screen s) noexcept;
 
 /// The application around the game: menus, settings, and the game itself.
 ///
@@ -90,10 +82,6 @@ class Shell {
   /// Persist settings, and apply anything that has to reach the session.
   void applySettings();
 
-  [[nodiscard]] Unbuilt lastUnbuiltAttempt() const noexcept { return unbuilt_; }
-  void noteUnbuilt(Unbuilt f);
-  void clearUnbuilt() { unbuilt_ = Unbuilt::None; }
-
  private:
   Shell() = default;
 
@@ -105,7 +93,6 @@ class Shell {
   std::string message_;
   Screen screen_{Screen::MainMenu};
   Screen previous_{Screen::MainMenu};
-  Unbuilt unbuilt_{Unbuilt::None};
   bool quit_{false};
   VariantLoader loader_;
 };

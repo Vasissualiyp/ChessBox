@@ -123,25 +123,6 @@ TEST_CASE("settings return you where you came from", "[unit][app]") {
   }
 }
 
-TEST_CASE("unbuilt menu entries say what they will be", "[unit][app]") {
-  // A menu that hides what is coming is dishonest; one that pretends a feature works is
-  // worse. Each unbuilt entry names itself and explains where the game actually stands.
-  auto shell = makeShell(tempSettings("unbuilt.conf"));
-  for (Unbuilt f : {Unbuilt::Continue, Unbuilt::Multiplayer, Unbuilt::BoardDesigner,
-                    Unbuilt::PieceDesigner}) {
-    shell->noteUnbuilt(f);
-    REQUIRE(shell->lastUnbuiltAttempt() == f);
-    REQUIRE_FALSE(unbuiltName(f).empty());
-    REQUIRE(unbuiltNote(f).size() > 40);
-  }
-  shell->clearUnbuilt();
-  REQUIRE(shell->lastUnbuiltAttempt() == Unbuilt::None);
-  // Changing screen clears it, so a note never follows you somewhere it makes no sense.
-  shell->noteUnbuilt(Unbuilt::Multiplayer);
-  shell->go(Screen::Settings);
-  REQUIRE(shell->lastUnbuiltAttempt() == Unbuilt::None);
-}
-
 TEST_CASE("settings survive a restart", "[unit][app]") {
   const auto path = tempSettings("roundtrip.conf");
   {

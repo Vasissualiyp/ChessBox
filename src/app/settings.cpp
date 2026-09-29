@@ -79,6 +79,8 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.showCoordinates = asBool(value);
     else if (key == "piece_height_scale")
       s.pieceHeightScale = asFloat(value, s.pieceHeightScale);
+    else if (key == "piece_icons")
+      s.pieceIcons = value;
     else if (key == "flat_view")
       s.flatView = asBool(value);
     else if (key == "animate_moves")
@@ -126,6 +128,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "show_seams = " << boolText(showSeams) << '\n';
   out << "show_coordinates = " << boolText(showCoordinates) << '\n';
   out << "piece_height_scale = " << pieceHeightScale << '\n';
+  out << "piece_icons = " << pieceIcons << '\n';
   out << "flat_view = " << boolText(flatView) << '\n';
   out << "animate_moves = " << boolText(animateMoves) << '\n';
   out << "animation_speed = " << animationSpeed << '\n';
@@ -152,6 +155,7 @@ void Settings::sanitize() {
   volumeMusic = std::clamp(volumeMusic, 0.0f, 1.0f);
   volumeEffects = std::clamp(volumeEffects, 0.0f, 1.0f);
   if (lastVariant.empty()) lastVariant = "standard";
+  if (pieceIcons != "faceted" && pieceIcons != "primitive") pieceIcons = "faceted";
 }
 
 }  // namespace cb::app

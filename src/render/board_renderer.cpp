@@ -501,8 +501,10 @@ InstanceSet BoardRenderer::buildInstances(
       e.maxY = std::max(e.maxY, pl.y);
       e.z = std::min(e.z, pl.z);
     }
-    // Warm, dark, and clearly not the ground: a table the board is standing on.
-    const view::Rgba wood = mix(theme_.ink, theme_.rule, 0.85f);
+    // The board is an object standing on the page, not a pattern printed on it, and the
+    // rim under the cells is what says so. It comes from the palette rather than from a
+    // blend of the ground, because on a light theme a blend of the ground is the ground.
+    const view::Rgba wood = theme_.boardRim;
     for (const Extent& e : extents) {
       if (!e.seen) continue;
       Instance plinth{};
@@ -517,7 +519,7 @@ InstanceSet BoardRenderer::buildInstances(
       toFloat4(e.present ? mix(wood, theme_.emberDeep, 0.55f) : wood, plinth.color);
       // A warm rim around the edge of the table, which is what makes it read as an
       // object rather than as a darker rectangle.
-      toFloat4(e.present ? theme_.ember : mix(theme_.emberDeep, theme_.rule, 0.45f),
+      toFloat4(e.present ? theme_.ember : mix(theme_.boardRim, theme_.emberDeep, 0.35f),
                plinth.edge);
       plinth.edgeMask = 15.0f;
       byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(plinth);

@@ -17,8 +17,8 @@ std::string_view screenName(Screen s) noexcept {
       return "paused";
     case Screen::Settings:
       return "settings";
-    case Screen::Creator:
-      return "creator";
+    case Screen::Editor:
+      return "editor";
     case Screen::GameInfo:
       return "game mode";
     case Screen::PieceMoves:
@@ -27,41 +27,24 @@ std::string_view screenName(Screen s) noexcept {
   return "?";
 }
 
-std::string_view unbuiltName(Unbuilt f) noexcept {
-  switch (f) {
-    case Unbuilt::None:
-      return "";
-    case Unbuilt::Continue:
-      return "Continue";
-    case Unbuilt::Multiplayer:
-      return "Multiplayer";
-    case Unbuilt::BoardDesigner:
-      return "Board designer";
-    case Unbuilt::PieceDesigner:
-      return "Piece designer";
+int screenDepth(Screen s) noexcept {
+  switch (s) {
+    case Screen::MainMenu:
+      return 0;
+    case Screen::NewGame:
+    case Screen::Settings:
+    case Screen::Editor:
+      return 1;
+    case Screen::Game:
+      return 2;
+    // Pause and the reference screens sit over the game rather than beyond it: they are
+    // a step further in, and the board behind them stays where it is.
+    case Screen::Paused:
+    case Screen::GameInfo:
+    case Screen::PieceMoves:
+      return 3;
   }
-  return "";
-}
-
-std::string_view unbuiltNote(Unbuilt f) noexcept {
-  switch (f) {
-    case Unbuilt::None:
-      return "";
-    case Unbuilt::Continue:
-      return "Saved games are not written yet, so there is nothing to continue. Start a "
-             "new game from the library instead.";
-    case Unbuilt::Multiplayer:
-      return "The engine is already the server - the same rules decide every move - but "
-             "nothing sends them over a wire yet.";
-    case Unbuilt::BoardDesigner:
-      return "Boards are data today: a variant file declares its axes, its geometry and "
-             "its opening position. The designer will edit that file for you.";
-    case Unbuilt::PieceDesigner:
-      return "A piece is a set of vector-move atoms, so the designer is a way to draw "
-             "one and see the directions it expands to. Read them in Piece moves for "
-             "now.";
-  }
-  return "";
+  return 0;
 }
 
 std::unique_ptr<Shell> Shell::create(std::vector<std::string> library,
@@ -96,17 +79,16 @@ void Shell::go(Screen s) {
   // Only remember a screen worth returning to: bouncing between two overlays should
   // still take you back to the game.
   if (screen_ != Screen::Settings && screen_ != Screen::GameInfo &&
-      screen_ != Screen::PieceMoves && screen_ != Screen::Creator) {
+      screen_ != Screen::PieceMoves && screen_ != Screen::Editor) {
     previous_ = screen_;
   }
   screen_ = s;
-  unbuilt_ = Unbuilt::None;
 }
 
 void Shell::back() {
   switch (screen_) {
     case Screen::Settings:
-    case Screen::Creator:
+    case Screen::Editor:
     case Screen::NewGame:
       screen_ = previous_;
       break;
@@ -123,7 +105,6 @@ void Shell::back() {
     case Screen::MainMenu:
       break;
   }
-  unbuilt_ = Unbuilt::None;
 }
 
 Result<void> Shell::startGame(const std::string& variantName) {
@@ -185,10 +166,6 @@ void Shell::applySettings() {
   if (auto ok = settings_.save(settingsPath_); !ok.has_value()) {
     message_ = ok.error().message;
   }
-}
-
-void Shell::noteUnbuilt(Unbuilt f) {
-  unbuilt_ = f;
 }
 
 }  // namespace cb::app

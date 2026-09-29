@@ -47,10 +47,33 @@ bool button(const char* label, const view::Theme& theme, float width = 0.0f,
 /// A large menu entry. The label is the whole entry: a control says what it is by being
 /// named, and a line of grey text under every row is exactly the developer-tool look
 /// this interface is trying not to have. Disabled entries stay visible.
-bool menuEntry(const char* label, const view::Theme& theme, ImFont* labelFont,
+/// A small monospaced label with a rule running out to the right. Marks what screen you
+/// are on without spending the title's weight on it.
+void eyebrow(const char* text, const view::Theme& theme, ImFont* monoFont, float scale);
+
+/// The screen's name, set large. Drawn through the draw list rather than as ordinary
+/// text because ImGui has one size per font, and a title wants several times the body.
+void screenTitle(const char* text, const view::Theme& theme, ImFont* displayFont,
+                 float scale, float sizeMul = 2.1f);
+
+/// A menu row: type on a hairline, not a box.
+///
+/// `index` is the row's number, set small and monospaced at the left - it says the list
+/// is ordered and gives the eye somewhere to start. `scale` is required rather than
+/// defaulted: a missed call site would silently draw one row at a different size from
+/// the rest, which is exactly the bug that once made the main menu look ragged.
+bool menuEntry(const char* label, int index, const view::Theme& theme, ImFont* labelFont,
                float width, bool enabled, float scale);
 
 /// A framed card centred in the viewport, used by every screen that sits over the board.
+/// One half of the shell: the menu column beside the screen's object.
+///
+/// `enter` runs 0 to 1 as the screen arrives. The pane is scaled about its own centre
+/// and faded along it, which is as near a camera push as a two-dimensional draw list
+/// gets - and unlike a slide it reads as depth rather than as a carousel.
+void beginPane(const char* id, ImVec2 min, ImVec2 max, float enter, float pad);
+void endPane();
+
 void beginPlate(const char* id, const view::Theme& theme, ImVec2 size,
                 float yBias = 0.5f);
 void endPlate();

@@ -124,7 +124,7 @@ class BoardRenderer {
   Result<void> ensureInstanceCapacity(std::size_t count);
 
   const VulkanContext* ctx_{nullptr};
-  view::Theme theme_{};
+  view::Theme theme_{view::Theme::manifold()};
   BoardOptions options_{};
   MeshLibrary meshes_;
   CellId lastFrom_{kInvalidCell};

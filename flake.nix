@@ -38,6 +38,22 @@
             cinzel jetbrains-mono
           ]) ++ [ imguiSdlVulkan ];
 
+          # Chakra Petch, assembled into one directory so the game can look for it the
+          # same way it looks for every other font.
+          chakraPetch =
+            let
+              rev = "23e54b51ddffbc7713c583748e3bd86f62b1fa4a";
+              grab = name: hash: pkgs.fetchurl {
+                url = "https://raw.githubusercontent.com/google/fonts/${rev}/ofl/chakrapetch/${name}";
+                sha256 = hash;
+              };
+            in pkgs.runCommand "chakra-petch-fonts" { } ''
+              mkdir -p $out
+              cp ${grab "ChakraPetch-Bold.ttf" "183qn96i14jjn1w68iykvn4sg58fgiqlvnqrbqkrf5k5jmnzgyv5"} $out/ChakraPetch-Bold.ttf
+              cp ${grab "ChakraPetch-SemiBold.ttf" "0jvklr3dllic3ligrr8aclb0sqswrlm418hl7vxxbnsd43ils9j5"} $out/ChakraPetch-SemiBold.ttf
+              cp ${grab "ChakraPetch-Regular.ttf" "11prxjl36nbdabinswh22cxv5qqf6g73hxbb67q1zj55p8wddz4q"} $out/ChakraPetch-Regular.ttf
+            '';
+
           mkShell = extra: pkgs.mkShell {
             packages = core ++ extra;
             # Validation layers are only discoverable if their manifest directory is on
@@ -52,7 +68,11 @@
             # CMAKE_PREFIX_PATH is deliberately NOT set here: nix's cmake setup hook
             # already puts every buildInput on it, and overriding it hides the rest of
             # them (which is exactly how imgui went missing once).
-            CB_FONT_CINZEL = "${pkgs.cinzel}/share/fonts/truetype";
+            # The shell's three voices. Chakra Petch is not packaged in nixpkgs, so it
+            # is fetched by hash from google/fonts at a pinned commit - immutable, and a
+            # loud failure rather than a silent substitution if it ever moves.
+            CB_FONT_DISPLAY = chakraPetch;
+            CB_FONT_BODY = "${pkgs.public-sans}/share/fonts/truetype";
             CB_FONT_MONO = "${pkgs.jetbrains-mono}/share/fonts/truetype";
             shellHook = ''
               export CCACHE_DIR="$PWD/.cache/ccache"

@@ -108,7 +108,9 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | New topology | `variants/*.toml` geometry block | `cb-new-geometry` |
 | New rule mechanic | `src/rules/` opcode + tests + docs table | `cb-new-effect` |
 | A piece's look | `variants/*.toml` `shape` / `height` (data only) | `cb-new-piece` |
-| UI colours | `src/view/theme.hpp` - one struct, no renderer changes | |
+| UI colours | `src/view/theme.hpp` - two themes, one struct, no renderer changes | |
+| A flat piece icon | `src/render/piece_icon.cpp` - polygon tables, two styles | |
+| A menu's decorative object | `src/render/deco.cpp` + `decoForScreen` | |
 | New module in a layer | that layer's dir + CMake edge + test + this table | `cb-new-module` |
 | A decision | `docs/adr/` | `cb-adr` |
 | Perft mismatch | bisect with `divide` against the oracle | `cb-perft-golden` |
@@ -164,9 +166,27 @@ These are the ones that have actually cost time here, not hypotheticals.
   archetype (`src/render/piece_mesh.cpp`); a variant may name one, and anything it
   leaves out is derived from how the piece moves. An unknown name falls back rather
   than failing - a variant is never unplayable for want of a model.
-- The palette is `view::Theme`, one struct. Retheming must not touch the renderer.
-- Cyan (`rift`) is reserved for geometry that is not flat: seams, wrapped moves, extra
-  axes. Spending it on anything else breaks the one rule a player learns by playing.
+- The palette is `view::Theme`, one struct, and there are two of them: `manifold()` is
+  the shipped look - a light shell with a board several steps darker than the page - and
+  `console()` is the older candlelit one. Retheming must not touch the renderer.
+  `tests/unit/view/test_theme.cpp` pins the load-bearing part: both piece colours must
+  read on both squares. That test found the old board pair sitting at 1.2:1.
+- Saturated colour is reserved for geometry that is not flat: seams, wrapped moves,
+  extra axes. The shell itself is cool and neutral, so spending a seam hue on a button
+  breaks the one rule a player learns by playing.
+- **A seam is coloured by the portal it belongs to, not by being a seam.** Both ends of
+  one identification share a colour off a hue ramp, so a cylinder reads as one gradient
+  repeated and a Moebius band as one folded - and brightness, not hue, distinguishes two
+  portals that a twist puts on the same face. `src/view/seams.cpp`.
+- **`Move::captureCell` is not `Move::to`.** They differ for exactly one move - en
+  passant, where the square landed on is empty - and reading `to` to decide whether a
+  capture atom applies made the move look illegal. That left the animation with a route
+  of no steps, a one-point polyline, and a crash. `src/view/move_anim.cpp`.
+- The three interface typefaces come from the flake as `CB_FONT_DISPLAY`,
+  `CB_FONT_BODY` and `CB_FONT_MONO`, and are copied beside the binary by
+  `src/render/CMakeLists.txt`. Chakra Petch is not in nixpkgs and is fetched by hash at
+  a pinned commit. A missing font is never fatal - the interface falls back and looks
+  plainer.
 - **Every hardcoded pixel size in the interface goes through `Ui::px()`.** A missed one
   scales the text and leaves the panel behind. `widgets::menuEntry` takes its scale as a
   required argument for exactly this reason - a default let four menu rows draw at the

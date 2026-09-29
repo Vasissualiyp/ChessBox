@@ -7,6 +7,8 @@
 
 #include "app/session.hpp"
 #include "app/shell.hpp"
+#include "render/deco.hpp"
+#include "render/piece_icon.hpp"
 #include "render/vulkan_context.hpp"
 #include "view/theme.hpp"
 
@@ -32,6 +34,9 @@ struct UiRequest {
   /// The interface scale changed; fonts have to be rebuilt at the new size.
   bool applyScale{false};
   bool toggleFullscreen{false};
+  /// A purely visual setting changed - the icon set, say - and has to reach the
+  /// interface rather than the engine.
+  bool applyLooks{false};
 };
 
 /// The game's interface: rails, ledger, status, promotion, library.
@@ -56,6 +61,11 @@ class Ui {
   [[nodiscard]] bool capturesMouse() const;
   [[nodiscard]] bool capturesKeyboard() const;
 
+  /// Advance the shell's own clock. The menus animate continuously - the manifold
+  /// turns, the field drifts - so the interface needs time, which only the main loop
+  /// knows about.
+  void tick(float dt);
+
   void newFrame();
 
   /// Build whichever screen the shell says the player is on.
@@ -66,6 +76,7 @@ class Ui {
   /// The atlas is regenerated rather than the existing glyphs stretched: a scale option
   /// that produces blurry text is not worth having. Must not be called inside a frame.
   Result<void> setScale(float scale);
+  void setIconStyle(IconStyle s) noexcept { iconStyle_ = s; }
   /// Finish the frame and record its draw commands into the board's render pass.
   void endFrame();
   void record(VkCommandBuffer cmd);
@@ -76,6 +87,9 @@ class Ui {
   Result<void> loadFonts();
 
   UiRequest buildGameHud(app::Shell& shell, float fps);
+  /// The two-pane frame every menu screen sits in: the drifting field, the screen's
+  /// own object, and the depth ladder. Returns the rectangle the menu itself gets.
+  void drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax);
   /// Pixels at the current interface scale. Every hardcoded size goes through this, or
   /// the scale option moves the text and leaves the panels behind.
   [[nodiscard]] float px(float v) const noexcept { return v * scale_; }
@@ -83,18 +97,29 @@ class Ui {
   UiRequest buildNewGame(app::Shell& shell);
   UiRequest buildPause(app::Shell& shell);
   UiRequest buildSettings(app::Shell& shell);
-  UiRequest buildCreator(app::Shell& shell);
+  UiRequest buildEditor(app::Shell& shell);
   UiRequest buildGameInfo(app::Shell& shell);
   UiRequest buildPieceMoves(app::Shell& shell);
 
   const VulkanContext* ctx_{nullptr};
   SDL_Window* window_{nullptr};
-  view::Theme theme_{};
+  view::Theme theme_{view::Theme::manifold()};
   VkDescriptorPool pool_{VK_NULL_HANDLE};
   void* fontDisplay_{nullptr};  ///< ImFont*, kept opaque so the header stays light
   void* fontBody_{nullptr};
   void* fontSmall_{nullptr};
+  void* fontMono_{nullptr};
+  /// Which flat-piece table to draw from. Pushed in from the player's settings; the
+  /// interface holds no opinion of its own about it.
+  IconStyle iconStyle_{IconStyle::Faceted};
   float scale_{1.0f};
+  /// The shell's clock, and where it is in a screen change. `enter_` runs 0 to 1 as a
+  /// screen arrives; the menu is scaled and faded along it, which is as close to a
+  /// camera push as a 2-D draw list gets.
+  float clock_{0.0f};
+  float enter_{1.0f};
+  int lastScreen_{-1};
+  DepthField field_;
   /// Which variant the new-game screen is showing details for.
   std::string pickedVariant_;
   /// That variant's own one-line description, and the name it was read for, so the file

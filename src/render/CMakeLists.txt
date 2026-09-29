@@ -42,7 +42,7 @@ add_custom_command(OUTPUT ${CB_SPV_HEADER}
 
 set(CB_RENDER_SOURCES
   vulkan_context.cpp offscreen_target.cpp board_renderer.cpp image_io.cpp
-  piece_mesh.cpp
+  piece_mesh.cpp piece_icon.cpp
   ${CB_SPV_HEADER})
 
 # SDL3 supplies the window and the surface; Dear ImGui supplies the panels. Without
@@ -53,7 +53,7 @@ find_package(imgui CONFIG)
 if(SDL3_FOUND)
   list(APPEND CB_RENDER_SOURCES window.cpp)
   if(imgui_FOUND)
-    list(APPEND CB_RENDER_SOURCES ui.cpp ui_menus.cpp ui_widgets.cpp)
+    list(APPEND CB_RENDER_SOURCES ui.cpp ui_menus.cpp ui_widgets.cpp deco.cpp)
   endif()
 endif()
 
@@ -73,13 +73,23 @@ endif()
 
 # The game installs its own typefaces so it looks the same on every machine rather than
 # inheriting whatever the system happens to have.
+# The shell's three voices, copied beside the binary so the game looks the same from the
+# build tree, from an install, or from a desktop entry with no sensible cwd. A missing
+# font is not an error - the interface falls back and simply looks plainer.
 set(CB_FONT_FILES "")
-if(DEFINED ENV{CB_FONT_CINZEL} AND EXISTS "$ENV{CB_FONT_CINZEL}/Cinzel-Bold.ttf")
-  list(APPEND CB_FONT_FILES "$ENV{CB_FONT_CINZEL}/Cinzel-Bold.ttf")
-endif()
-if(DEFINED ENV{CB_FONT_MONO} AND EXISTS "$ENV{CB_FONT_MONO}/JetBrainsMono-Regular.ttf")
-  list(APPEND CB_FONT_FILES "$ENV{CB_FONT_MONO}/JetBrainsMono-Regular.ttf")
-endif()
+foreach(spec
+    "CB_FONT_DISPLAY|ChakraPetch-Bold.ttf"
+    "CB_FONT_DISPLAY|ChakraPetch-SemiBold.ttf"
+    "CB_FONT_BODY|PublicSans-Regular.ttf"
+    "CB_FONT_BODY|PublicSans-Light.ttf"
+    "CB_FONT_MONO|JetBrainsMono-Regular.ttf")
+  string(REPLACE "|" ";" parts "${spec}")
+  list(GET parts 0 var)
+  list(GET parts 1 file)
+  if(DEFINED ENV{${var}} AND EXISTS "$ENV{${var}}/${file}")
+    list(APPEND CB_FONT_FILES "$ENV{${var}}/${file}")
+  endif()
+endforeach()
 if(CB_FONT_FILES)
   file(COPY ${CB_FONT_FILES} DESTINATION ${CMAKE_BINARY_DIR}/fonts)
   install(FILES ${CB_FONT_FILES} DESTINATION share/chessbox/fonts)

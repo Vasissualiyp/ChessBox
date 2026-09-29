@@ -117,7 +117,7 @@ void Session::refreshView() {
       std::remove_if(placements_.begin(), placements_.end(),
                      [&](const view::Placement& p) { return !boardVisible(p.cell); }),
       placements_.end());
-  seams_ = view::SeamMap::build(*variant_, viewCfg_, view::Theme::console());
+  seams_ = view::SeamMap::build(*variant_, viewCfg_, theme_);
   // Framed for the shape of the area the board is drawn into, which the interface
   // narrows with its rails - not for the whole window.
   camera_ = view::OrbitCamera::frame(view::boundsOf(placements_), boardAspect_);
@@ -152,6 +152,12 @@ void Session::refreshTemporalView() {
     camera_.pitch = pitch;
   }
   camera_.distance = distance;
+}
+
+void Session::setTheme(const view::Theme& t) {
+  theme_ = t;
+  // The seam colours come out of the palette, so they are rebuilt with it.
+  seams_ = view::SeamMap::build(*variant_, viewCfg_, theme_);
 }
 
 void Session::setFlatView(bool flat) {
@@ -245,8 +251,7 @@ Result<void> Session::playChecked(const Move& m) {
     return fail(ok.error().code, ok.error().message);
   }
   if (animating) {
-    anim_.start(viewCfg_, placements_, seams_, view::Theme::console(), path,
-                animSeconds_);
+    anim_.start(viewCfg_, placements_, seams_, theme_, path, animSeconds_);
   } else {
     anim_.clear();
   }

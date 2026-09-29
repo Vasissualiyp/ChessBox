@@ -104,7 +104,15 @@ MovePath tracePath(const VariantSpec& v, const Position& pos, PieceTypeId type,
           // an occupied square, and its capture must. Without this a pawn on a mirror
           // took the push that reached the same square the reflected capture did, and the
           // animation showed a straight step instead of a bounce.
-          const bool occupied = !pos.at(m.to).empty();
+          //
+          // What is taken is `captureCell`, not `to`. Those are the same square for
+          // every ordinary capture and different for exactly one move - en passant, where
+          // the square landed on is empty. Reading `to` made the capture atom look
+          // illegal, left the move unexplained, and handed the animation a route with no
+          // steps in it.
+          const CellId taken =
+              m.captureCell != kInvalidCell ? m.captureCell : m.to;
+          const bool occupied = !pos.at(taken).empty();
           const bool allowed = atom.capture == CapturePolicy::May ||
                                (atom.capture == CapturePolicy::Must && occupied) ||
                                (atom.capture == CapturePolicy::Cannot && !occupied);
@@ -341,6 +349,21 @@ void MoveAnimation::start(const ViewConfig& cfg, const std::vector<Placement>& p
     incoming = s.dir;
   }
 
+  // A route nothing explained - a castle, a rule effect, a move whose atom was edited
+  // out from under a running game - still has to be drawn. It glides straight there.
+  // Leaving it as the single starting point would hand sample() a polyline with nothing
+  // to interpolate along, which is a crash rather than a still piece.
+  if (runs_.size() == 1 && runs_.back().x.size() < 2) {
+    const Placement& dst = found.back();
+    append(dst.x, dst.y, dst.z);
+  }
+  for (const Run& run : runs_) {
+    if (run.x.size() < 2) {
+      clear();
+      return;
+    }
+  }
+
   // Time is handed out by distance travelled, with a fixed pause for each crossing, so
   // a one-square step and a queen's run across the board move at the same speed.
   std::vector<float> length(runs_.size(), 0.0f);
@@ -427,6 +450,12 @@ MoveAnimation::Sample MoveAnimation::sample() const {
     }
 
     // Walk the polyline by arc length.
+    if (run.x.size() < 2) {
+      out.x = run.x.front();
+      out.y = run.y.front();
+      out.z = run.z.front();
+      return out;
+    }
     float len = 0;
     std::vector<float> cum(run.x.size(), 0.0f);
     for (std::size_t i = 1; i < run.x.size(); ++i) {

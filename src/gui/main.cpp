@@ -111,8 +111,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
     shell->pause();
   else if (screen == "settings")
     shell->go(app::Screen::Settings);
-  else if (screen == "creator")
-    shell->go(app::Screen::Creator);
+  else if (screen == "editor")
+    shell->go(app::Screen::Editor);
   else if (screen == "info")
     shell->go(app::Screen::GameInfo);
   else if (screen == "pieces")
@@ -155,9 +155,13 @@ int captureFrame(const std::string& variantName, const std::string& path,
   // The capture has to show the interface at the scale the player set, or it is not a
   // picture of what they would see.
   (void)(*ui)->setScale(shell->settings().guiScale);
+  (*ui)->setIconStyle(render::iconStyleFromName(shell->settings().pieceIcons));
   // Two frames: ImGui sizes some things from the previous frame, so the first can catch
   // a panel mid-layout.
   for (int frame = 0; frame < 2; ++frame) {
+    // A fixed step rather than a real clock: the shell animates, and a capture has to
+    // be the same picture every time it is taken.
+    (*ui)->tick(frame == 0 ? 0.0f : 1.0f);
     (*ui)->newFrame();
     const render::UiRequest request = (*ui)->build(*shell, 60.0f);
     (*ui)->endFrame();
@@ -229,7 +233,7 @@ int main(int argc, char** argv) {
           "  Esc           pause     u  undo     r  reset\n\n"
           "With no variant, the game opens on the main menu.\n"
           "--shot renders one frame to a PPM and exits, with no display required;\n"
-          "--screen picks which one: menu, newgame, pause, settings, creator, info,\n"
+          "--screen picks which one: menu, newgame, pause, settings, editor, info,\n"
           "pieces, or the board by default.\n");
       return 0;
     }
@@ -286,11 +290,16 @@ int main(int argc, char** argv) {
     return 1;
   }
   (void)(*ui)->setScale(shell->settings().guiScale);
+  (*ui)->setIconStyle(render::iconStyleFromName(shell->settings().pieceIcons));
 #endif
   if (shell->settings().fullscreen) SDL_SetWindowFullscreen(window->handle(), true);
 
   render::BoardRect boardRect{0, 0, static_cast<float>(window->width()),
                               static_cast<float>(window->height())};
+  // How far the camera has stepped back off the board. Pause is not a dialog landing on
+  // top of the position - it is the player looking up from it - so the view pulls away
+  // rather than being covered.
+  float steppedBack = 0.0f;
   bool running = true;
   bool orbiting = false;
   bool panning = false;
@@ -414,6 +423,7 @@ int main(int argc, char** argv) {
     if (dt > 0.0f) fps = fps * 0.9f + (1.0f / dt) * 0.1f;
 
 #ifdef CB_HAVE_IMGUI
+    (*ui)->tick(dt);
     (*ui)->newFrame();
     const render::UiRequest request = (*ui)->build(*shell, fps);
     (*ui)->endFrame();
@@ -426,6 +436,7 @@ int main(int argc, char** argv) {
     if (request.settingsChanged) {
       shell->applySettings();
       renderer->setOptions(optionsFrom(shell->settings()));
+      (*ui)->setIconStyle(render::iconStyleFromName(shell->settings().pieceIcons));
     }
     if (request.toggleFullscreen) {
       SDL_SetWindowFullscreen(window->handle(), shell->settings().fullscreen);
@@ -452,6 +463,10 @@ int main(int argc, char** argv) {
           [&](CellId c) { return shell->session()->boardVisible(c); },
           [&](CellId c) { return shell->session()->game().cellInPresent(c); });
       camera = shell->session()->camera();
+      const bool away = shell->screen() != app::Screen::Game;
+      const float want = away ? 1.0f : 0.0f;
+      steppedBack += std::clamp(want - steppedBack, -dt * 3.2f, dt * 3.2f);
+      camera.distance *= 1.0f + 0.16f * steppedBack;
     }
 
     const auto overlay = [&](VkCommandBuffer cmd) {
