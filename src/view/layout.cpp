@@ -9,6 +9,21 @@ namespace cb::view {
 ViewConfig ViewConfig::forBoard(const DimSpec& d) {
   ViewConfig cfg;
   const std::uint8_t n = d.dims();
+  // Temporal and multiverse axes are sub-board grid axes: time runs across the screen and
+  // timelines down it, the display 5D chess uses. Only the spatial axes go on the screen.
+  bool hasTemporal = false;
+  for (std::uint8_t a = 0; a < n; ++a) {
+    if (d.kind(a) != AxisKind::Spatial) hasTemporal = true;
+  }
+  if (hasTemporal) {
+    for (std::uint8_t a = 0; a < n && cfg.screenAxes.size() < 3; ++a) {
+      if (d.kind(a) == AxisKind::Spatial) cfg.screenAxes.push(a);
+    }
+    for (std::uint8_t a = 0; a < n; ++a) {
+      if (d.kind(a) != AxisKind::Spatial) cfg.gridAxes.push(a);
+    }
+    return cfg;
+  }
   const std::uint8_t spatial = n >= 3 ? 3 : n;
   for (std::uint8_t a = 0; a < spatial; ++a) cfg.screenAxes.push(a);
   for (std::uint8_t a = spatial; a < n; ++a) cfg.gridAxes.push(a);

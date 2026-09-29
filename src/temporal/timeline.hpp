@@ -7,8 +7,7 @@
 
 namespace cb::temporal {
 
-/// A timeline index along the multiverse axis. The original timeline is 0; White's
-/// branches run one way and Black's the other, so a line id's sign says who owns it.
+/// A timeline index along the multiverse axis.
 using LineId = std::int16_t;
 
 /// A half-turn index along the time axis. Board 0 is the starting position; every move
@@ -17,6 +16,24 @@ using Turn = std::int16_t;
 
 /// Who a timeline belongs to. The original timeline belongs to nobody in particular.
 enum class BranchOwner : std::uint8_t { Original, White, Black };
+
+/// The rules that make one time-travel variant different from another, as data.
+///
+/// None of these are universal. Which way a player's timelines grow, how far a new
+/// timeline advances relative to the board it branches from, and whether a forward step
+/// stays on the mover's own future are all ChessBox choices a variant may make
+/// differently - so they are parameters, not constants (ADR-0007 and the M6 plan's
+/// "configuration, not code" rule).
+struct TemporalPolicy {
+  /// Timeline coordinate of the original timeline. Branches grow away from it, so the
+  /// line axis must have room on both sides for both players.
+  LineId originLine{0};
+  /// Which way each player's branches run. White down (negative), Black up (positive).
+  int whiteSign{-1};
+  int blackSign{1};
+  /// A branch from a board at (t, l) lands at (t + branchAdvance, k).
+  Turn branchAdvance{1};
+};
 
 /// One board in the multiverse: a full position at a point in time on a timeline.
 struct BoardRef {
@@ -43,19 +60,20 @@ struct Timeline {
 /// timeline. It is enough to apply the published activity and present rules, and it is
 /// deliberately just data - no positions, no moves.
 ///
-/// The rules implemented here are transcribed from the reference game's public rules:
-///
 ///  - A timeline is *playable* if the board on it is the latest on that timeline.
 ///  - The original timeline is *active*. The nth timeline a player created is active iff
 ///    the opponent has created at least n-1 timelines.
 ///  - The *present line* aligns with the active board furthest left along the time axis;
 ///    every board in that column (same turn) is in the present.
 ///
-/// Nothing here is validated against the reference game's own outputs yet; treat it as a
-/// first-principles implementation of the written rules (M6.2).
+/// Implemented from the reference game's written rules, not yet validated against a
+/// transcribed corpus (M6.2). The direction and advance of branches come from the policy.
 class TimelineModel {
  public:
-  TimelineModel();
+  explicit TimelineModel(TemporalPolicy policy = {});
+
+  [[nodiscard]] const TemporalPolicy& policy() const noexcept { return policy_; }
+  [[nodiscard]] LineId originLine() const noexcept { return policy_.originLine; }
 
   [[nodiscard]] const std::vector<Timeline>& timelines() const noexcept { return lines_; }
   [[nodiscard]] const Timeline* find(LineId line) const;
@@ -63,10 +81,13 @@ class TimelineModel {
   /// Record that a board exists at (turn, line). A duplicate is refused.
   bool addBoard(LineId line, Turn turn);
 
-  /// Create a timeline for `owner`, branching from `fromLine` into the vacant row closest
-  /// to it on that player's side: White branches to lower ids, Black to higher ones.
-  /// Returns the new line, or nullopt if `owner` is the original.
-  std::optional<LineId> branch(BranchOwner owner, LineId fromLine);
+  /// Create a timeline for `owner`. Returns the new line, or nullopt for the original.
+  std::optional<LineId> branch(BranchOwner owner);
+
+  /// The line `owner`'s next branch would take, without creating it.
+  [[nodiscard]] LineId nextId(BranchOwner owner) const;
+  /// The sign this owner's branches run in.
+  [[nodiscard]] int signOf(BranchOwner owner) const noexcept;
 
   /// The nth timeline a player created is active iff the opponent created at least n-1.
   [[nodiscard]] bool active(LineId line) const;
@@ -74,13 +95,13 @@ class TimelineModel {
   /// The active board furthest left along the time axis sets the present turn.
   [[nodiscard]] Turn presentTurn() const;
 
-  /// Every board in the present column, across the active timelines: the boards a player
-  /// has to answer on.
+  /// Every board in the present column, across the active timelines.
   [[nodiscard]] std::vector<BoardRef> boardsInPresent() const;
 
  private:
   [[nodiscard]] Timeline* findMutable(LineId line);
 
+  TemporalPolicy policy_;
   std::vector<Timeline> lines_;
   int whiteBranches_{0};
   int blackBranches_{0};

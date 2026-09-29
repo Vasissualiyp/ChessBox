@@ -20,6 +20,7 @@ enum class ActionKind : std::uint8_t {
   Undo,
   Reset,
   Orbit,          ///< dx, dy in radians
+  Pan,            ///< dx, dy: slide the look-at point in the view plane
   Zoom,           ///< dx as a multiplier
   SetScreenAxes,  ///< text is a comma-separated axis name list
   SetPromotion,   ///< text is a piece name
@@ -78,6 +79,10 @@ class Session {
   void setFlatView(bool flat);
   [[nodiscard]] bool flatView() const noexcept { return flat_; }
 
+  /// Whether this cell's board exists yet (always true for a non-temporal variant). The
+  /// temporal lattice is mostly unfilled space, so the view draws only live boards.
+  [[nodiscard]] bool boardVisible(CellId c) const;
+
   /// How long a move takes to draw, per cell travelled. Zero turns animation off, and
   /// a move then simply appears where it landed.
   void setAnimationSeconds(float secondsPerCell) { animSeconds_ = secondsPerCell; }
@@ -115,6 +120,9 @@ class Session {
   Session() = default;
   void refreshSnapshot();
   void refreshView();
+  /// Re-lay the temporal view after a move changed which boards exist, keeping the
+  /// player's camera angle and zoom.
+  void refreshTemporalView();
   void applyViewMode();
   /// The view actually laid out: the player's choice, adjusted for the flat mode, which
   /// cannot show a depth axis because a top-down camera would stack the boards unseen.

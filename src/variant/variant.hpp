@@ -108,6 +108,13 @@ class VariantSpec {
   std::vector<FieldDecl> pieceFields;
   std::vector<FieldDecl> cellFields;
 
+  /// Temporal policy, as data (M6). Which way each player's timelines grow, and how far
+  /// a new timeline advances past the board it branches from. Defaults are the reference
+  /// game's: White down (-1), Black up (+1), one turn on.
+  int temporalWhiteSign{-1};
+  int temporalBlackSign{1};
+  int temporalBranchAdvance{1};
+
   /// The variant's rules, as data. Held by opaque pointer so that the position layer
   /// does not need to know the rule VM exists.
   std::shared_ptr<const void> ruleSet;

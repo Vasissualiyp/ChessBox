@@ -99,8 +99,9 @@ class BoardRenderer {
   /// box needs neither, and the tests that cover instance building pass nullptr.
   [[nodiscard]] InstanceSet buildInstances(
       const view::PositionView& p, const view::ViewConfig& cfg,
-      const view::SeamMap* seams = nullptr,
-      const view::MoveAnimation* anim = nullptr) const;
+      const view::SeamMap* seams = nullptr, const view::MoveAnimation* anim = nullptr,
+      const std::function<bool(CellId)>& visible = {},
+      const std::function<bool(CellId)>& present = {}) const;
 
   /// Render one frame into `target`, leaving the colour image in TRANSFER_SRC_OPTIMAL.
   /// `overlay` records extra commands inside the same render pass, which is how the UI

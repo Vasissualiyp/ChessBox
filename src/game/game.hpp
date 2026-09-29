@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "movegen/movegen.hpp"
 #include "rules/vm.hpp"
+#include "temporal/multiverse.hpp"
 
 namespace cb {
 
@@ -54,7 +56,7 @@ class Game {
   bool undo();
   void reset();
 
-  [[nodiscard]] std::size_t plyCount() const noexcept { return history_.size(); }
+  [[nodiscard]] std::size_t plyCount() const noexcept { return played_.size(); }
   [[nodiscard]] const std::vector<Move>& moveHistory() const noexcept { return played_; }
 
   [[nodiscard]] GameResult result() const;
@@ -73,9 +75,32 @@ class Game {
   /// A one-line human-readable status, used by both front ends.
   [[nodiscard]] std::string statusLine() const;
 
+  /// True when the variant declares a temporal or multiverse axis, in which case play
+  /// goes through the multiverse: a move appends a board, and time travel branches.
+  [[nodiscard]] bool isTemporal() const noexcept { return temporal_; }
+  /// The multiverse's board bookkeeping, for a temporal variant (nullptr otherwise).
+  [[nodiscard]] const temporal::Multiverse* multiverse() const noexcept {
+    return multi_.has_value() ? &*multi_ : nullptr;
+  }
+  /// For a temporal variant, whether this cell's board exists yet. The rest of the
+  /// lattice is space the multiverse will fill; the view hides it until then.
+  [[nodiscard]] bool boardVisible(CellId c) const;
+  /// Whether this cell is on a board in the present column - the boards to answer on.
+  [[nodiscard]] bool cellInPresent(CellId c) const;
+
  private:
   void invalidate();
   [[nodiscard]] int repetitionCount() const;
+
+  // ---- temporal (M6) ------------------------------------------------------
+  void initTemporal();
+  [[nodiscard]] temporal::BoardKey keyOf(CellId c) const;
+  [[nodiscard]] CellId cellOn(const temporal::BoardKey& b, std::int16_t file,
+                              std::int16_t rank) const;
+  [[nodiscard]] std::vector<temporal::BoardKey> actionable() const;
+  void copyBoard(const temporal::BoardKey& from, const temporal::BoardKey& to);
+  void applyTemporal(const Move& m);
+  void settleTemporalTurn();
 
   /// Does this piece have a capture available? Supplied to the rule VM, which cannot
   /// generate moves itself (see rules::RuleEnv).
@@ -99,6 +124,23 @@ class Game {
 
   mutable std::vector<Move> legalCache_;
   mutable bool legalCacheValid_{false};
+
+  // ---- temporal state -----------------------------------------------------
+  bool temporal_{false};
+  std::uint8_t fileAxis_{0};
+  std::uint8_t rankAxis_{1};
+  std::uint8_t turnAxis_{0};
+  std::uint8_t lineAxis_{0};
+  std::optional<temporal::Multiverse> multi_;
+  Color temporalTurn_{Color::White};
+  /// A whole-multiverse snapshot per move, because a temporal move rewrites many boards
+  /// and is not reversible by a single Undo.
+  struct TemporalSnapshot {
+    Position pos;
+    temporal::Multiverse multi;
+    Color turn;
+  };
+  std::vector<TemporalSnapshot> temporalHistory_;
 };
 
 }  // namespace cb

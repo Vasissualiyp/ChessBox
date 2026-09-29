@@ -44,7 +44,7 @@ VariantSpec temporalSandbox() {
     c.c[0] = static_cast<std::int16_t>(file);
     c.c[1] = static_cast<std::int16_t>(rank);
     c.c[2] = 0;  // turn
-    c.c[3] = 0;  // line
+    c.c[3] = 1;  // line: the origin sits in the middle of the timeline axis
     v.start.push_back(StartPiece{c, v.findPiece(name), color});
   };
   place(4, 0, "king", Color::White);
@@ -97,10 +97,11 @@ TEST_CASE("a time jump is an ordinary legal move", "[unit][temporal]") {
   }
   REQUIRE(jump != nullptr);
   const Move chosen = *jump;  // legalMoves() is invalidated by play
-  const Coord to = v.dims.toCoord(chosen.to);
   REQUIRE(g.play(chosen).has_value());
-  REQUIRE_FALSE(g.position().at(chosen.to).empty());
-  CHECK((to.c[2] != 0 || to.c[3] != 0));  // the piece left the first board
+  // The jump landed on a board that did not exist yet, so the multiverse grew: the move
+  // is an ordinary lattice move and its consequence is the multiverse's business.
+  REQUIRE(g.multiverse() != nullptr);
+  CHECK(g.multiverse()->live().size() > 1);
 }
 
 TEST_CASE("movegen and the oracle still agree with temporal axes present",

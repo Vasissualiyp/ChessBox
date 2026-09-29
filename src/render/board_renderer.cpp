@@ -357,12 +357,20 @@ Result<void> BoardRenderer::ensureInstanceCapacity(std::size_t count) {
   return {};
 }
 
-InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
-                                          const view::ViewConfig& cfg,
-                                          const view::SeamMap* seams,
-                                          const view::MoveAnimation* anim) const {
+InstanceSet BoardRenderer::buildInstances(
+    const view::PositionView& p, const view::ViewConfig& cfg, const view::SeamMap* seams,
+    const view::MoveAnimation* anim, const std::function<bool(CellId)>& visible,
+    const std::function<bool(CellId)>& present) const {
   const VariantSpec& v = p.variant();
-  const auto placements = view::layout(v.dims, cfg);
+  auto placements = view::layout(v.dims, cfg);
+  // A temporal variant's lattice is mostly boards that do not exist yet; `visible` says
+  // which are real, so the opening board is one board rather than a grid of empty ones.
+  if (visible) {
+    placements.erase(
+        std::remove_if(placements.begin(), placements.end(),
+                       [&](const view::Placement& pl) { return !visible(pl.cell); }),
+        placements.end());
+  }
 
   // Appearance per piece type, resolved once: a variant may declare a shape and a
   // height, and anything it leaves out is derived from how the piece moves.
@@ -415,9 +423,11 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
 
   for (const view::Placement& pl : placements) {
     const Coord c = v.dims.toCoord(pl.cell);
+    // Square colour comes from the drawn spatial axes only: a sub-board on another turn
+    // or timeline is still a chessboard, and its light and dark squares must not swap as
+    // the turn axis advances.
     int parity = 0;
     for (std::uint8_t a : cfg.screenAxes) parity += c.c[a];
-    for (std::uint8_t a : cfg.gridAxes) parity += c.c[a];
 
     Instance cell{};
     cell.center[0] = pl.x;
@@ -475,12 +485,14 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     struct Extent {
       float minX{0}, maxX{0}, minY{0}, maxY{0}, z{0};
       bool seen{false};
+      bool present{false};
     };
     std::vector<Extent> extents(view::enumerateSlices(v.dims, cfg).size());
     for (const view::Placement& pl : placements) {
       Extent& e = extents[pl.slice];
+      if (present && present(pl.cell)) e.present = true;
       if (!e.seen) {
-        e = Extent{pl.x, pl.x, pl.y, pl.y, pl.z, true};
+        e = Extent{pl.x, pl.x, pl.y, pl.y, pl.z, true, e.present};
         continue;
       }
       e.minX = std::min(e.minX, pl.x);
@@ -500,10 +512,13 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
       plinth.scale[0] = ((e.maxX - e.minX) * 0.5f + 0.78f) / half.x;
       plinth.scale[1] = ((e.maxY - e.minY) * 0.5f + 0.78f) / half.y;
       plinth.scale[2] = 0.13f / half.z;
-      toFloat4(wood, plinth.color);
+      // A board in the present - one a move is expected on - stands on a lit plinth, so
+      // the boards to answer on are visible at a glance.
+      toFloat4(e.present ? mix(wood, theme_.emberDeep, 0.55f) : wood, plinth.color);
       // A warm rim around the edge of the table, which is what makes it read as an
       // object rather than as a darker rectangle.
-      toFloat4(mix(theme_.emberDeep, theme_.rule, 0.45f), plinth.edge);
+      toFloat4(e.present ? theme_.ember : mix(theme_.emberDeep, theme_.rule, 0.45f),
+               plinth.edge);
       plinth.edgeMask = 15.0f;
       byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(plinth);
     }

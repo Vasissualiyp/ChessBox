@@ -38,6 +38,11 @@ Result<Action> parseAction(const VariantSpec& v, std::string_view line) {
     in >> a.dx >> a.dy;
     return a;
   }
+  if (verb == "pan") {
+    a.kind = ActionKind::Pan;
+    in >> a.dx >> a.dy;
+    return a;
+  }
   if (verb == "zoom") {
     a.kind = ActionKind::Zoom;
     in >> a.dx;
@@ -98,14 +103,55 @@ view::ViewConfig Session::effectiveViewConfig() const {
   return cfg;
 }
 
+bool Session::boardVisible(CellId c) const {
+  return game_ == nullptr || game_->boardVisible(c);
+}
+
 void Session::refreshView() {
   viewCfg_ = effectiveViewConfig();
   placements_ = view::layout(variant_->dims, viewCfg_);
+  // A temporal variant's lattice is mostly space the multiverse has not filled yet:
+  // show only the boards that exist, so the game opens on one board, not a grid of
+  // empty ones.
+  placements_.erase(
+      std::remove_if(placements_.begin(), placements_.end(),
+                     [&](const view::Placement& p) { return !boardVisible(p.cell); }),
+      placements_.end());
   seams_ = view::SeamMap::build(*variant_, viewCfg_, view::Theme::console());
   // Framed for the shape of the area the board is drawn into, which the interface
   // narrows with its rails - not for the whole window.
   camera_ = view::OrbitCamera::frame(view::boundsOf(placements_), boardAspect_);
   applyViewMode();
+}
+
+void Session::refreshTemporalView() {
+  if (game_ == nullptr || !game_->isTemporal()) return;
+  const float yaw = camera_.yaw;
+  const float pitch = camera_.pitch;
+  const float distance = camera_.distance;
+  refreshView();
+  // Center on the board(s) to answer on, so the newly created board the player must move
+  // on is in view rather than off to the side.
+  float cx = 0.0f;
+  float cy = 0.0f;
+  float cz = 0.0f;
+  int n = 0;
+  for (const view::Placement& p : placements_) {
+    if (game_->cellInPresent(p.cell)) {
+      cx += p.x;
+      cy += p.y;
+      cz += p.z;
+      ++n;
+    }
+  }
+  if (n > 0)
+    camera_.target = view::Vec3{cx / static_cast<float>(n), cy / static_cast<float>(n),
+                                cz / static_cast<float>(n)};
+  if (!flat_) {
+    camera_.yaw = yaw;
+    camera_.pitch = pitch;
+  }
+  camera_.distance = distance;
 }
 
 void Session::setFlatView(bool flat) {
@@ -134,13 +180,16 @@ bool Session::advanceAnimation(float dt) {
 void Session::setBoardAspect(float aspect) {
   if (aspect <= 0.0f || std::abs(aspect - boardAspect_) < 0.01f) return;
   boardAspect_ = aspect;
+  const view::Vec3 keptTarget = camera_.target;
   const float keptDistance = camera_.distance;
   const float keptYaw = camera_.yaw;
   const float keptPitch = camera_.pitch;
   camera_ = view::OrbitCamera::frame(view::boundsOf(placements_), boardAspect_);
-  // A resize re-frames, but whatever the player had turned or zoomed to is theirs to
-  // keep unless the board itself changed.
-  if (framedOnce_) {
+  // A resize re-frames, but whatever the player had turned, panned or zoomed to is
+  // theirs to keep. A temporal board has just been centered on the present board, so it
+  // keeps that target even on the first framing.
+  if (framedOnce_ || (game_ != nullptr && game_->isTemporal())) {
+    camera_.target = keptTarget;
     camera_.distance = keptDistance;
     camera_.yaw = keptYaw;
     camera_.pitch = keptPitch;
@@ -205,6 +254,7 @@ Result<void> Session::playChecked(const Move& m) {
   selected_ = kInvalidCell;
   pending_ = PendingPromotion{};
   refreshSnapshot();
+  refreshTemporalView();
   return {};
 }
 
@@ -299,6 +349,7 @@ Result<void> Session::apply(const Action& a) {
       selected_ = kInvalidCell;
       message_ = "undone";
       refreshSnapshot();
+      refreshTemporalView();
       return {};
 
     case ActionKind::Reset:
@@ -307,12 +358,23 @@ Result<void> Session::apply(const Action& a) {
       selected_ = kInvalidCell;
       message_ = "reset";
       refreshSnapshot();
+      refreshTemporalView();
       return {};
 
     case ActionKind::Orbit:
       camera_.yaw += a.dx;
       camera_.pitch = std::clamp(camera_.pitch + a.dy, -1.5f, 1.5f);
       return {};
+
+    case ActionKind::Pan: {
+      // Slide the look-at point in the plane the camera is facing, so the board moves
+      // with the mouse and the viewing angle does not change.
+      const view::Vec3 forward = view::normalize(camera_.target - camera_.eye());
+      const view::Vec3 right = view::normalize(view::cross(forward, camera_.upHint()));
+      const view::Vec3 up = view::cross(right, forward);
+      camera_.target = camera_.target + right * a.dx + up * a.dy;
+      return {};
+    }
 
     case ActionKind::Zoom:
       if (a.dx > 0)

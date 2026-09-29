@@ -262,7 +262,7 @@ TEST_CASE("camera actions stay within sane limits", "[unit][app]") {
 TEST_CASE("every shipped variant is playable through the session", "[unit][app]") {
   // The interaction layer must not assume two dimensions, a box board, or pawns.
   for (const char* name : {"standard", "cylinder", "torus", "mobius", "klein",
-                           "mirrorbox", "cube5", "hyper4", "torus3d"}) {
+                           "mirrorbox", "cube5", "hyper4", "torus3d", "5d"}) {
     CAPTURE(name);
     auto s = open(name);
     REQUIRE(s->game().result() == GameResult::InProgress);

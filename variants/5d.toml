@@ -1,0 +1,155 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# 5d - chess with a turn axis and a timeline axis.
+#
+# The two extra axes are declared `temporal` and `multiverse`, but nothing below the
+# game layer treats them specially: a rook is still the atom [1]^inf, so on this board
+# it slides along the file, the rank, *through time*, and *between timelines*. A knight
+# still leaps {1,2} on any two axes, which is how a piece jumps over a missing board.
+# This is the movement half of 5D chess as pure data (M6.1).
+#
+# The multiverse bookkeeping - a move appending a new board, time travel branching a
+# timeline, and a turn being a set of moves on the present boards - is not enforced
+# yet; until it is, this plays as a single four-dimensional board. See
+# docs/plan/M6-temporal.md.
+
+name = "5d"
+description = "Chess on a board with time and timelines: pieces move through the turn and multiverse axes by vector."
+side_to_move = "white"
+en_passant = false
+stalemate = "draw"
+halfmove_draw_limit = 100
+orientation_axis = "rank"
+
+[[axis]]
+name = "file"
+extent = 8
+
+[[axis]]
+name = "rank"
+extent = 8
+
+[[axis]]
+name = "turn"
+extent = 10
+kind = "temporal"
+
+[[axis]]
+name = "line"
+extent = 5
+kind = "multiverse"
+
+[promotion]
+rank = 7
+
+# Temporal policy, as data. White's timelines grow down (-1) and Black's up (+1); a new
+# timeline's board sits one turn on from the target it branches from. A variant that
+# wanted the reference game's other conventions, or a toroidal timeline, would say so
+# here rather than needing new engine code.
+[temporal]
+white_sign = -1
+black_sign = 1
+branch_advance = 1
+
+# ---------------------------------------------------------------------------
+# Pieces. Identical to standard chess; the algebra does the generalization.
+# ---------------------------------------------------------------------------
+
+[[piece]]
+name = "pawn"
+symbol = "P"
+resets_draw_clock = true
+promotes_to = ["knight", "bishop", "rook", "queen"]
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+  capture = "cannot"
+  forward = true
+
+  [[piece.move]]
+  vector = [1]
+  min = 2
+  max = 2
+  mode = "slide"
+  capture = "cannot"
+  forward = true
+  from_rank = 1
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+  capture = "must"
+  forward = true
+
+[[piece]]
+name = "knight"
+symbol = "N"
+
+  [[piece.move]]
+  vector = [1, 2]
+  max = 1
+  mode = "leap"
+
+[[piece]]
+name = "bishop"
+symbol = "B"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "rook"
+symbol = "R"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "queen"
+symbol = "Q"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "unicorn"
+symbol = "U"
+
+  [[piece.move]]
+  vector = [1, 1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "king"
+symbol = "K"
+royal = true
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+
+# The opening board. The multiverse starts as a single board at (turn 0, line 0); later
+# boards are created as the game is played, so only the origin needs writing here.
+[start]
+origin = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"

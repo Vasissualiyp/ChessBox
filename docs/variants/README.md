@@ -16,6 +16,7 @@ so a new variant is held to the same bar without being registered anywhere.
 | [cube5](cube5.md) | 5×5×5 | box | unicorns; three-dimensional play |
 | [hyper4](hyper4.md) | 4×4×4×4 | box | 48-direction knights |
 | [torus3d](torus3d.md) | 4×4×4 | all three axes glued | fully uniform 3-D board |
+| [5d](5d.md) | 8×8×3×2 | box | a turn axis and a timeline axis; pieces move through time |
 | [atomic](atomic.md) | 8×8 | box | captures destroy their neighbourhood |
 | [atomic_torus](atomic_torus.md) | 8×8 | torus | the same rules, wrapping — rules × geometry |
 | [mustcapture](mustcapture.md) | 8×8 | box | captures are compulsory |

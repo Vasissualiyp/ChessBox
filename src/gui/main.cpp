@@ -169,7 +169,9 @@ int captureFrame(const std::string& variantName, const std::string& path,
       syncMarks(*renderer, *shell->session());
       instances = renderer->buildInstances(
           shell->session()->snapshot(), shell->session()->viewConfig(),
-          &shell->session()->seams(), &shell->session()->animation());
+          &shell->session()->seams(), &shell->session()->animation(),
+          [&](CellId c) { return shell->session()->boardVisible(c); },
+          [&](CellId c) { return shell->session()->game().cellInPresent(c); });
     }
     const view::OrbitCamera camera =
         shell->showsBoard() ? shell->session()->camera() : view::OrbitCamera{};
@@ -184,7 +186,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
 #else
   const auto instances = renderer->buildInstances(
       shell->session()->snapshot(), shell->session()->viewConfig(),
-      &shell->session()->seams(), &shell->session()->animation());
+      &shell->session()->seams(), &shell->session()->animation(),
+      [&](CellId c) { return shell->session()->boardVisible(c); });
   (void)renderer->render(*target, instances, shell->session()->camera());
 #endif
 
@@ -290,6 +293,7 @@ int main(int argc, char** argv) {
                               static_cast<float>(window->height())};
   bool running = true;
   bool orbiting = false;
+  bool panning = false;
   auto lastFrame = std::chrono::steady_clock::now();
   float fps = 0.0f;
 
@@ -334,14 +338,26 @@ int main(int argc, char** argv) {
                                          boardRect.height);
           } else if (e.button.button == SDL_BUTTON_RIGHT) {
             orbiting = true;
+          } else if (e.button.button == SDL_BUTTON_MIDDLE) {
+            panning = true;
           }
           break;
         case SDL_EVENT_MOUSE_BUTTON_UP:
           if (e.button.button == SDL_BUTTON_RIGHT) orbiting = false;
+          if (e.button.button == SDL_BUTTON_MIDDLE) panning = false;
           break;
         case SDL_EVENT_MOUSE_MOTION:
-          // Orbiting a flat board would only tilt the diagram out of true.
-          if (orbiting && shell->hasGame() && !shell->session()->flatView()) {
+          if (panning && shell->hasGame()) {
+            // Drag the board with the middle button: slide the look-at point in the
+            // camera plane, scaled so it tracks the pixels at any zoom.
+            app::Action a;
+            a.kind = app::ActionKind::Pan;
+            const float k = shell->session()->camera().distance * 0.0016f;
+            a.dx = e.motion.xrel * -k;
+            a.dy = e.motion.yrel * k;
+            (void)shell->session()->apply(a);
+          } else if (orbiting && shell->hasGame() && !shell->session()->flatView()) {
+            // Orbiting a flat board would only tilt the diagram out of true.
             app::Action a;
             a.kind = app::ActionKind::Orbit;
             a.dx = e.motion.xrel * 0.01f * settings.orbitSensitivity;
@@ -432,7 +448,9 @@ int main(int argc, char** argv) {
       shell->session()->advanceAnimation(dt);
       instances = renderer->buildInstances(
           shell->session()->snapshot(), shell->session()->viewConfig(),
-          &shell->session()->seams(), &shell->session()->animation());
+          &shell->session()->seams(), &shell->session()->animation(),
+          [&](CellId c) { return shell->session()->boardVisible(c); },
+          [&](CellId c) { return shell->session()->game().cellInPresent(c); });
       camera = shell->session()->camera();
     }
 

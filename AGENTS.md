@@ -114,8 +114,9 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | Perft mismatch | bisect with `divide` against the oracle | `cb-perft-golden` |
 | Performance work | `bench/baselines/` first, then the hot path | `cb-bench-baseline` |
 
-Nine variants ship, all as data: `standard`, `cylinder`, `torus`, `mobius`, `klein`,
-`mirrorbox`, `cube5` (3-D), `hyper4` (4-D), `torus3d`. See
+Variants ship, all as data: `standard`, `cylinder`, `torus`, `mobius`, `klein`,
+`mirrorbox`, `cube5` (3-D), `hyper4` (4-D), `torus3d`, `atomic`, `atomic_torus`,
+`mustcapture`, `charged`, and `5d` (turn and timeline axes). See
 [`docs/variants/README.md`](docs/variants/README.md).
 
 Skills live in `.claude/skills/` and are catalogued in

@@ -510,22 +510,41 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       // Cold, because it acts on the geometry rather than on the game.
       if (button("AXES", t, px(78), false, true)) {
         const DimSpec& d = v.dims;
-        const int dims = static_cast<int>(d.dims());
-        // The default view, then every pair of axes twice: once with the extra axes laid
-        // across the screen and once down it. A 3-D board's depth axis is only visible
-        // as a column of boards, so both arrangements have to be in the cycle.
-        const int steps = 1 + dims * 2;
-        axisRotation_ = (axisRotation_ + 1) % steps;
+        bool temporal = false;
+        for (std::uint8_t ax = 0; ax < d.dims(); ++ax) {
+          if (d.kind(ax) != AxisKind::Spatial) temporal = true;
+        }
         app::Action a;
         a.kind = app::ActionKind::SetScreenAxes;
-        if (axisRotation_ == 0) {
-          a.text = "default";
+        if (temporal) {
+          // Time travel is unreadable in a depth view, so a temporal board is only ever
+          // shown with its spatial axes on screen and the boards laid out in full. The
+          // control just swaps whether time runs across the screen or down it.
+          std::string text;
+          for (std::uint8_t ax = 0; ax < d.dims(); ++ax) {
+            if (d.kind(ax) != AxisKind::Spatial) continue;
+            if (!text.empty()) text += ",";
+            text += d.name(ax);
+          }
+          a.text = text;
+          axisRotation_ ^= 1;
+          a.gridVertical = axisRotation_ != 0;
         } else {
-          const int s = axisRotation_ - 1;
-          const int r = (s / 2) % dims;
-          a.gridVertical = (s % 2) == 1;
-          a.text = d.name(static_cast<std::size_t>(r)) + "," +
-                   d.name(static_cast<std::size_t>((r + 1) % dims));
+          const int dims = static_cast<int>(d.dims());
+          // The default view, then every pair of axes twice: once with the extra axes
+          // laid across the screen and once down it. A 3-D board's depth axis is only
+          // visible as a column of boards, so both arrangements have to be in the cycle.
+          const int steps = 1 + dims * 2;
+          axisRotation_ = (axisRotation_ + 1) % steps;
+          if (axisRotation_ == 0) {
+            a.text = "default";
+          } else {
+            const int s = axisRotation_ - 1;
+            const int r = (s / 2) % dims;
+            a.gridVertical = (s % 2) == 1;
+            a.text = d.name(static_cast<std::size_t>(r)) + "," +
+                     d.name(static_cast<std::size_t>((r + 1) % dims));
+          }
         }
         (void)session.apply(a);
       }

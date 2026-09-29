@@ -132,6 +132,13 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
   }
   v.description = tbl["description"].value_or(std::string{});
 
+  if (const auto* temporal = tbl["temporal"].as_table()) {
+    v.temporalWhiteSign = (*temporal)["white_sign"].value_or(v.temporalWhiteSign);
+    v.temporalBlackSign = (*temporal)["black_sign"].value_or(v.temporalBlackSign);
+    v.temporalBranchAdvance =
+        (*temporal)["branch_advance"].value_or(v.temporalBranchAdvance);
+  }
+
   // ---- axes ----------------------------------------------------------------
   const auto* axesNode = tbl["axis"].as_array();
   if (axesNode == nullptr || axesNode->empty()) {
@@ -691,15 +698,47 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
   }
 
   // ---- starting position ---------------------------------------------------
+  // A temporal variant may give just the opening board for the origin slice (turn 0,
+  // line 0) with `[start] origin`; the rest of the lattice starts empty and boards are
+  // created as the game is played. Otherwise `board` describes the whole lattice.
+  const std::string origin = tbl["start"]["origin"].value_or(std::string{});
   const std::string board = tbl["start"]["board"].value_or(std::string{});
-  if (board.empty()) {
+  if (origin.empty() && board.empty()) {
     return fail(ErrorCode::ValidationError,
-                "a variant needs [start] board = \"...\" describing the opening setup");
+                "a variant needs [start] board = \"...\" (or origin for a temporal one)");
   }
-  auto placements = parseBoardSection(v.dims, v.pieces, board);
-  if (!placements.has_value())
-    return fail(placements.error().code, placements.error().message);
-  v.start = std::move(*placements);
+  if (!origin.empty()) {
+    if (v.dims.dims() < 2) {
+      return fail(ErrorCode::ValidationError,
+                  "[start] origin needs at least two axes to hold a board");
+    }
+    const std::vector<AxisDecl> two{
+        AxisDecl{v.dims.extent(0), AxisKind::Spatial, v.dims.name(0)},
+        AxisDecl{v.dims.extent(1), AxisKind::Spatial, v.dims.name(1)},
+    };
+    const auto flat = DimSpec::create(two);
+    if (!flat.has_value()) return fail(flat.error().code, flat.error().message);
+    auto parsed = parseBoardSection(*flat, v.pieces, origin);
+    if (!parsed.has_value()) return fail(parsed.error().code, parsed.error().message);
+    for (const StartPiece& sp : *parsed) {
+      Coord c(v.dims.dims());
+      for (std::uint8_t a = 0; a < v.dims.dims(); ++a) {
+        // The origin board sits in the middle of the timeline axis, so both players have
+        // room to branch outward; time starts at turn 0.
+        c.c[a] = v.dims.kind(a) == AxisKind::Multiverse
+                     ? static_cast<std::int16_t>(v.dims.extent(a) / 2)
+                     : 0;
+      }
+      c.c[0] = sp.at.c[0];
+      c.c[1] = sp.at.c[1];
+      v.start.push_back(StartPiece{c, sp.type, sp.color});
+    }
+  } else {
+    auto placements = parseBoardSection(v.dims, v.pieces, board);
+    if (!placements.has_value())
+      return fail(placements.error().code, placements.error().message);
+    v.start = std::move(*placements);
+  }
 
   if (auto ok = v.finalize(); !ok.has_value()) {
     return fail(ok.error().code, ok.error().message, ok.error().line);

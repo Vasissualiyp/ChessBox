@@ -37,37 +37,37 @@ TEST_CASE("a player's nth branch is active only once the opponent has branched",
           "[unit][temporal]") {
   TimelineModel m;
   // White opens a timeline; with Black on zero branches, the first is active.
-  const auto w1 = m.branch(BranchOwner::White, 0);
+  const auto w1 = m.branch(BranchOwner::White);
   REQUIRE(w1.has_value());
-  CHECK(*w1 < 0);  // White branches to one side
+  CHECK(*w1 == -1);  // White branches down from the origin
   CHECK(m.active(*w1));
 
   // White's second is active only once Black has created at least one.
-  const auto w2 = m.branch(BranchOwner::White, 0);
+  const auto w2 = m.branch(BranchOwner::White);
   REQUIRE(w2.has_value());
+  CHECK(*w2 == -2);
   CHECK_FALSE(m.active(*w2));
 
-  const auto b1 = m.branch(BranchOwner::Black, 0);
+  const auto b1 = m.branch(BranchOwner::Black);
   REQUIRE(b1.has_value());
-  CHECK(*b1 > 0);        // Black branches to the other side
+  CHECK(*b1 == 1);
   CHECK(m.active(*b1));  // Black's first: White has branched
   CHECK(m.active(*w2));  // now White's second counts too
   CHECK_FALSE(m.active(static_cast<LineId>(99)));
 }
 
-TEST_CASE("branching takes the vacant row closest to the origin", "[unit][temporal]") {
+TEST_CASE("branching takes the next free index", "[unit][temporal]") {
   TimelineModel m;
-  const auto w1 = m.branch(BranchOwner::White, 0);
-  const auto w2 = m.branch(BranchOwner::White, 0);
+  const auto w1 = m.branch(BranchOwner::White);
+  const auto w2 = m.branch(BranchOwner::White);
   REQUIRE(w1.has_value());
   REQUIRE(w2.has_value());
   CHECK(*w1 == -1);
   CHECK(*w2 == -2);
-  // Branching from an existing branch still lands in that player's nearest free row.
-  const auto w3 = m.branch(BranchOwner::White, *w1);
-  REQUIRE(w3.has_value());
-  CHECK(*w3 == -3);  // -2 is taken, so it walks outward past it
-  CHECK_FALSE(m.branch(BranchOwner::Original, 0).has_value());
+  const auto b1 = m.branch(BranchOwner::Black);
+  REQUIRE(b1.has_value());
+  CHECK(*b1 == 1);
+  CHECK_FALSE(m.branch(BranchOwner::Original).has_value());
 }
 
 TEST_CASE("the present line sits on the leftmost active board", "[unit][temporal]") {
@@ -75,7 +75,7 @@ TEST_CASE("the present line sits on the leftmost active board", "[unit][temporal
   REQUIRE(m.addBoard(0, 0));
   REQUIRE(m.addBoard(0, 1));
   REQUIRE(m.addBoard(0, 2));  // original is furthest right
-  const auto w1 = m.branch(BranchOwner::White, 0);
+  const auto w1 = m.branch(BranchOwner::White);
   REQUIRE(w1.has_value());
   REQUIRE(m.addBoard(*w1, 0));  // the branch starts back at turn 0
 
@@ -91,7 +91,7 @@ TEST_CASE("the present line sits on the leftmost active board", "[unit][temporal
   CHECK(m.presentTurn() == 1);
 
   // An inactive timeline contributes no board to the present.
-  const auto w2 = m.branch(BranchOwner::White, 0);  // White's second, inactive
+  const auto w2 = m.branch(BranchOwner::White);  // White's second, inactive
   REQUIRE(w2.has_value());
   REQUIRE(m.addBoard(*w2, 0));
   for (const BoardRef& b : m.boardsInPresent()) CHECK(b.line != *w2);

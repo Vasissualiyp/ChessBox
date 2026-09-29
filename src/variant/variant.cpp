@@ -301,6 +301,9 @@ Result<void> VariantSpec::finalize() {
   h.add(enPassant ? 1u : 0u);
   h.add(static_cast<std::uint64_t>(stalemate));
   h.add(static_cast<std::uint64_t>(halfmoveDrawLimit));
+  h.add(static_cast<std::uint64_t>(temporalWhiteSign));
+  h.add(static_cast<std::uint64_t>(temporalBlackSign));
+  h.add(static_cast<std::uint64_t>(temporalBranchAdvance));
   for (const auto* group : {&pieceFields, &cellFields}) {
     for (const FieldDecl& f : *group) {
       h.add(f.name);

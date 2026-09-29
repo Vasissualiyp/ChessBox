@@ -9,12 +9,21 @@ bool Timeline::hasBoard(Turn t) const {
   return std::find(boards.begin(), boards.end(), t) != boards.end();
 }
 
-TimelineModel::TimelineModel() {
+TimelineModel::TimelineModel(TemporalPolicy policy) : policy_(policy) {
   Timeline original;
-  original.id = 0;
+  original.id = policy_.originLine;
   original.owner = BranchOwner::Original;
   original.order = 0;
   lines_.push_back(original);
+}
+
+int TimelineModel::signOf(BranchOwner owner) const noexcept {
+  return owner == BranchOwner::White ? policy_.whiteSign : policy_.blackSign;
+}
+
+LineId TimelineModel::nextId(BranchOwner owner) const {
+  const int order = (owner == BranchOwner::White ? whiteBranches_ : blackBranches_) + 1;
+  return static_cast<LineId>(policy_.originLine + signOf(owner) * order);
 }
 
 const Timeline* TimelineModel::find(LineId line) const {
@@ -39,17 +48,10 @@ bool TimelineModel::addBoard(LineId line, Turn turn) {
   return true;
 }
 
-std::optional<LineId> TimelineModel::branch(BranchOwner owner, LineId fromLine) {
+std::optional<LineId> TimelineModel::branch(BranchOwner owner) {
   if (owner == BranchOwner::Original) return std::nullopt;
-  const int step = owner == BranchOwner::White ? -1 : +1;
-  // "in the vacant row closest to the originating timeline": walk out from the origin in
-  // this player's direction until a row nobody has taken.
-  LineId candidate = static_cast<LineId>(fromLine + step);
-  while (find(candidate) != nullptr) {
-    candidate = static_cast<LineId>(candidate + step);
-  }
   Timeline t;
-  t.id = candidate;
+  t.id = nextId(owner);
   t.owner = owner;
   if (owner == BranchOwner::White) {
     t.order = ++whiteBranches_;
@@ -57,7 +59,7 @@ std::optional<LineId> TimelineModel::branch(BranchOwner owner, LineId fromLine) 
     t.order = ++blackBranches_;
   }
   lines_.push_back(t);
-  return candidate;
+  return t.id;
 }
 
 bool TimelineModel::active(LineId line) const {
