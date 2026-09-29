@@ -13,6 +13,7 @@
 
 name = "klein"
 description = "One pair of edges joined straight, one with a twist - and a bishop that finally escapes its colour."
+difficulty = "medium"
 side_to_move = "white"
 en_passant = false
 stalemate = "draw"

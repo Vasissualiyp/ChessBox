@@ -94,61 +94,87 @@ void keyValue(const char* key, const std::string& value, const view::Theme& them
   ImGui::PopStyleColor();
 }
 
-bool button(const char* label, const view::Theme& theme, float width, bool primary,
-            bool cold, bool enabled) {
-  const float s = uiScale();
-  const view::Rgba accent = cold ? theme.rift : theme.ember;
-  // The stock button is only an input target: every pixel is drawn after it, so the
-  // control can be a slab with an outline instead of a flat tint.
+namespace {
+
+/// The shell's one interactive row. A menu entry and a Start/Back button are the same
+/// control: type on a hairline with an accent wash under the pointer, never a filled
+/// key. A list entry adds a number and a tail; a button adds neither. One drawing here
+/// is what keeps the two from drifting apart again.
+bool rowControl(const char* id, const char* label, const view::Theme& theme, ImFont* font,
+                float width, float height, float scale, bool enabled, bool primary,
+                bool cold, int index, const char* tail) {
+  const float s = scale;
+  // The stock button is only an input target: every pixel is drawn after it.
   ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
   ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0, 0, 0, 0));
   ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0, 0, 0, 0));
   ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0, 0, 0, 0));
+  // The stock label is hidden; every pixel is drawn here instead.
   ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0, 0, 0, 0));
   if (!enabled) ImGui::BeginDisabled();
-  const bool pressed = ImGui::Button(label, ImVec2(width, 0));
+  const bool pressed = ImGui::Button(id, ImVec2(width, height));
   if (!enabled) ImGui::EndDisabled();
   const bool hovered = enabled && ImGui::IsItemHovered();
-  const bool active = enabled && ImGui::IsItemActive();
   ImGui::PopStyleColor(5);
 
+  // Everything is positioned from the item's *actual* rectangle rather than from the
+  // cursor read before it: they are not always the same.
   const ImVec2 min = ImGui::GetItemRectMin();
   const ImVec2 max = ImGui::GetItemRectMax();
   ImDrawList* dl = ImGui::GetWindowDrawList();
 
-  // A press pushes the face down into its own shadow, which is most of what makes a
-  // flat rectangle feel like a physical key.
-  const float press = active ? 2.0f * s : 0.0f;
-  const ImVec2 tl(min.x, min.y + press);
-  const ImVec2 br(max.x, max.y + press);
-  const float r = 7.0f * s;
-
-  view::Rgba face = primary ? accent : theme.panelHi;
-  if (!enabled) {
-    face = mix(face, theme.ink, 0.45f);
-  } else if (active) {
-    face = mix(face, theme.ink, 0.16f);
-  } else if (hovered) {
-    face = mix(face, theme.bone, primary ? 0.10f : 0.14f);
+  // A wash that sweeps in from the left rather than a filled row: the row is type on a
+  // page, and a solid block would turn the list back into a stack of buttons.
+  const view::Rgba wash = cold ? theme.rift : theme.ember;
+  if (hovered) {
+    dl->AddRectFilledMultiColor(min, max, u32(wash, 0.16f), u32(wash, 0.0f),
+                                u32(wash, 0.0f), u32(wash, 0.16f));
   }
+  dl->AddLine(min, ImVec2(max.x, min.y), u32(theme.rule, 0.8f), 1.0f);
 
-  dl->AddRectFilled(ImVec2(tl.x + 2.0f * s, tl.y + 3.0f * s),
-                    ImVec2(br.x + 2.0f * s, br.y + 3.0f * s), u32(theme.ink, 0.55f), r);
-  gradientRect(dl, tl, br, u32(mix(face, theme.bone, 0.10f)), u32(shade(face, 0.82f)), r);
-  dl->AddRect(tl, br, u32(theme.ink), r, 0, 2.5f * s);
-  dl->AddLine(ImVec2(tl.x + r * 0.7f, tl.y + 2.2f * s),
-              ImVec2(br.x - r * 0.7f, tl.y + 2.2f * s),
-              u32(primary ? theme.ink : theme.bone, primary ? 0.25f : 0.14f), 1.2f * s);
+  const float labelHeight = font != nullptr ? font->FontSize : ImGui::GetFontSize();
+  const float top = min.y + (max.y - min.y - labelHeight) * 0.5f;
+  // The row steps towards the pointer, which is the only movement in the list.
+  const float slide = hovered ? 12.0f * s : 0.0f;
+  const float inset = index >= 0 ? 36.0f * s : 12.0f * s;
+  const float textX = min.x + inset + slide;
 
-  const std::string cap = upper(label);
-  const ImVec2 ts = ImGui::CalcTextSize(cap.c_str());
-  const ImU32 textCol =
-      u32(!enabled ? theme.boneFaint
-                   : (primary ? theme.ink : (cold ? theme.rift : theme.bone)));
-  dl->AddText(
-      ImVec2((tl.x + br.x) * 0.5f - ts.x * 0.5f, (tl.y + br.y) * 0.5f - ts.y * 0.5f),
-      textCol, cap.c_str());
+  const ImU32 labelColor = u32(!enabled  ? theme.boneFaint
+                               : primary ? theme.ember
+                               : cold    ? theme.rift
+                               : hovered ? theme.ember
+                                         : theme.bone);
+  const std::string caption = upper(label);
+  if (font != nullptr) {
+    const float small = font->FontSize * 0.58f;
+    if (index >= 0) {
+      char idx[4]{};
+      std::snprintf(idx, sizeof(idx), "%02d", std::clamp(index, 0, 99));
+      dl->AddText(font, small,
+                  ImVec2(min.x + 6.0f * s, min.y + (max.y - min.y - small) * 0.5f),
+                  u32(theme.boneFaint), idx);
+    }
+    dl->AddText(font, labelHeight, ImVec2(textX, top), labelColor, caption.c_str());
+    if (tail != nullptr) {
+      const ImVec2 w = font->CalcTextSizeA(small, FLT_MAX, 0.0f, tail);
+      dl->AddText(font, small,
+                  ImVec2(max.x - 8.0f * s - w.x, min.y + (max.y - min.y - small) * 0.5f),
+                  u32(enabled ? (hovered ? theme.ember : theme.rule) : theme.boneFaint),
+                  tail);
+    }
+  } else {
+    dl->AddText(ImVec2(textX, top), labelColor, caption.c_str());
+  }
   return pressed && enabled;
+}
+
+}  // namespace
+
+bool button(const char* label, const view::Theme& theme, float width, bool primary,
+            bool cold, bool enabled, ImFont* font) {
+  const float s = uiScale();
+  return rowControl(label, label, theme, font, width, 42.0f * s, s, enabled, primary,
+                    cold, -1, nullptr);
 }
 
 void eyebrow(const char* text, const view::Theme& theme, ImFont* monoFont, float scale) {
@@ -191,65 +217,11 @@ void screenTitle(const char* text, const view::Theme& theme, ImFont* displayFont
 
 bool menuEntry(const char* label, int index, const view::Theme& theme, ImFont* labelFont,
                float width, bool enabled, float scale) {
-  const float s = scale;
-  const float height = 42.0f * s;
-
-  ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0, 0, 0, 0));
-  ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0, 0, 0, 0));
-  ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0, 0, 0, 0));
-  const bool pressed =
-      ImGui::Button(("##" + std::string(label)).c_str(), ImVec2(width, height));
-  const bool hovered = ImGui::IsItemHovered() && enabled;
-  ImGui::PopStyleColor(4);
-
-  // Everything is positioned from the item's *actual* rectangle rather than from the
-  // cursor read before it: they are not always the same, and drawing from the stale
-  // position leaves the row's marks floating beside it instead of on it.
-  const ImVec2 min = ImGui::GetItemRectMin();
-  const ImVec2 max = ImGui::GetItemRectMax();
-  ImDrawList* dl = ImGui::GetWindowDrawList();
-
-  // A wash that sweeps in from the left rather than a filled row: the row is type on a
-  // page, and a solid block would turn the list back into a stack of buttons.
-  if (hovered) {
-    dl->AddRectFilledMultiColor(min, max, u32(theme.ember, 0.16f), u32(theme.ember, 0.0f),
-                                u32(theme.ember, 0.0f), u32(theme.ember, 0.16f));
-  }
-  dl->AddLine(min, ImVec2(max.x, min.y), u32(theme.rule, 0.8f), 1.0f);
-
-  const float labelHeight =
-      labelFont != nullptr ? labelFont->FontSize : ImGui::GetFontSize();
-  const float top = min.y + (max.y - min.y - labelHeight) * 0.5f;
-  // The row steps towards the pointer, which is the only movement in the list.
-  const float slide = hovered ? 12.0f * s : 0.0f;
-  const float textX = min.x + 36.0f * s + slide;
-
-  const ImU32 labelColor =
-      u32(!enabled ? theme.boneFaint : (hovered ? theme.ember : theme.bone));
-  const std::string caption = upper(label);
-  if (labelFont != nullptr) {
-    const float small = labelFont->FontSize * 0.58f;
-    char idx[4]{};
-    std::snprintf(idx, sizeof(idx), "%02d", index);
-    dl->AddText(labelFont, small,
-                ImVec2(min.x + 6.0f * s, min.y + (max.y - min.y - small) * 0.5f),
-                u32(theme.boneFaint), idx);
-    dl->AddText(labelFont, labelFont->FontSize, ImVec2(textX, top), labelColor,
-                caption.c_str());
-
-    // What is coming stays in the list and says so, in two words at the far end of the
-    // row. It does not need a paragraph underneath it every time the pointer goes past.
-    const char* tail = enabled ? ">" : "NOT BUILT";
-    const ImVec2 w = labelFont->CalcTextSizeA(small, FLT_MAX, 0.0f, tail);
-    dl->AddText(labelFont, small,
-                ImVec2(max.x - 8.0f * s - w.x, min.y + (max.y - min.y - small) * 0.5f),
-                u32(enabled ? (hovered ? theme.ember : theme.rule) : theme.boneFaint),
-                tail);
-  } else {
-    dl->AddText(ImVec2(textX, top), labelColor, caption.c_str());
-  }
-  return pressed && enabled;
+  const std::string id = "##" + std::string(label);
+  // What is coming stays in the list and says so, in two words at the far end of the
+  // row. It does not need a paragraph underneath it every time the pointer goes past.
+  return rowControl(id.c_str(), label, theme, labelFont, width, 42.0f * scale, scale,
+                    enabled, false, false, index, enabled ? ">" : "NOT BUILT");
 }
 
 namespace {
@@ -275,19 +247,24 @@ float& currentPaneTop() {
   static float top = 0;
   return top;
 }
+/// Whether this pane's height may be remembered. False for a departing ghost.
+bool& currentPaneRemember() {
+  static bool remember = true;
+  return remember;
+}
 
 }  // namespace
 
-void beginPane(const char* id, ImVec2 min, ImVec2 max, float enter, float pad) {
-  const float e = std::clamp(enter, 0.0f, 1.0f);
-  const float eased = e * e * (3.0f - 2.0f * e);
-  const float k = 0.66f + 0.34f * eased;
+void beginPane(const char* id, ImVec2 min, ImVec2 max, float scale, float alpha,
+               float pad, bool remember) {
+  const float k = std::max(0.05f, scale);
+  const float a = std::clamp(alpha, 0.0f, 1.0f);
   const ImVec2 centre((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
   const ImVec2 size((max.x - min.x - pad * 2.0f) * k, (max.y - min.y - pad * 2.0f) * k);
 
   ImGui::SetNextWindowPos(centre, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
   ImGui::SetNextWindowSize(size);
-  ImGui::PushStyleVar(ImGuiStyleVar_Alpha, eased);
+  ImGui::PushStyleVar(ImGuiStyleVar_Alpha, a);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
   ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
   ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0, 0, 0, 0));
@@ -300,6 +277,7 @@ void beginPane(const char* id, ImVec2 min, ImVec2 max, float enter, float pad) {
   ImGui::SetWindowFontScale(k);
 
   currentPane() = id;
+  currentPaneRemember() = remember;
   currentPaneTop() = ImGui::GetCursorPosY();
   const auto it = paneHeights().find(id);
   if (it != paneHeights().end() && it->second < size.y) {
@@ -309,7 +287,9 @@ void beginPane(const char* id, ImVec2 min, ImVec2 max, float enter, float pad) {
 }
 
 void endPane() {
-  paneHeights()[currentPane()] = ImGui::GetCursorPosY() - currentPaneTop();
+  if (currentPaneRemember()) {
+    paneHeights()[currentPane()] = ImGui::GetCursorPosY() - currentPaneTop();
+  }
   ImGui::SetWindowFontScale(1.0f);
   ImGui::End();
   ImGui::PopStyleColor(2);

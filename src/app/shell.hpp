@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -17,9 +18,10 @@ enum class Screen : std::uint8_t {
   Game,
   Paused,
   Settings,
-  Editor,      ///< board and piece designers, not built yet
-  GameInfo,    ///< what the loaded variant's rules actually are
-  PieceMoves,  ///< how each piece in the loaded variant moves
+  Editor,       ///< board and piece designers, not built yet
+  GameInfo,     ///< what the loaded variant's rules actually are
+  PieceMoves,   ///< how each piece in the loaded variant moves
+  QuitConfirm,  ///< the "are you sure?" step before the window closes
 };
 
 std::string_view screenName(Screen s) noexcept;
@@ -68,8 +70,16 @@ class Shell {
 
   /// Start a game. The loader is injected so the shell stays testable without files.
   using VariantLoader = std::function<Result<VariantSpec>(const std::string&)>;
-  void setVariantLoader(VariantLoader loader) { loader_ = std::move(loader); }
+  /// Install the loader and give the library its final order: difficulty first, then
+  /// name. The order can only be computed here, because a difficulty lives in the
+  /// variant's own file rather than in the name list the shell is handed at startup.
+  void setVariantLoader(VariantLoader loader);
   Result<void> startGame(const std::string& variantName);
+
+  /// A variant's advertised difficulty, for the library's order and its colours.
+  /// Resolved through the loader once and remembered; a name that will not load is
+  /// `Other` rather than an error, because the picker must still be able to draw it.
+  [[nodiscard]] Difficulty difficultyOf(const std::string& name) const;
 
   /// The one-line description a variant's own file gives it, or empty when it cannot be
   /// loaded. The picker has only names to work from, so this is how it shows an author's
@@ -105,6 +115,9 @@ class Shell {
   VariantLoader loader_;
   mutable std::unique_ptr<VariantSpec> preview_;
   mutable std::string previewName_;
+  /// Difficulty per variant name, filled on first ask so the picker does not re-read a
+  /// file for every row on every frame.
+  mutable std::map<std::string, Difficulty> difficulty_;
 };
 
 }  // namespace cb::app

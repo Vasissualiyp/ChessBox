@@ -123,6 +123,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
     shell->go(app::Screen::PieceMoves);
   else if (screen == "newgame")
     shell->go(app::Screen::NewGame);
+  else if (screen == "quit")
+    shell->go(app::Screen::QuitConfirm);
 
   if (SDL_getenv("DISPLAY") == nullptr && SDL_getenv("WAYLAND_DISPLAY") == nullptr) {
     SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");

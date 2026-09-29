@@ -57,6 +57,19 @@ Result<AxisKind> parseAxisKind(std::string_view s, int line) {
               line);
 }
 
+Result<Difficulty> parseDifficulty(std::string_view s, int line) {
+  if (s == "easy") return Difficulty::Easy;
+  if (s == "medium") return Difficulty::Medium;
+  if (s == "hard") return Difficulty::Hard;
+  if (s == "impossible") return Difficulty::Impossible;
+  if (s == "other") return Difficulty::Other;
+  return fail(ErrorCode::ValidationError,
+              "difficulty must be 'easy', 'medium', 'hard', 'impossible' or 'other', "
+              "not '" +
+                  std::string(s) + "'",
+              line);
+}
+
 }  // namespace
 
 Result<std::vector<StartPiece>> parseBoardSection(const DimSpec& dims,
@@ -131,6 +144,13 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
     return fail(ErrorCode::ValidationError, "a variant needs a 'name'");
   }
   v.description = tbl["description"].value_or(std::string{});
+  // Advertising a difficulty is optional: a variant that says nothing - or one from a
+  // Workshop package this build has never seen - is "other" rather than an error.
+  if (const auto* node = tbl["difficulty"].as_string()) {
+    const auto d = parseDifficulty(node->get(), lineOf(*node));
+    if (!d.has_value()) return fail(d.error().code, d.error().message, d.error().line);
+    v.difficulty = *d;
+  }
 
   if (const auto* temporal = tbl["temporal"].as_table()) {
     v.temporalWhiteSign = (*temporal)["white_sign"].value_or(v.temporalWhiteSign);

@@ -352,7 +352,8 @@ void drawLattice(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& them
 void drawTesseract(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
                    float t) {
   const ImVec2 centre((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
-  const float scale = std::min(max.x - min.x, max.y - min.y) * 0.26f;
+  // A decoration beside a menu, not the subject: half the size it used to be.
+  const float scale = std::min(max.x - min.x, max.y - min.y) * 0.13f;
   const float a = t * 0.14f, b = t * 0.09f;
 
   ImVec2 pts[16];
@@ -458,6 +459,9 @@ Deco decoForScreen(int screen) noexcept {
       return Deco::Tesseract;
     case app::Screen::Editor:
       return Deco::Atom;
+    case app::Screen::QuitConfirm:
+      // Nothing beside the prompt: the question is the whole screen.
+      return Deco::None;
     default:
       return Deco::None;
   }
@@ -465,10 +469,11 @@ Deco decoForScreen(int screen) noexcept {
 
 DepthField::DepthField() {
   std::uint32_t seed = 0xC0FFEEu;
-  // More bodies, spread through the whole depth, so the near plane is never empty and
-  // the field reads as motion rather than as a few specks drifting. The polygon-to-piece
-  // ratio stays roughly 3:1.
-  bodies_.resize(84);
+  // Enough bodies, spread through the whole depth, that the field is a presence rather
+  // than a few specks: it is the background the menus are read against, so it has to be
+  // visible without ever competing with the board. The polygon-to-piece ratio stays
+  // roughly 3:1 - the pieces are the game appearing in its own background.
+  bodies_.resize(120);
   for (std::size_t i = 0; i < bodies_.size(); ++i) {
     Body& b = bodies_[i];
     // A few of them are pieces rather than polygons: the background is made out of the
@@ -489,7 +494,7 @@ void DepthField::respawn(Body& b, std::uint32_t& seed, bool nearPlane) const {
   b.radiusPhase = nextFloat(seed) * 2.0f * kPi;
   b.spin = nextFloat(seed) * 2.0f * kPi;
   b.spinV = (nextFloat(seed) - 0.5f) * 0.10f;
-  b.size = b.piece ? 110.0f + nextFloat(seed) * 140.0f : 68.0f + nextFloat(seed) * 170.0f;
+  b.size = b.piece ? 130.0f + nextFloat(seed) * 160.0f : 95.0f + nextFloat(seed) * 210.0f;
   b.zDrift = -0.010f - nextFloat(seed) * 0.025f;
   b.alphaPhase = nextFloat(seed) * 2.0f * kPi;
   b.alphaV = 0.18f + nextFloat(seed) * 0.24f;
@@ -554,13 +559,13 @@ void DepthField::draw(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme&
 
     if (b.piece) {
       icon(dl, iconStyle, kPieceShapes[b.shape], at, b.size * scale,
-           u32(withAlpha(tint, fade * 0.34f)), u32(withAlpha(tint, fade * 0.22f)));
+           u32(withAlpha(tint, fade * 0.52f)), u32(withAlpha(tint, fade * 0.34f)));
       continue;
     }
 
     const float alpha =
         fade *
-        (0.20f + 0.26f * (std::sin(clock_ * b.alphaV + b.alphaPhase) * 0.5f + 0.5f));
+        (0.40f + 0.42f * (std::sin(clock_ * b.alphaV + b.alphaPhase) * 0.5f + 0.5f));
     const int sides = 3 + static_cast<int>(b.shape % 4);
     dl->PathClear();
     for (int i = 0; i < sides; ++i) {

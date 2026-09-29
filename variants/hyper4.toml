@@ -12,6 +12,7 @@
 
 name = "hyper4"
 description = "A four-dimensional board. Here a knight reaches in forty-eight directions."
+difficulty = "hard"
 side_to_move = "white"
 en_passant = false
 stalemate = "draw"

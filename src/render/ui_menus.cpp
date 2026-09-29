@@ -21,6 +21,24 @@ namespace {
 
 using namespace widgets;
 
+/// The colour a difficulty is advertised with. A switch, not an array lookup, so that
+/// adding a level to the enum is a compile error here rather than a silent wrap.
+view::Rgba difficultyColor(const view::Theme& t, Difficulty d) {
+  switch (d) {
+    case Difficulty::Easy:
+      return t.diffEasy;
+    case Difficulty::Medium:
+      return t.diffMedium;
+    case Difficulty::Hard:
+      return t.diffHard;
+    case Difficulty::Impossible:
+      return t.diffImpossible;
+    case Difficulty::Other:
+      return t.diffOther;
+  }
+  return t.diffOther;
+}
+
 /// A short, human description of a board's shape - the kind of thing a player wants
 /// before starting a game, not a list of axis extents.
 std::string describeBoard(const VariantSpec& v) {
@@ -118,7 +136,9 @@ UiRequest Ui::buildMainMenu(app::Shell& shell) {
 
   ImVec2 menuMin, menuMax;
   drawShellFrame(shell, menuMin, menuMax);
-  beginPane("##mainmenu", menuMin, menuMax, enter_, px(46.0f));
+  const PaneMove move = paneMove();
+  beginPane("##mainmenu", menuMin, menuMax, move.scale, move.alpha, px(46.0f),
+            !ghosting_);
   screenTitle("CHESSBOX", t, display, scale_, 2.4f);
   ImGui::Dummy(ImVec2(0, px(14)));
 
@@ -140,8 +160,42 @@ UiRequest Ui::buildMainMenu(app::Shell& shell) {
   if (menuEntry("Settings", 5, t, display, width, true, scale_)) {
     shell.go(app::Screen::Settings);
   }
-  if (menuEntry("Quit", 6, t, display, width, true, scale_)) request.quit = true;
+  if (menuEntry("Quit", 6, t, display, width, true, scale_)) {
+    shell.go(app::Screen::QuitConfirm);
+  }
 
+  endPane();
+  return request;
+}
+
+UiRequest Ui::buildQuitConfirm(app::Shell& shell) {
+  UiRequest request;
+  const view::Theme& t = theme_;
+  auto* display = static_cast<ImFont*>(fontDisplay_);
+  auto* small = static_cast<ImFont*>(fontSmall_);
+  auto* mono = static_cast<ImFont*>(fontMono_);
+
+  ImVec2 menuMin, menuMax;
+  drawShellFrame(shell, menuMin, menuMax);
+  const PaneMove move = paneMove();
+  beginPane("##quitconfirm", menuMin, menuMax, move.scale, move.alpha, px(46.0f),
+            !ghosting_);
+  eyebrow("quit", t, mono, scale_);
+  screenTitle("Are you sure?", t, display, scale_, 1.9f);
+  ImGui::Dummy(ImVec2(0, px(6)));
+  ImGui::PushFont(small);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
+  ImGui::TextWrapped(
+      "The window will close. A position that has not been saved is lost.");
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
+  ImGui::Dummy(ImVec2(0, px(14)));
+
+  // Leaving is the destructive choice, so it is not the one under the pointer by
+  // default and it is not the accent: backing out is.
+  if (button("BACK", t, px(150), true, false, true, display)) shell.back();
+  ImGui::SameLine();
+  if (button("QUIT", t, px(110), false, false, true, display)) request.quit = true;
   endPane();
   return request;
 }
@@ -164,7 +218,8 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
 
   ImVec2 menuMin, menuMax;
   drawShellFrame(shell, menuMin, menuMax);
-  beginPane("##newgame", menuMin, menuMax, enter_, px(46.0f));
+  const PaneMove move = paneMove();
+  beginPane("##newgame", menuMin, menuMax, move.scale, move.alpha, px(46.0f), !ghosting_);
   eyebrow("new game", t, mono, scale_);
   screenTitle("Library", t, display, scale_, 2.2f);
   ImGui::Dummy(ImVec2(0, px(6)));
@@ -185,6 +240,13 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   ImGui::BeginChild("##library", ImVec2(listW, listH), ImGuiChildFlags_Border);
   for (const std::string& name : shell.library()) {
     const bool active = name == pickedVariant_;
+    // The difficulty is a property of the variant, resolved once by the shell; the
+    // colour follows from it. The selected row is filled with its own difficulty
+    // colour - the choice states how hard the thing you picked is - and every row
+    // carries a small tab of that colour at its left, so the level reads before a
+    // click. `bone` is the type colour that contrasts with the page in both themes,
+    // which is what keeps the text legible on the saturated fill.
+    const view::Rgba diff = difficultyColor(t, shell.difficultyOf(name));
     ImGui::PushID(name.c_str());
     const float rowW = ImGui::GetContentRegionAvail().x;
     const ImVec2 min = ImGui::GetCursorScreenPos();
@@ -193,15 +255,17 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
     const bool hovered = ImGui::IsItemHovered();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     if (active) {
-      dl->AddRectFilled(min, max, u32(t.emberDeep), px(4));
-      dl->AddRectFilled(ImVec2(min.x, min.y + px(3)),
-                        ImVec2(min.x + px(4), max.y - px(3)), u32(t.ember));
+      dl->AddRectFilled(min, max, u32(diff, 0.88f), px(4));
     } else if (hovered) {
       dl->AddRectFilled(min, max, u32(t.panelHi), px(4));
     }
-    const ImU32 textCol = u32(active ? t.ink : (hovered ? t.bone : t.boneDim));
-    dl->AddText(ImVec2(min.x + px(12), min.y + (rowH - ImGui::GetFontSize()) * 0.5f),
-                textCol, upper(name).c_str());
+    const float tabW = px(5.0f);
+    dl->AddRectFilled(ImVec2(min.x, min.y + px(3)), ImVec2(min.x + tabW, max.y - px(3)),
+                      u32(diff, active ? 1.0f : 0.78f), px(2));
+    const ImU32 textCol = u32(active ? t.bone : (hovered ? t.bone : t.boneDim));
+    dl->AddText(
+        ImVec2(min.x + px(12) + tabW, min.y + (rowH - ImGui::GetFontSize()) * 0.5f),
+        textCol, upper(name).c_str());
     if (clicked) pickedVariant_ = name;
     ImGui::PopID();
   }
@@ -238,9 +302,11 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   ImGui::EndChild();
 
   ImGui::Dummy(ImVec2(0, px(8)));
-  if (button("START", t, px(150), true)) request.loadVariant = pickedVariant_;
+  if (button("START", t, px(150), true, false, true, display)) {
+    request.loadVariant = pickedVariant_;
+  }
   ImGui::SameLine();
-  if (button("BACK", t, px(110))) shell.back();
+  if (button("BACK", t, px(110), false, false, true, display)) shell.back();
   if (!shell.message().empty()) {
     ImGui::PushFont(small);
     ImGui::PushStyleColor(ImGuiCol_Text, col(t.blood));
@@ -266,7 +332,9 @@ UiRequest Ui::buildPause(app::Shell& shell) {
   const ImVec2 vmax(vp->WorkPos.x + vp->WorkSize.x, vp->WorkPos.y + vp->WorkSize.y);
   ImGui::GetBackgroundDrawList()->AddRectFilled(vmin, vmax, u32(t.ink, 0.42f));
   const float split = vmin.x + (vmax.x - vmin.x) * 0.52f;
-  beginPane("##pause", ImVec2(split, vmin.y), ImVec2(vmax.x, vmax.y), enter_, px(46.0f));
+  const PaneMove move = paneMove();
+  beginPane("##pause", ImVec2(split, vmin.y), ImVec2(vmax.x, vmax.y), move.scale,
+            move.alpha, px(46.0f), !ghosting_);
   // The board keeps the other side, so the position sits clear of the menu rather than
   // half behind it.
   request.boardRect[0] = vmin.x;
@@ -291,7 +359,9 @@ UiRequest Ui::buildPause(app::Shell& shell) {
   if (menuEntry("Main menu", 5, t, display, width, true, scale_)) {
     shell.go(app::Screen::MainMenu);
   }
-  if (menuEntry("Quit", 6, t, display, width, true, scale_)) request.quit = true;
+  if (menuEntry("Quit", 6, t, display, width, true, scale_)) {
+    shell.go(app::Screen::QuitConfirm);
+  }
   endPane();
   return request;
 }
@@ -305,7 +375,8 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
 
   ImVec2 menuMin, menuMax;
   drawShellFrame(shell, menuMin, menuMax);
-  beginPane("##editor", menuMin, menuMax, enter_, px(46.0f));
+  const PaneMove move = paneMove();
+  beginPane("##editor", menuMin, menuMax, move.scale, move.alpha, px(46.0f), !ghosting_);
   eyebrow("editor", t, mono, scale_);
   screenTitle("Editor", t, display, scale_, 2.0f);
   ImGui::PushFont(small);
@@ -324,7 +395,7 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   }
 
   ImGui::Dummy(ImVec2(0, px(8)));
-  if (button("BACK", t, px(120))) shell.back();
+  if (button("BACK", t, px(120), false, false, true, display)) shell.back();
   endPane();
   return request;
 }
@@ -346,7 +417,9 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
     beginPlate("##settings", t, ImVec2(px(600), px(560)), 0.5f);
   } else {
     drawShellFrame(shell, menuMin, menuMax);
-    beginPane("##settings", menuMin, menuMax, enter_, px(46.0f));
+    const PaneMove move = paneMove();
+    beginPane("##settings", menuMin, menuMax, move.scale, move.alpha, px(46.0f),
+              !ghosting_);
   }
   eyebrow("settings", t, mono, scale_);
   screenTitle("Settings", t, display, scale_, 2.0f);
@@ -478,9 +551,9 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::EndChild();
 
   ImGui::Dummy(ImVec2(0, px(4)));
-  if (button("BACK", t, px(120), true)) shell.back();
+  if (button("BACK", t, px(120), true, false, true, display)) shell.back();
   ImGui::SameLine();
-  if (button("RESET TO DEFAULTS", t, px(200))) {
+  if (button("RESET TO DEFAULTS", t, px(200), false, false, true, display)) {
     const std::string keepVariant = s.lastVariant;
     s = app::Settings{};
     s.lastVariant = keepVariant;
@@ -594,7 +667,7 @@ UiRequest Ui::buildGameInfo(app::Shell& shell) {
   ImGui::EndChild();
 
   ImGui::Dummy(ImVec2(0, px(4)));
-  if (button("BACK", t, px(120), true)) shell.back();
+  if (button("BACK", t, px(120), true, false, true, display)) shell.back();
   endPlate();
   return request;
 }
@@ -666,7 +739,7 @@ UiRequest Ui::buildPieceMoves(app::Shell& shell) {
   ImGui::EndChild();
 
   ImGui::Dummy(ImVec2(0, px(4)));
-  if (button("BACK", t, px(120), true)) shell.back();
+  if (button("BACK", t, px(120), true, false, true, display)) shell.back();
   endPlate();
   return request;
 }

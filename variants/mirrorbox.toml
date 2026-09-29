@@ -9,6 +9,7 @@
 
 name = "mirrorbox"
 description = "The file walls reflect instead of joining. Rays bounce, and nothing ever teleports."
+difficulty = "easy"
 side_to_move = "white"
 en_passant = true
 stalemate = "draw"

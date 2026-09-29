@@ -8,6 +8,7 @@
 # first, so the threshold below is tested against the new value.
 name = "charged"
 description = "Pieces carry custom data fields that travel with them across the board."
+difficulty = "other"
 side_to_move = "white"
 en_passant = true
 stalemate = "draw"

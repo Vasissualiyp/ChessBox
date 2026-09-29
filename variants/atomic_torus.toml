@@ -9,6 +9,7 @@
 # file is the test of that claim.
 name = "atomic_torus"
 description = "Atomic chess on a torus, where the explosions meet geometry that wraps."
+difficulty = "medium"
 side_to_move = "white"
 en_passant = true
 stalemate = "draw"

@@ -10,6 +10,7 @@
 
 name = "standard"
 description = "The game you know, on a plain eight-by-eight board - the reference every other variant here is measured against."
+difficulty = "easy"
 side_to_move = "white"
 en_passant = true
 stalemate = "draw"

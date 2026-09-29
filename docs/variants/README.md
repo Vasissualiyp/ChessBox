@@ -25,6 +25,15 @@ so a new variant is held to the same bar without being registered anywhere.
 
 Rules and custom fields are documented in [writing rules](rules.md).
 
+## Difficulty
+
+A variant file may declare a `difficulty`: one of `easy`, `medium`, `hard`,
+`impossible` or `other`. It decides nothing about play - it is library metadata. The
+picker orders its list by it, easiest first and alphabetically within a level, and
+colours each entry with it (green, amber, red, purple, aqua). A variant that omits the
+key is `other`, which is where a Workshop package will land until its author chooses a
+level; an unrecognised word is a load error rather than a silent fall back.
+
 ## What every variant page records
 
 The rules, where they came from, and - importantly - **which rules are ChessBox's own

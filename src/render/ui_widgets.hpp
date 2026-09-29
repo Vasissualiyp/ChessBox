@@ -39,10 +39,14 @@ void heading(const char* text, const view::Theme& theme, ImFont* font);
 void keyValue(const char* key, const std::string& value, const view::Theme& theme,
               bool cold = false);
 
-/// A chunky bevelled control. "primary" fills it with the accent; "cold" marks a
-/// control that acts on geometry or time rather than on the game.
+/// An action, drawn as a menu row: type on a hairline with an ember wash under the
+/// pointer, never a filled key - so a Start/Back pair and the main menu are one control.
+/// "primary" sets the label in the accent; "cold" marks a control that acts on geometry
+/// or time rather than on the game; `font` is the label typeface, the same one a menu
+/// entry passes, or null for the interface's body font.
 bool button(const char* label, const view::Theme& theme, float width = 0.0f,
-            bool primary = false, bool cold = false, bool enabled = true);
+            bool primary = false, bool cold = false, bool enabled = true,
+            ImFont* font = nullptr);
 
 /// A large menu entry. The label is the whole entry: a control says what it is by being
 /// named, and a line of grey text under every row is exactly the developer-tool look
@@ -68,10 +72,14 @@ bool menuEntry(const char* label, int index, const view::Theme& theme, ImFont* l
 /// A framed card centred in the viewport, used by every screen that sits over the board.
 /// One half of the shell: the menu column beside the screen's object.
 ///
-/// `enter` runs 0 to 1 as the screen arrives. The pane is scaled about its own centre
-/// and faded along it, which is as near a camera push as a two-dimensional draw list
-/// gets - and unlike a slide it reads as depth rather than as a carousel.
-void beginPane(const char* id, ImVec2 min, ImVec2 max, float enter, float pad);
+/// `scale` grows or shrinks the whole card and its text about the pane's centre, and
+/// `alpha` fades it. Both are supplied by the shell's transition rather than derived
+/// here, so an arriving screen can grow from small while a departing one swells and
+/// fades, and the two moves can be exact reverses of each other. `remember` is false for
+/// a departing ghost: its scaled measurement must not become the height the settled pane
+/// is later centred from.
+void beginPane(const char* id, ImVec2 min, ImVec2 max, float scale, float alpha,
+               float pad, bool remember = true);
 void endPane();
 
 void beginPlate(const char* id, const view::Theme& theme, ImVec2 size,

@@ -90,6 +90,23 @@ class Ui {
   /// The two-pane frame every menu screen sits in: the drifting field, the screen's
   /// own object, and the depth ladder. Returns the rectangle the menu itself gets.
   void drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax);
+
+  /// Where a pane sits in the shell's transition, as the scale and fade the pane is
+  /// drawn with. The arriving pane and the departing ghost ask for their own.
+  struct PaneMove {
+    float scale{1.0f};
+    float alpha{1.0f};
+  };
+  [[nodiscard]] PaneMove paneMove() const noexcept;
+  /// The two halves of the transition clock. The departing screen runs first and is
+  /// finished before the arriving one begins, so the two moves are a sequence rather
+  /// than a cross-fade; `outEase` reaches 1 while `inEase` is still 0.
+  [[nodiscard]] float outEase() const noexcept;
+  [[nodiscard]] float inEase() const noexcept;
+  /// Draw the screen being left, once more, scaled and faded - the departing menu has to
+  /// be seen to shrink or swell, not simply switch off. Its input is disabled and its
+  /// request discarded, so re-running its build cannot start or change anything.
+  void drawGhost(app::Shell& shell);
   /// Pixels at the current interface scale. Every hardcoded size goes through this, or
   /// the scale option moves the text and leaves the panels behind.
   [[nodiscard]] float px(float v) const noexcept { return v * scale_; }
@@ -98,6 +115,7 @@ class Ui {
   UiRequest buildPause(app::Shell& shell);
   UiRequest buildSettings(app::Shell& shell);
   UiRequest buildEditor(app::Shell& shell);
+  UiRequest buildQuitConfirm(app::Shell& shell);
   UiRequest buildGameInfo(app::Shell& shell);
   UiRequest buildPieceMoves(app::Shell& shell);
 
@@ -119,6 +137,13 @@ class Ui {
   float clock_{0.0f};
   float enter_{1.0f};
   int lastScreen_{-1};
+  /// The screen being left, kept as a number so its own build can be re-run as a ghost,
+  /// and the screen being built now, so `paneMove` knows whether this is a menu move.
+  int leavingScreen_{-1};
+  int currentScreen_{-1};
+  /// True only while drawGhost is building the departing pane, so drawShellFrame skips
+  /// the background it already drew and beginPane uses the departing move.
+  bool ghosting_{false};
   /// The decoration of the screen being left, and which way the camera is going. One
   /// clock (`enter_`) drives the arriving object, the leaving ghost, the menu pane and
   /// the field, so none of them can disagree about where the camera is.

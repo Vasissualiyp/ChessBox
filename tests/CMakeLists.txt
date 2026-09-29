@@ -50,7 +50,7 @@ set_tests_properties(property PROPERTIES TIMEOUT 900)
 if(TARGET chessbox_gui)
   # Every screen, not just the board: a menu that fails to lay out, or a panel that makes
   # the validation layers complain, is caught here rather than by someone opening it.
-  foreach(screen board menu newgame pause settings editor info pieces)
+  foreach(screen board menu newgame quit pause settings editor info pieces)
     add_test(NAME gui-${screen}
       COMMAND chessbox_gui standard
               --shot ${CMAKE_BINARY_DIR}/render-captures/gui-${screen}.ppm

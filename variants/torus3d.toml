@@ -8,6 +8,7 @@
 
 name = "torus3d"
 description = "A four-by-four-by-four cube with every face glued - fully uniform, no edges at all."
+difficulty = "hard"
 side_to_move = "white"
 stalemate = "draw"
 halfmove_draw_limit = 100

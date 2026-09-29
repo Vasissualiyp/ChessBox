@@ -15,6 +15,7 @@
 
 name = "cube5"
 description = "Chess in a five-by-five-by-five cube, with unicorns that travel through space."
+difficulty = "medium"
 side_to_move = "white"
 en_passant = false
 stalemate = "draw"

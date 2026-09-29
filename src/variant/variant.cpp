@@ -24,6 +24,22 @@ class IdHasher {
 
 }  // namespace
 
+std::string_view difficultyName(Difficulty d) noexcept {
+  switch (d) {
+    case Difficulty::Easy:
+      return "easy";
+    case Difficulty::Medium:
+      return "medium";
+    case Difficulty::Hard:
+      return "hard";
+    case Difficulty::Impossible:
+      return "impossible";
+    case Difficulty::Other:
+      return "other";
+  }
+  return "other";
+}
+
 PieceTypeId VariantSpec::findPiece(std::string_view n) const {
   for (std::size_t i = 1; i < pieces.size(); ++i) {
     if (pieces[i].name == n) return static_cast<PieceTypeId>(i);

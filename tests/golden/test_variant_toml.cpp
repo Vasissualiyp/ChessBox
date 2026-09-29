@@ -93,3 +93,47 @@ TEST_CASE("a variant with a missing starting board is rejected", "[golden][io]")
   REQUIRE_FALSE(r.has_value());
   REQUIRE(r.error().message.find("start") != std::string::npos);
 }
+
+namespace {
+/// The smallest variant that loads, for exercising one optional key at a time.
+std::string minimalVariantToml(std::string_view extra = {}) {
+  return std::string("name=\"x\"\n") + std::string(extra) +
+         "[[axis]]\nname=\"a\"\nextent=4\n[[piece]]\nname=\"p\"\nsymbol=\"P\"\n"
+         "[[piece.move]]\nvector=[1]\n[start]\nboard=\"4\"\n";
+}
+}  // namespace
+
+TEST_CASE("a variant that does not state a difficulty is 'other'", "[golden][io]") {
+  // The picker has to draw every variant, including one from a Workshop package that
+  // predates the key. Silence is "other", not an error.
+  const auto v = loadVariantToml(minimalVariantToml(), "<test>");
+  REQUIRE(v.has_value());
+  REQUIRE(v->difficulty == Difficulty::Other);
+}
+
+TEST_CASE("a stated difficulty round-trips through the file", "[golden][io]") {
+  struct Case {
+    const char* word;
+    Difficulty level;
+  };
+  const Case cases[]{{"easy", Difficulty::Easy},
+                     {"medium", Difficulty::Medium},
+                     {"hard", Difficulty::Hard},
+                     {"impossible", Difficulty::Impossible},
+                     {"other", Difficulty::Other}};
+  for (const Case& c : cases) {
+    CAPTURE(c.word);
+    const auto v = loadVariantToml(
+        minimalVariantToml(std::string("difficulty=\"") + c.word + "\"\n"), "<test>");
+    REQUIRE(v.has_value());
+    REQUIRE(v->difficulty == c.level);
+    REQUIRE(difficultyName(v->difficulty) == c.word);
+  }
+}
+
+TEST_CASE("an unknown difficulty is rejected, not guessed", "[golden][io]") {
+  // A typo must be an error the author can fix, not a silent fall back to "other".
+  const auto r = loadVariantToml(minimalVariantToml("difficulty=\"expert\"\n"), "<test>");
+  REQUIRE_FALSE(r.has_value());
+  REQUIRE(r.error().message.find("difficulty") != std::string::npos);
+}

@@ -7,6 +7,7 @@
 # [[rule]] block at the end.
 name = "atomic"
 description = "Captures detonate: the capturing piece destroys its neighbours as well."
+difficulty = "easy"
 side_to_move = "white"
 en_passant = true
 stalemate = "draw"

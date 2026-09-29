@@ -17,6 +17,7 @@
 
 name = "t6"
 description = "Six glued axes: a six-dimensional torus, where a knight reaches a hundred and twenty cells."
+difficulty = "impossible"
 side_to_move = "white"
 stalemate = "draw"
 halfmove_draw_limit = 100

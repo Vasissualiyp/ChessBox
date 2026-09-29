@@ -15,6 +15,7 @@
 
 name = "5d"
 description = "Chess on a board with time and timelines: pieces move through the turn and multiverse axes by vector."
+difficulty = "hard"
 side_to_move = "white"
 en_passant = false
 stalemate = "draw"

@@ -14,6 +14,7 @@
 
 name = "cylinder"
 description = "The files are glued into a loop. Pawns, promotion and castling all survive the curvature."
+difficulty = "easy"
 side_to_move = "white"
 en_passant = true
 stalemate = "draw"

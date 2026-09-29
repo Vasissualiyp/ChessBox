@@ -73,6 +73,18 @@ struct Theme {
   Rgba moss{Rgba::hex(0x8FB65C)};
   Rgba blood{Rgba::hex(0xD4483B)};
 
+  // Difficulty, reserved for the library's entries: one hue per level, from the
+  // reassuring green of a game anyone can sit down to, through amber and red, to the
+  // purple that says a six-dimensional torus is not one you win. `other` is aqua - the
+  // colour of a variant whose difficulty nobody has declared, where a Workshop package
+  // lands until its author says otherwise. Kept the same in both themes on purpose:
+  // the level a colour names should not change when the page does.
+  Rgba diffEasy{Rgba::hex(0x3FB950)};
+  Rgba diffMedium{Rgba::hex(0xE3B341)};
+  Rgba diffHard{Rgba::hex(0xE5534B)};
+  Rgba diffImpossible{Rgba::hex(0xA371F7)};
+  Rgba diffOther{Rgba::hex(0x2DD4BF)};
+
   // Lower contrast than a real chessboard, so pieces and marks stay the loudest thing -
   // but not so low that a piece disappears into the square it stands on. The old pair
   // (D9C9A8 / 5E4A34) put a pale piece on a pale square at 1.2:1, which a contrast test
@@ -103,7 +115,12 @@ struct Theme {
   /// them.
   [[nodiscard]] static Theme manifold() {
     Theme t;
-    t.ink = Rgba::hex(0xDCE0E6);  // the ground is now the light one
+    // The ground is now the light one, and deliberately a soft blue rather than a near
+    // white: a full-page bright field is tiring to sit in front of, and the blue keeps
+    // the board's own cool greys in the same family. It sits a little below the drifting
+    // field, so the field reads as objects in front of the page rather than as a pattern
+    // printed on it.
+    t.ink = Rgba::hex(0xB4C4DB);
     t.soot = Rgba::hex(0xE6EAF0);
     t.panel = Rgba::hex(0xEEF1F6);
     t.panelHi = Rgba::hex(0xD2D9E4);

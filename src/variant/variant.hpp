@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "base/result.hpp"
@@ -77,6 +78,17 @@ struct StartPiece {
 /// What to do when the side to move has no legal move and is not in check.
 enum class StalematePolicy : std::uint8_t { Draw, Loss, Win };
 
+/// How hard a variant admits to being. It decides nothing about play - it is metadata
+/// for the library, which orders its list by this and colours each entry with it.
+///
+/// Ordered easiest to hardest with `Other` last, so a variant whose author has not said
+/// (or a Workshop package this build does not know) collects at the end rather than
+/// claiming a place it has not earned.
+enum class Difficulty : std::uint8_t { Easy = 0, Medium, Hard, Impossible, Other };
+
+/// The lower-case word a variant file uses for a level. Round-trips the TOML spelling.
+[[nodiscard]] std::string_view difficultyName(Difficulty d) noexcept;
+
 /// A fully resolved variant: everything L4..L8 needs, precomputed once at load.
 /// Nothing below L9 ever parses text.
 class VariantSpec {
@@ -86,6 +98,9 @@ class VariantSpec {
   /// shows it in place of a generated description, because a player choosing a game
   /// wants the author's pitch rather than an axis count.
   std::string description;
+  /// Advertised difficulty, from the variant file's optional `difficulty` key. Not part
+  /// of play; the library uses it to order and colour its list. `Other` when unset.
+  Difficulty difficulty{Difficulty::Other};
   DimSpec dims;
   Geometry geom;
 

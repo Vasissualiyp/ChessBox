@@ -48,8 +48,9 @@ class DepthField {
 
   /// Move the field on. `dt` is seconds.
   void advance(float dt);
-  /// Dolly the field. Positive goes towards the viewer, which is what a menu move into
-  /// a deeper screen looks like; negative is backing out of one.
+  /// Dolly the field. Positive pushes it away from the viewer - smaller, nearer the
+  /// vanishing point - and negative pulls it towards the camera, which is what a menu
+  /// move into a deeper screen looks like: the field rushes past as you go in.
   void push(float amount) noexcept { velocity_ += amount; }
 
   /// Draw it into `dl`, filling the given rectangle.

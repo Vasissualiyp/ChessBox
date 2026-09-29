@@ -14,6 +14,7 @@
 
 name = "mobius"
 description = "The files are glued with a half-twist. Ride the board twice and you come home mirrored."
+difficulty = "medium"
 side_to_move = "white"
 en_passant = false
 stalemate = "draw"

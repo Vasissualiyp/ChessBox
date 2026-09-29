@@ -36,6 +36,56 @@ std::filesystem::path tempSettings(const char* name) {
 
 }  // namespace
 
+TEST_CASE("the shipped variants advertise their difficulty", "[unit][app]") {
+  // The level lives in each variant's own file, so changing it is a data edit. These
+  // are the five levels the library orders and colours by.
+  REQUIRE(test::loadVariant("standard").difficulty == Difficulty::Easy);
+  REQUIRE(test::loadVariant("atomic").difficulty == Difficulty::Easy);
+  REQUIRE(test::loadVariant("mirrorbox").difficulty == Difficulty::Easy);
+  REQUIRE(test::loadVariant("mustcapture").difficulty == Difficulty::Easy);
+  REQUIRE(test::loadVariant("cylinder").difficulty == Difficulty::Easy);
+
+  REQUIRE(test::loadVariant("torus").difficulty == Difficulty::Medium);
+  REQUIRE(test::loadVariant("mobius").difficulty == Difficulty::Medium);
+  REQUIRE(test::loadVariant("klein").difficulty == Difficulty::Medium);
+  REQUIRE(test::loadVariant("cube5").difficulty == Difficulty::Medium);
+  REQUIRE(test::loadVariant("atomic_torus").difficulty == Difficulty::Medium);
+
+  REQUIRE(test::loadVariant("5d").difficulty == Difficulty::Hard);
+  REQUIRE(test::loadVariant("torus3d").difficulty == Difficulty::Hard);
+  REQUIRE(test::loadVariant("hyper4").difficulty == Difficulty::Hard);
+
+  REQUIRE(test::loadVariant("t6").difficulty == Difficulty::Impossible);
+  REQUIRE(test::loadVariant("charged").difficulty == Difficulty::Other);
+}
+
+TEST_CASE("the library is ordered by difficulty, then alphabetically", "[unit][app]") {
+  auto shell =
+      Shell::create({"t6", "standard", "klein", "charged", "hyper4", "atomic", "torus"},
+                    tempSettings("order.conf"));
+  shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
+    auto v = loadVariantFile(test::variantPath(name));
+    if (!v.has_value()) return fail(v.error().code, v.error().message);
+    return std::move(*v);
+  });
+  const std::vector<std::string> expected{"atomic", "standard", "klein",  "torus",
+                                          "hyper4", "t6",       "charged"};
+  REQUIRE(shell->library() == expected);
+}
+
+TEST_CASE("a variant this build cannot load is library-ordered as other", "[unit][app]") {
+  // A Workshop variant, later, or simply a broken file: it must still draw in the
+  // library, at the end with the unknowns, rather than vanish or crash the picker.
+  auto shell = Shell::create({"hyper4", "mystery"}, tempSettings("unknown.conf"));
+  shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
+    auto v = loadVariantFile(test::variantPath(name));
+    if (!v.has_value()) return fail(v.error().code, v.error().message);
+    return std::move(*v);
+  });
+  REQUIRE(shell->difficultyOf("mystery") == Difficulty::Other);
+  REQUIRE(shell->library() == std::vector<std::string>{"hyper4", "mystery"});
+}
+
 TEST_CASE("the game opens on the main menu with nothing loaded", "[unit][app]") {
   auto shell = makeShell(tempSettings("open.conf"));
   REQUIRE(shell->screen() == Screen::MainMenu);
@@ -69,6 +119,23 @@ TEST_CASE("the picker reads a variant's own description", "[unit][app]") {
   auto shell = makeShell(tempSettings("describe.conf"));
   REQUIRE_FALSE(shell->variantDescription("klein").empty());
   REQUIRE(shell->variantDescription("no-such-variant").empty());
+}
+
+TEST_CASE("quitting asks first, and backing out is free", "[unit][app]") {
+  // Quit is a screen of its own, one step in from the menu, not an immediate exit: the
+  // shell only reports quit when the confirmation is accepted.
+  auto shell = makeShell(tempSettings("quit.conf"));
+  REQUIRE(screenDepth(Screen::QuitConfirm) == 1);
+  shell->go(Screen::QuitConfirm);
+  REQUIRE(shell->screen() == Screen::QuitConfirm);
+  REQUIRE_FALSE(shell->quitRequested());
+  shell->back();
+  REQUIRE(shell->screen() == Screen::MainMenu);
+  REQUIRE_FALSE(shell->quitRequested());
+
+  shell->go(Screen::QuitConfirm);
+  shell->requestQuit();
+  REQUIRE(shell->quitRequested());
 }
 
 TEST_CASE("pausing keeps the game and the board", "[unit][app]") {

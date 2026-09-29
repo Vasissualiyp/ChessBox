@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/shell.hpp"
 
+#include <algorithm>
+
 #include "io/variant_toml.hpp"
 
 namespace cb::app {
@@ -23,6 +25,8 @@ std::string_view screenName(Screen s) noexcept {
       return "game mode";
     case Screen::PieceMoves:
       return "piece moves";
+    case Screen::QuitConfirm:
+      return "quit";
   }
   return "?";
 }
@@ -34,6 +38,7 @@ int screenDepth(Screen s) noexcept {
     case Screen::NewGame:
     case Screen::Settings:
     case Screen::Editor:
+    case Screen::QuitConfirm:
       return 1;
     case Screen::Game:
       return 2;
@@ -90,6 +95,7 @@ void Shell::back() {
     case Screen::Settings:
     case Screen::Editor:
     case Screen::NewGame:
+    case Screen::QuitConfirm:
       screen_ = previous_;
       break;
     case Screen::GameInfo:
@@ -105,6 +111,34 @@ void Shell::back() {
     case Screen::MainMenu:
       break;
   }
+}
+
+void Shell::setVariantLoader(VariantLoader loader) {
+  loader_ = std::move(loader);
+  difficulty_.clear();
+  // Difficulty first, then name. Ties are alphabetical, so the order is stable and
+  // predictable rather than whatever the filesystem handed over.
+  std::stable_sort(library_.begin(), library_.end(),
+                   [this](const std::string& a, const std::string& b) {
+                     const Difficulty da = difficultyOf(a);
+                     const Difficulty db = difficultyOf(b);
+                     if (da != db) return static_cast<int>(da) < static_cast<int>(db);
+                     return a < b;
+                   });
+}
+
+Difficulty Shell::difficultyOf(const std::string& name) const {
+  // A running game already holds the spec, and it is the same one.
+  if (session_ != nullptr && currentVariant_ == name)
+    return session_->variant().difficulty;
+  if (const auto it = difficulty_.find(name); it != difficulty_.end()) return it->second;
+  Difficulty d = Difficulty::Other;
+  if (loader_) {
+    auto v = loader_(name);
+    if (v.has_value()) d = v->difficulty;
+  }
+  difficulty_.emplace(name, d);
+  return d;
 }
 
 Result<void> Shell::startGame(const std::string& variantName) {

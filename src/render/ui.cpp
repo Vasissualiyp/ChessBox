@@ -47,6 +47,45 @@ std::filesystem::path findFont(const char* name) {
   return {};
 }
 
+/// The shell's own screens - the main menu and the panels it opens into. They move as
+/// panes and a departing one is worth drawing again; the board screens are covered by
+/// the board's own pull-back instead.
+bool isMenuScreen(app::Screen s) noexcept {
+  switch (s) {
+    case app::Screen::MainMenu:
+    case app::Screen::NewGame:
+    case app::Screen::Editor:
+    case app::Screen::Settings:
+    case app::Screen::QuitConfirm:
+      return true;
+    default:
+      return false;
+  }
+}
+
+/// Which way the camera travels when moving from one screen to another.
+///
+/// Usually deeper is simply "a greater screen depth". The quit prompt is the exception:
+/// it is the layer *outside* the menu, not deeper into the game, so opening it backs
+/// out - the same move as returning to the menu - and closing it goes back in.
+bool goesDeeper(app::Screen from, app::Screen to) noexcept {
+  if (to == app::Screen::QuitConfirm) return false;
+  if (from == app::Screen::QuitConfirm) return true;
+  return app::screenDepth(to) >= app::screenDepth(from);
+}
+
+/// The transition in two halves, so the screens do not cross-fade. The departing screen
+/// is finished and gone by `kOutEnd`; the arriving one does not begin until `kInStart`.
+/// The gap is the point: with both moving at once the eye reads one screen turning into
+/// another, where a short pause reads as passing through the first into the second.
+constexpr float kOutEnd = 0.40f;
+constexpr float kInStart = 0.55f;
+
+float smoothstep(float t) {
+  t = std::clamp(t, 0.0f, 1.0f);
+  return t * t * (3.0f - 2.0f * t);
+}
+
 /// A heading with a rule running to the right of it, the way a plate is labelled.
 
 /// A piece drawn as a flat icon, for the top-down view where a model would be a blob.
@@ -308,11 +347,6 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
   const ImVec2 max =
       ImVec2(vp->WorkPos.x + vp->WorkSize.x, vp->WorkPos.y + vp->WorkSize.y);
 
-  // The ground. A light shell has to paint its own, or the board's clear colour shows
-  // through where nothing else is drawn.
-  dl->AddRectFilled(min, max, u32(theme_.ink));
-  field_.draw(dl, min, max, theme_, iconStyle_, true, true);
-
   // The object stays on one side across screens. Alternating it by depth made the
   // decoration jump from one half of the frame to the other as the screen changed, which
   // reads as a teleport; keeping it put lets the one clock zoom it in place, so a deeper
@@ -324,24 +358,37 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
   menuMin = ImVec2(decoLeft ? split : min.x, min.y);
   menuMax = ImVec2(decoLeft ? max.x : split, max.y);
 
-  // The library's lattice is the *selected* variant's, not the running game's - the
-  // whole point of it is to show you the shape of the board you are about to choose.
-  const VariantSpec* subject =
-      shell.screen() == app::Screen::NewGame
-          ? shell.preview(pickedVariant_)
-          : (shell.hasGame() ? &shell.session()->variant() : nullptr);
-  // One clock drives the camera move. Eased, so the arrival settles rather than stopping
-  // dead; the incoming object grows or shrinks to its place, and the outgoing one - the
-  // screen being left - is drawn as a ghost that zooms away. Its build function is never
-  // re-run.
-  const float ease = enter_ * enter_ * (3.0f - 2.0f * enter_);
-  const float inZoom = deeper_ ? 0.55f + 0.45f * ease : 1.7f - 0.7f * ease;
+  // A dragging ghost only needs the rectangle: the ground, the field and the arriving
+  // object are the arriving screen's to draw, and drawing them twice would double them.
+  if (ghosting_) return;
+
+  // The ground. A light shell has to paint its own, or the board's clear colour shows
+  // through where nothing else is drawn.
+  dl->AddRectFilled(min, max, u32(theme_.ink));
+  field_.draw(dl, min, max, theme_, iconStyle_, true, true);
+
+  // A screen's object belongs to that screen: the library's lattice is the *selected*
+  // variant's, while a board screen shows the running game's. The departing ghost must
+  // ask for its own subject rather than inherit the arriving one - otherwise the lattice
+  // left behind by "new game" would briefly wear the running game's boards.
+  const auto subjectFor = [&](app::Screen s) -> const VariantSpec* {
+    if (s == app::Screen::NewGame) return shell.preview(pickedVariant_);
+    return shell.hasGame() ? &shell.session()->variant() : nullptr;
+  };
+  // The departing screen's object leaves first; the arriving screen's only grows in once
+  // it is gone. The two halves of the clock are separate for exactly that reason.
+  const float inE = inEase();
+  const float outE = outEase();
+  const float inZoom = deeper_ ? 0.55f + 0.45f * inE : 1.7f - 0.7f * inE;
   drawDeco(dl, decoForScreen(static_cast<int>(shell.screen())), decoMin, decoMax, theme_,
-           iconStyle_, clock_, subject, inZoom, ease);
-  if (leaving_ != Deco::None && enter_ < 1.0f) {
-    const float outZoom = deeper_ ? 1.0f + 0.8f * ease : 1.0f - 0.5f * ease;
-    drawDeco(dl, leaving_, decoMin, decoMax, theme_, iconStyle_, clock_, subject, outZoom,
-             1.0f - ease);
+           iconStyle_, clock_, subjectFor(shell.screen()), inZoom, inE);
+  if (leaving_ != Deco::None && outE < 1.0f) {
+    const float outZoom = deeper_ ? 1.0f + 0.8f * outE : 1.0f - 0.5f * outE;
+    const VariantSpec* leavingSubject =
+        leavingScreen_ >= 0 ? subjectFor(static_cast<app::Screen>(leavingScreen_))
+                            : nullptr;
+    drawDeco(dl, leaving_, decoMin, decoMax, theme_, iconStyle_, clock_, leavingSubject,
+             outZoom, 1.0f - outE);
   }
 
   // A hairline between the object and the menu, and the depth ladder on the far left.
@@ -373,22 +420,91 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
   }
 }
 
+float Ui::outEase() const noexcept {
+  return smoothstep(enter_ / kOutEnd);
+}
+
+float Ui::inEase() const noexcept {
+  return smoothstep((enter_ - kInStart) / (1.0f - kInStart));
+}
+
+Ui::PaneMove Ui::paneMove() const noexcept {
+  // Pause and the reference panels sit over the board and do not travel as panes; they
+  // keep the old grow-in, which rides only the arriving half of the clock.
+  const int which = ghosting_ ? leavingScreen_ : currentScreen_;
+  if (!isMenuScreen(static_cast<app::Screen>(which))) {
+    const float inE = inEase();
+    return {0.66f + 0.34f * inE, inE};
+  }
+  if (ghosting_) {
+    // The screen being left swells towards the viewer on the way in, and shrinks away on
+    // the way back out. It has faded to nothing by the time the next one starts.
+    const float outE = outEase();
+    return {deeper_ ? 1.0f + 0.35f * outE : 1.0f - 0.34f * outE, 1.0f - outE};
+  }
+  // The screen arriving grows from small on the way in; on the way back it returns from
+  // the size the outgoing one left it at, so the two moves are reverses.
+  const float inE = inEase();
+  return {deeper_ ? 0.66f + 0.34f * inE : 1.35f - 0.35f * inE, inE};
+}
+
+void Ui::drawGhost(app::Shell& shell) {
+  if (leavingScreen_ < 0 || outEase() >= 1.0f) return;
+  const auto leaving = static_cast<app::Screen>(leavingScreen_);
+  if (!isMenuScreen(leaving) || !isMenuScreen(static_cast<app::Screen>(currentScreen_))) {
+    return;
+  }
+  // Disabled while it is drawn: a departing screen must be seen but not touched. Its
+  // request is discarded too, so re-running its build can neither start a game nor
+  // change a setting.
+  ghosting_ = true;
+  ImGui::BeginDisabled();
+  switch (leaving) {
+    case app::Screen::MainMenu:
+      (void)buildMainMenu(shell);
+      break;
+    case app::Screen::NewGame:
+      (void)buildNewGame(shell);
+      break;
+    case app::Screen::Editor:
+      (void)buildEditor(shell);
+      break;
+    case app::Screen::Settings:
+      (void)buildSettings(shell);
+      break;
+    case app::Screen::QuitConfirm:
+      (void)buildQuitConfirm(shell);
+      break;
+    default:
+      break;
+  }
+  ImGui::EndDisabled();
+  ghosting_ = false;
+}
+
 UiRequest Ui::build(app::Shell& shell, float fps) {
   // A screen change starts the camera moving and shoves the field towards the viewer -
   // or away from it, on the way back out.
   const int screen = static_cast<int>(shell.screen());
+  currentScreen_ = screen;
   if (screen != lastScreen_) {
-    const bool deeper =
-        lastScreen_ < 0 || app::screenDepth(shell.screen()) >=
-                               app::screenDepth(static_cast<app::Screen>(lastScreen_));
-    field_.push(deeper ? 3.1f : -2.6f);
-    // Remember what is leaving, so it can be drawn as a ghost. Its build function is
-    // never run again: drawing a departing screen must not be able to navigate.
+    const bool deeper = lastScreen_ < 0 ||
+                        goesDeeper(static_cast<app::Screen>(lastScreen_), shell.screen());
+    // Going in, the field rushes towards and past the viewer; coming back it recedes.
+    // The impulse is negative for "towards the viewer" - see DepthField::push.
+    field_.push(deeper ? -3.1f : 2.6f);
+    // Remember what is leaving, and from which screen, so its pane and its decoration can
+    // be drawn once more on the way out. The ghost's input is disabled and its request
+    // discarded, so re-running its build cannot navigate.
     leaving_ = lastScreen_ >= 0 ? decoForScreen(lastScreen_) : Deco::None;
+    leavingScreen_ = lastScreen_;
     deeper_ = deeper;
     enter_ = 0.0f;
     lastScreen_ = screen;
   }
+
+  // The departing menu first, so the arriving one is drawn over it.
+  drawGhost(shell);
 
   switch (shell.screen()) {
     case app::Screen::MainMenu:
@@ -397,6 +513,8 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
       return buildNewGame(shell);
     case app::Screen::Editor:
       return buildEditor(shell);
+    case app::Screen::QuitConfirm:
+      return buildQuitConfirm(shell);
     case app::Screen::Settings: {
       // Opened over a game, the rails stay up so the position behind stays readable.
       UiRequest out;
@@ -565,13 +683,13 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
   ImGui::Begin("##controls", nullptr, overlayFlags);
   {
-    if (button("UNDO", t, px(78))) {
+    if (button("UNDO", t, px(78), false, false, true, display)) {
       app::Action a;
       a.kind = app::ActionKind::Undo;
       (void)session.apply(a);
     }
     ImGui::SameLine();
-    if (button("RESET", t, px(84))) {
+    if (button("RESET", t, px(84), false, false, true, display)) {
       app::Action a;
       a.kind = app::ActionKind::Reset;
       (void)session.apply(a);
@@ -579,7 +697,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     if (v.dims.dims() > 2) {
       ImGui::SameLine();
       // Cold, because it acts on the geometry rather than on the game.
-      if (button("AXES", t, px(78), false, true)) {
+      if (button("AXES", t, px(78), false, true, true, display)) {
         const DimSpec& d = v.dims;
         bool temporal = false;
         for (std::uint8_t ax = 0; ax < d.dims(); ++ax) {
@@ -623,14 +741,14 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     ImGui::SameLine();
     // View mode travels with the player: a flat board is easier to read, a solid one
     // easier to understand. Cold, because it is a view of the geometry, not a move.
-    if (button(session.flatView() ? "2D" : "3D", t, px(64), false, true)) {
+    if (button(session.flatView() ? "2D" : "3D", t, px(64), false, true, true, display)) {
       const bool flat = !session.flatView();
       session.setFlatView(flat);
       shell.settings().flatView = flat;
       request.settingsChanged = true;
     }
     ImGui::SameLine();
-    if (button("MENU", t, px(78))) shell.pause();
+    if (button("MENU", t, px(78), false, false, true, display)) shell.pause();
 
     ImGui::PushFont(small);
     ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
@@ -685,13 +803,14 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       for (std::size_t i = 0; i < pending.choices.size(); ++i) {
         if (i != 0) ImGui::SameLine();
         const PieceTypeId piece = pending.choices[i];
-        if (button(upper(v.pieces[piece].name).c_str(), t, px(104), i == 0)) {
+        if (button(upper(v.pieces[piece].name).c_str(), t, px(104), i == 0, false, true,
+                   display)) {
           (void)session.choosePromotion(piece);
           ImGui::CloseCurrentPopup();
         }
       }
       ImGui::Dummy(ImVec2(0, px(2)));
-      if (button("CANCEL", t, px(104))) {
+      if (button("CANCEL", t, px(104), false, false, true, display)) {
         session.cancelPromotion();
         ImGui::CloseCurrentPopup();
       }
