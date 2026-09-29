@@ -208,4 +208,12 @@ void VariantDoc::setDescription(std::string text) {
   impl_->table.insert_or_assign("description", std::move(text));
 }
 
+std::string VariantDoc::name() const {
+  return impl_->table["name"].value_or(std::string{});
+}
+
+void VariantDoc::setName(std::string name) {
+  impl_->table.insert_or_assign("name", std::move(name));
+}
+
 }  // namespace cb

@@ -54,6 +54,10 @@ class VariantDoc {
   [[nodiscard]] std::string description() const;
   void setDescription(std::string text);
 
+  /// The variant's name. Part of `VariantId`, so renaming is a real edit.
+  [[nodiscard]] std::string name() const;
+  void setName(std::string name);
+
  private:
   VariantDoc();
 
