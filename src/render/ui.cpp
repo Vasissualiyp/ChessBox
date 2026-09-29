@@ -544,7 +544,8 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
   }
   dl->AddRect(origin, ImVec2(origin.x + side, origin.y + side), u32(t.rule, 0.8f));
 
-  // Pieces the player placed, then the piece being designed, in white, at the centre.
+  // Pieces the player placed are always pawns - the piece under test is the one at the
+  // centre - then the piece being designed, in white, at the centre.
   for (int y = 0; y < kN; ++y) {
     for (int x = 0; x < kN; ++x) {
       const std::uint8_t occ =
@@ -553,8 +554,8 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
       const ImVec2 c(origin.x + (static_cast<float>(x) + 0.5f) * cell,
                      origin.y + (static_cast<float>(y) + 0.5f) * cell);
       const view::Rgba col = occ == 1 ? t.blackPiece : t.whitePiece;
-      drawPieceGlyph(dl, c, cell * 0.42f, u32(col), u32(baseColour(x, y)), shape,
-                     iconStyle_);
+      drawPieceGlyph(dl, c, cell * 0.42f, u32(col), u32(baseColour(x, y)),
+                     Archetype::Dome, iconStyle_);
     }
   }
   const ImVec2 centre(origin.x + (static_cast<float>(cx) + 0.5f) * cell,
