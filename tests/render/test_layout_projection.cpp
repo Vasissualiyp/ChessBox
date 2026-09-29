@@ -24,16 +24,8 @@ struct Screen {
 };
 
 Screen project(const view::OrbitCamera& cam, const view::Vec3& world, float w, float h) {
-  const view::Mat4 vp = cam.viewProj(w / h);
-  const float cx = vp[0] * world.x + vp[4] * world.y + vp[8] * world.z + vp[12];
-  const float cy = vp[1] * world.x + vp[5] * world.y + vp[9] * world.z + vp[13];
-  const float cw = vp[3] * world.x + vp[7] * world.y + vp[11] * world.z + vp[15];
-  if (cw <= 0.0f) return {};
-  Screen s;
-  s.x = (cx / cw * 0.5f + 0.5f) * w - 0.5f;
-  s.y = (cy / cw * 0.5f + 0.5f) * h - 0.5f;
-  s.visible = s.x >= 0 && s.y >= 0 && s.x < w && s.y < h;
-  return s;
+  const view::OrbitCamera::ScreenPoint sp = cam.project(world, w / h, w, h);
+  return Screen{sp.x, sp.y, sp.visible};
 }
 
 }  // namespace

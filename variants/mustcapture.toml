@@ -6,6 +6,7 @@
 # every non-capture is forbidden. This is the mechanism a draughts-style game needs,
 # demonstrated on a board whose other rules are already verified.
 name = "mustcapture"
+description = "Every capture is compulsory. Decline one and the move is simply illegal."
 side_to_move = "white"
 en_passant = true
 stalemate = "draw"

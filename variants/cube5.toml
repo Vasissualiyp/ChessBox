@@ -14,6 +14,7 @@
 # for three dimensions is a data file rather than engine code.
 
 name = "cube5"
+description = "Chess in a five-by-five-by-five cube, with unicorns that travel through space."
 side_to_move = "white"
 en_passant = false
 stalemate = "draw"

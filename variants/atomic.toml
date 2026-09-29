@@ -6,6 +6,7 @@
 # standard ones, unchanged: what makes this a different game is entirely in the
 # [[rule]] block at the end.
 name = "atomic"
+description = "Captures detonate: the capturing piece destroys its neighbours as well."
 side_to_move = "white"
 en_passant = true
 stalemate = "draw"

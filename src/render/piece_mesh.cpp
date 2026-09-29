@@ -200,6 +200,12 @@ void buildArchetype(MeshLibrary& m, Archetype which, std::int32_t base) {
       return;
     }
 
+    case Archetype::Portal:
+      // A unit cube, not a slab: a portal takes the shape of the seam it belongs to, and
+      // only a symmetric body can be scaled into a doorway standing on any axis.
+      addBox(m, base, 0, 0, 0, 0.5f, 0.5f, 0.5f, 1.0f);
+      return;
+
     case Archetype::Count:
       return;
   }
@@ -215,6 +221,7 @@ Archetype archetypeFromName(std::string_view name) {
   if (name == "crown") return Archetype::Crown;
   if (name == "monolith") return Archetype::Monolith;
   if (name == "horn") return Archetype::Horn;
+  if (name == "portal") return Archetype::Portal;
   return Archetype::Tower;
 }
 
@@ -236,6 +243,8 @@ std::string_view archetypeName(Archetype a) {
       return "monolith";
     case Archetype::Horn:
       return "horn";
+    case Archetype::Portal:
+      return "portal";
     case Archetype::Count:
       break;
   }

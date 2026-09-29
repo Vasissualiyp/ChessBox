@@ -32,6 +32,14 @@ struct Settings {
   bool showCoordinates{true};
   /// How much taller a valuable piece stands. 0 makes every piece the same height.
   float pieceHeightScale{1.0f};
+  /// Draw the board flat and straight down, with pieces as lettered tokens. Cheaper to
+  /// draw than the models, and on a slow machine that is the difference between a game
+  /// and a slideshow.
+  bool flatView{false};
+  /// Slide pieces along the route they actually took, through portals and off walls.
+  bool animateMoves{true};
+  /// Multiplier on how fast that happens. Higher is faster.
+  float animationSpeed{1.0f};
 
   // ---- camera -------------------------------------------------------------
   float orbitSensitivity{1.0f};

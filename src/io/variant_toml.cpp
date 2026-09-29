@@ -130,6 +130,7 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
   if (v.name.empty()) {
     return fail(ErrorCode::ValidationError, "a variant needs a 'name'");
   }
+  v.description = tbl["description"].value_or(std::string{});
 
   // ---- axes ----------------------------------------------------------------
   const auto* axesNode = tbl["axis"].as_array();

@@ -74,9 +74,33 @@ Result<std::unique_ptr<Session>> Session::create(VariantSpec variant) {
 
 void Session::refreshView() {
   placements_ = view::layout(variant_->dims, viewCfg_);
+  seams_ = view::SeamMap::build(*variant_, viewCfg_, view::Theme::console());
   // Framed for the shape of the area the board is drawn into, which the interface
   // narrows with its rails - not for the whole window.
   camera_ = view::OrbitCamera::frame(view::boundsOf(placements_), boardAspect_);
+  applyViewMode();
+}
+
+void Session::setFlatView(bool flat) {
+  if (flat == flat_) return;
+  flat_ = flat;
+  camera_ = view::OrbitCamera::frame(view::boundsOf(placements_), boardAspect_);
+  applyViewMode();
+}
+
+void Session::applyViewMode() {
+  camera_.orthographic = flat_;
+  if (flat_) {
+    // Straight down. The camera's own up-vector fallback handles the degenerate basis,
+    // so this needs no nudge off the pole to avoid a singularity.
+    camera_.pitch = 1.5707963f;
+    camera_.yaw = 0.0f;
+  }
+}
+
+bool Session::advanceAnimation(float dt) {
+  anim_.advance(dt);
+  return anim_.active();
 }
 
 void Session::setBoardAspect(float aspect) {
@@ -94,6 +118,7 @@ void Session::setBoardAspect(float aspect) {
     camera_.pitch = keptPitch;
   }
   framedOnce_ = true;
+  applyViewMode();
 }
 
 const Move* Session::findMove(CellId from, CellId to) const {
@@ -129,8 +154,24 @@ std::vector<PieceTypeId> Session::promotionChoicesFor(CellId from, CellId to) co
 
 Result<void> Session::playChecked(const Move& m) {
   const Move chosen = m;  // play() invalidates the legal-move cache the move points into
+  // The route is traced against the position the piece set off from, before the move is
+  // applied: occupancy decides which way round a glued board the piece actually went,
+  // and after play() the blocker it avoided and the mover itself are both gone.
+  const Piece mover = game_->position().at(chosen.from);
+  view::MovePath path;
+  const bool animating = animSeconds_ > 0.0f && !mover.empty();
+  if (animating) {
+    path = view::tracePath(*variant_, game_->position(), mover.type, mover.colorOf(),
+                           chosen);
+  }
   if (auto ok = game_->play(chosen); !ok.has_value()) {
     return fail(ok.error().code, ok.error().message);
+  }
+  if (animating) {
+    anim_.start(viewCfg_, placements_, seams_, view::Theme::console(), path,
+                animSeconds_);
+  } else {
+    anim_.clear();
   }
   message_ = moveText(*variant_, chosen);
   selected_ = kInvalidCell;

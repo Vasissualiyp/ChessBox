@@ -117,6 +117,12 @@ class Geometry {
   /// leaving `axis` on `side`, if that face is identified.
   [[nodiscard]] const Transform* faceTransform(std::uint8_t axis, Side side) const;
 
+  /// What leaving `axis` on `side` does: a gluing returns the ray somewhere else, a
+  /// reflecting wall turns it around, an open face ends it. The move animation needs
+  /// this to tell a portal from a bounce - the two are the same boundary step and only
+  /// the declaration says which it is.
+  [[nodiscard]] BoundaryKind boundaryKind(std::uint8_t axis, Side side) const;
+
  private:
   static constexpr int kMaxSeamCrossingsPerStep = 2 * kMaxDims;
 
@@ -125,6 +131,7 @@ class Geometry {
   /// faceXf_[axis][side] - the coordinate map applied on leaving that face.
   std::array<std::array<Transform, 2>, kMaxDims> faceXf_{};
   std::array<std::array<bool, 2>, kMaxDims> faceSet_{};
+  std::array<std::array<BoundaryKind, 2>, kMaxDims> faceKind_{};
   bool hasIdents_{false};
   bool orientable_{true};
   bool reversingFace_{false};

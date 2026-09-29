@@ -10,6 +10,7 @@
 
 #include <filesystem>
 
+#include "io/fen.hpp"
 #include "render/board_renderer.hpp"
 #include "render/offscreen_target.hpp"
 #include "render/vulkan_context.hpp"
@@ -148,35 +149,77 @@ TEST_CASE("instances are built from a snapshot without a GPU", "[render]") {
   }
 }
 
-TEST_CASE("a glued board marks its seams, a box board does not", "[render]") {
-  // The cold colour is spent only where the board stops being flat, and the mask says
-  // *which* sides are glued - so a player can pair the two edges by eye.
-  //
-  // The plinth the board stands on carries a warm rim of its own, so a seam is
-  // identified by its colour rather than merely by having an edge.
+TEST_CASE("a glued board marks each seam with the colour of where it leads", "[render]") {
+  // One cyan rail per edge is not enough information: a cylinder and a Moebius band
+  // draw the identical picture, and the difference between them is the whole game. So
+  // every glued face gets its own rail, coloured by the portal it belongs to, and the
+  // two ends of one portal match.
   BoardRenderer renderer;
-  const view::Rgba rift = renderer.theme().rift;
-  const auto isSeam = [&](const Instance& i) {
-    return i.edgeMask > 0.0f && std::abs(i.edge[0] - rift.r) < 0.01f &&
-           std::abs(i.edge[2] - rift.b) < 0.01f;
-  };
+  const view::Theme theme = renderer.theme();
 
   const VariantSpec box = test::loadVariant("standard");
   const Position bp = Position::startPosition(box);
-  const InstanceSet plain = renderer.buildInstances(view::PositionView::capture(bp),
-                                                    view::ViewConfig::forBoard(box.dims));
-  for (const Instance& i : plain.instances) REQUIRE_FALSE(isSeam(i));
+  const view::ViewConfig boxCfg = view::ViewConfig::forBoard(box.dims);
+  const view::SeamMap boxSeams = view::SeamMap::build(box, boxCfg, theme);
+  const InstanceSet plain =
+      renderer.buildInstances(view::PositionView::capture(bp), boxCfg, &boxSeams);
+  CHECK(boxSeams.empty());
 
   const VariantSpec torus = test::loadVariant("torus");
   const Position tp = Position::startPosition(torus);
-  const InstanceSet glued = renderer.buildInstances(view::PositionView::capture(tp),
-                                                    view::ViewConfig::forBoard(torus.dims));
-  int marked = 0;
-  for (const Instance& i : glued.instances) {
-    if (isSeam(i)) ++marked;
+  const view::ViewConfig cfg = view::ViewConfig::forBoard(torus.dims);
+  const view::SeamMap seams = view::SeamMap::build(torus, cfg, theme);
+  const InstanceSet glued =
+      renderer.buildInstances(view::PositionView::capture(tp), cfg, &seams);
+
+  // Both axes are glued, so every cell on the border carries a rail, and the four
+  // corners carry two.
+  CHECK(seams.faces().size() == 8 * 4);
+  CHECK(glued.size() == plain.size() + seams.faces().size());
+
+  // Switching the marks off leaves the board alone.
+  BoardOptions quiet = renderer.options();
+  quiet.showSeams = false;
+  renderer.setOptions(quiet);
+  const InstanceSet bare =
+      renderer.buildInstances(view::PositionView::capture(tp), cfg, &seams);
+  CHECK(bare.size() == plain.size());
+}
+
+TEST_CASE("a portal is a doorway standing across its seam", "[render]") {
+  // The portal used to be drawn with the flat cell slab, which lies on the board however
+  // it is scaled - so a portal on a vertical file seam came out horizontal. It is a cube
+  // now, scaled thin on the axis it faces.
+  const VariantSpec v = test::loadVariant("cylinder");
+  const view::ViewConfig cfg = view::ViewConfig::forBoard(v.dims);
+  const view::Theme theme = BoardRenderer{}.theme();
+  const view::SeamMap seams = view::SeamMap::build(v, cfg, theme);
+
+  auto pos = fromFen(v, "8/8/8/8/8/8/8/R7 w - - 0 1");
+  REQUIRE(pos.has_value());
+  const PieceTypeId rook = v.findPiece("rook");
+  Move m;
+  m.from = v.dims.toCell(Coord::of({0, 0}));
+  m.to = v.dims.toCell(Coord::of({6, 0}));
+  const view::MovePath path = view::tracePath(v, *pos, rook, Color::White, m);
+
+  view::MoveAnimation anim;
+  anim.start(cfg, view::layout(v.dims, cfg), seams, theme, path, 0.12f);
+  for (int i = 0; i < 500 && anim.active() && anim.openPortals().empty(); ++i) {
+    anim.advance(0.005f);
   }
-  // Both axes are glued, so the whole border is a seam: 8x8 minus the 6x6 interior.
-  REQUIRE(marked == 64 - 36);
+  REQUIRE_FALSE(anim.openPortals().empty());
+
+  const InstanceSet set = BoardRenderer{}.buildInstances(
+      view::PositionView::capture(*pos), cfg, &seams, &anim);
+  const auto& batch = set.batches[static_cast<std::size_t>(Archetype::Portal)];
+  REQUIRE(batch.count > 0);
+  for (std::uint32_t i = 0; i < batch.count; ++i) {
+    const Instance& iris = set.instances[batch.first + i];
+    // Thin across the file seam (X), wide along it (Y), tall (Z): a vertical doorway.
+    CHECK(iris.scale[0] < iris.scale[1]);
+    CHECK(iris.scale[0] < iris.scale[2]);
+  }
 }
 
 TEST_CASE("pieces get a shape from how they move", "[render]") {

@@ -13,6 +13,7 @@
 # per-variant policy decisions, not engine behaviour (docs/plan/M3-geometry.md 3.4).
 
 name = "torus"
+description = "Every edge is joined to its opposite: no corners, no walls, and no promotion rank."
 side_to_move = "white"
 en_passant = true
 stalemate = "draw"

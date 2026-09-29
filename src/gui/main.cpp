@@ -67,6 +67,7 @@ render::BoardOptions optionsFrom(const app::Settings& s) {
   o.showCheck = s.showCheck;
   o.showSeams = s.showSeams;
   o.pieceHeightScale = s.pieceHeightScale;
+  o.flat = s.flatView;
   return o;
 }
 
@@ -166,8 +167,9 @@ int captureFrame(const std::string& variantName, const std::string& path,
     if (shell->showsBoard()) {
       if (rect.valid()) shell->session()->setBoardAspect(rect.width / rect.height);
       syncMarks(*renderer, *shell->session());
-      instances = renderer->buildInstances(shell->session()->snapshot(),
-                                           shell->session()->viewConfig());
+      instances = renderer->buildInstances(
+          shell->session()->snapshot(), shell->session()->viewConfig(),
+          &shell->session()->seams(), &shell->session()->animation());
     }
     const view::OrbitCamera camera =
         shell->showsBoard() ? shell->session()->camera() : view::OrbitCamera{};
@@ -180,8 +182,9 @@ int captureFrame(const std::string& variantName, const std::string& path,
     }
   }
 #else
-  const auto instances = renderer->buildInstances(shell->session()->snapshot(),
-                                                  shell->session()->viewConfig());
+  const auto instances = renderer->buildInstances(
+      shell->session()->snapshot(), shell->session()->viewConfig(),
+      &shell->session()->seams(), &shell->session()->animation());
   (void)renderer->render(*target, instances, shell->session()->camera());
 #endif
 
@@ -292,10 +295,11 @@ int main(int argc, char** argv) {
 
   while (running && !shell->quitRequested()) {
     SDL_Event e;
-    // Wait for input rather than spinning: a board game has nothing to animate, and
-    // redrawing an unchanged position would only heat the room. The timeout keeps the
-    // frame counter and hover feedback alive.
-    if (!SDL_WaitEventTimeout(&e, 100)) e.type = SDL_EVENT_POLL_SENTINEL;
+    // A board game has nothing to animate most of the time, so the loop waits for
+    // input rather than spinning. While a piece is actually moving it wants frames, so
+    // the wait shortens to roughly one.
+    const bool animating = shell->hasGame() && shell->session()->animation().active();
+    if (!SDL_WaitEventTimeout(&e, animating ? 8 : 100)) e.type = SDL_EVENT_POLL_SENTINEL;
     do {
       if (e.type == SDL_EVENT_POLL_SENTINEL) continue;
 #ifdef CB_HAVE_IMGUI
@@ -336,7 +340,8 @@ int main(int argc, char** argv) {
           if (e.button.button == SDL_BUTTON_RIGHT) orbiting = false;
           break;
         case SDL_EVENT_MOUSE_MOTION:
-          if (orbiting && shell->hasGame()) {
+          // Orbiting a flat board would only tilt the diagram out of true.
+          if (orbiting && shell->hasGame() && !shell->session()->flatView()) {
             app::Action a;
             a.kind = app::ActionKind::Orbit;
             a.dx = e.motion.xrel * 0.01f * settings.orbitSensitivity;
@@ -424,8 +429,10 @@ int main(int argc, char** argv) {
         shell->session()->setBoardAspect(boardRect.width / boardRect.height);
       }
       syncMarks(*renderer, *shell->session());
-      instances = renderer->buildInstances(shell->session()->snapshot(),
-                                           shell->session()->viewConfig());
+      shell->session()->advanceAnimation(dt);
+      instances = renderer->buildInstances(
+          shell->session()->snapshot(), shell->session()->viewConfig(),
+          &shell->session()->seams(), &shell->session()->animation());
       camera = shell->session()->camera();
     }
 

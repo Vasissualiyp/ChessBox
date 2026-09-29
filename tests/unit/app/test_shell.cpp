@@ -62,6 +62,15 @@ TEST_CASE("a variant that will not load leaves the shell usable", "[unit][app]")
   REQUIRE_FALSE(shell->message().empty());  // and it says why
 }
 
+TEST_CASE("the picker reads a variant's own description", "[unit][app]") {
+  // The picker knows only names, so the shell is what turns one into the line the
+  // variant file carries. A name that will not load yields nothing rather than an
+  // invented sentence.
+  auto shell = makeShell(tempSettings("describe.conf"));
+  REQUIRE_FALSE(shell->variantDescription("klein").empty());
+  REQUIRE(shell->variantDescription("no-such-variant").empty());
+}
+
 TEST_CASE("pausing keeps the game and the board", "[unit][app]") {
   // The pause screen is an overlay: losing sight of the position while paused would
   // make "gamemode info" and "piece moves" much less useful than they should be.

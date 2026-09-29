@@ -79,6 +79,11 @@ class Shell {
   void setVariantLoader(VariantLoader loader) { loader_ = std::move(loader); }
   Result<void> startGame(const std::string& variantName);
 
+  /// The one-line description a variant's own file gives it, or empty when it cannot be
+  /// loaded. The picker has only names to work from, so this is how it shows an author's
+  /// pitch before the game itself is started.
+  [[nodiscard]] std::string variantDescription(const std::string& name) const;
+
   void pause();
   void resume();
 

@@ -1,0 +1,122 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+
+#include <cstdint>
+#include <vector>
+
+#include "position/move.hpp"
+#include "position/position.hpp"
+#include "variant/variant.hpp"
+#include "view/layout.hpp"
+#include "view/seams.hpp"
+#include "view/theme.hpp"
+
+namespace cb::view {
+
+/// What happened on one step of a move.
+enum class StepKind : std::uint8_t {
+  Interior,  ///< an ordinary step to the neighbouring cell
+  Portal,    ///< the step left through a gluing and arrived somewhere else entirely
+  Bounce,    ///< the step hit a reflecting wall and turned around
+};
+
+struct PathStep {
+  CellId from{kInvalidCell};
+  CellId to{kInvalidCell};
+  StepKind kind{StepKind::Interior};
+  /// The direction *after* the step. On a Klein seam this is not the direction the
+  /// piece left with, which is exactly why a piece re-entering a twisted board appears
+  /// to come out sideways - and why the animation has to be told rather than guess.
+  Direction dir{};
+  /// When the step crossed a boundary, the face it went through. The portal is oriented
+  /// by this and not by the travel direction: a diagonal move can cross the file edge
+  /// while its direction leans along the rank, and the portal must face the edge.
+  std::uint8_t faceAxis{0};
+  Side faceSide{Side::Max};
+};
+
+/// How a piece actually travelled from one cell to another.
+///
+/// Reconstructed from the variant's own atoms, not from the difference between the two
+/// cells: on a glued board the difference means nothing, and the question "did it pass
+/// through the cells in between" is the whole difference between a rook and a knight.
+struct MovePath {
+  CellId from{kInvalidCell};
+  CellId to{kInvalidCell};
+  /// True when the piece arrived without traversing what lies between - a leap or a
+  /// hop. Drawn as an arc over the board rather than as a line across it.
+  bool leap{false};
+  /// True when nothing in the variant explains the move, which is what a castle or a
+  /// rule-effect displacement looks like from here. Drawn as a plain glide.
+  bool unexplained{false};
+  /// The direction the piece set off in. Needed to know which wall it leaves through
+  /// on the very first step.
+  Direction startDir{};
+  std::vector<PathStep> steps;
+};
+
+/// Trace the route a move took. `type` and `side` are the piece that moved, read from
+/// the position *before* the move is applied - which is also the position `pos` must be,
+/// because a sliding ray cannot pass through a piece, and the route a player watched is
+/// the clear one, not whichever ray the atom table happens to list first.
+MovePath tracePath(const VariantSpec& v, const Position& pos, PieceTypeId type,
+                   Color side, const Move& m);
+
+/// A move being drawn: a polyline in world space, broken wherever the piece went
+/// through a seam, plus the portals that open when it does.
+class MoveAnimation {
+ public:
+  /// One straight run. A portal ends a run and the next one starts on the far side.
+  struct Run {
+    std::vector<float> x, y, z;
+  };
+  /// A portal, with how far open it is this frame. Both ends of a crossing open at
+  /// once: the point of the animation is that you see where the piece is going to
+  /// come out at the moment it leaves.
+  struct Portal {
+    float x{0}, y{0}, z{0};
+    /// Which way the portal faces, in world space. The iris is drawn edge-on to this,
+    /// so a portal on the file seam stands across the file rather than along it.
+    float nx{0}, ny{0}, nz{0};
+    Rgba color{};
+    float openAt{0};     ///< time it is fully open, in seconds from the start
+    float intensity{0};  ///< 0..1, filled in by openPortals()
+  };
+
+  /// Sampled state for one frame.
+  struct Sample {
+    float x{0}, y{0}, z{0};
+    /// Extra height, so a leap arcs over what it is leaping and a portal exit rises
+    /// out of the floor rather than sliding out of a wall.
+    float lift{0};
+    bool moving{false};
+  };
+
+  /// Begin drawing `m`, whose route is `path`. `placements` supplies world positions
+  /// and `seams` the colour of any portal on the way, so the portal that opens is the
+  /// same colour as the edge the piece left through.
+  void start(const ViewConfig& cfg, const std::vector<Placement>& placements,
+             const SeamMap& seams, const Theme& theme, const MovePath& path,
+             float secondsPerCell);
+  void clear();
+
+  void advance(float dt);
+  [[nodiscard]] bool active() const noexcept { return active_; }
+  [[nodiscard]] CellId travellingTo() const noexcept { return to_; }
+  [[nodiscard]] Sample sample() const;
+  /// Portals with any intensity left this frame, for the renderer to draw.
+  [[nodiscard]] std::vector<Portal> openPortals() const;
+
+ private:
+  bool active_{false};
+  bool leap_{false};
+  float elapsed_{0};
+  float duration_{0.0001f};
+  CellId to_{kInvalidCell};
+  std::vector<Run> runs_;
+  std::vector<float> runStart_;  ///< normalised time each run begins at
+  std::vector<float> runEnd_;
+  std::vector<Portal> portals_;
+};
+
+}  // namespace cb::view

@@ -82,6 +82,10 @@ enum class StalematePolicy : std::uint8_t { Draw, Loss, Win };
 class VariantSpec {
  public:
   std::string name;
+  /// One line, in the variant author's own words, of what the game *is*. The picker
+  /// shows it in place of a generated description, because a player choosing a game
+  /// wants the author's pitch rather than an axis count.
+  std::string description;
   DimSpec dims;
   Geometry geom;
 

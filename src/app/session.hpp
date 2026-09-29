@@ -8,6 +8,8 @@
 #include "game/game.hpp"
 #include "view/camera.hpp"
 #include "view/layout.hpp"
+#include "view/move_anim.hpp"
+#include "view/seams.hpp"
 #include "view/snapshot.hpp"
 
 namespace cb::app {
@@ -48,6 +50,13 @@ class Session {
   [[nodiscard]] const view::PositionView& snapshot() const noexcept { return snapshot_; }
   [[nodiscard]] const view::ViewConfig& viewConfig() const noexcept { return viewCfg_; }
   [[nodiscard]] const view::OrbitCamera& camera() const noexcept { return camera_; }
+  /// Where the board is glued to itself, and in what colour. Built once per variant.
+  [[nodiscard]] const view::SeamMap& seams() const noexcept { return seams_; }
+  /// The move currently being drawn, if any.
+  [[nodiscard]] const view::MoveAnimation& animation() const noexcept { return anim_; }
+  /// Move the animation on. Returns true while something is still moving, which is how
+  /// the front end knows to keep drawing frames.
+  bool advanceAnimation(float dt);
   [[nodiscard]] const std::vector<view::Placement>& placements() const noexcept {
     return placements_;
   }
@@ -61,6 +70,15 @@ class Session {
   /// Tell the session how wide the board's drawing area is relative to its height, so
   /// the default camera frames the board in the space the interface leaves it.
   void setBoardAspect(float aspect);
+
+  /// Look straight down with no perspective, for a machine that would rather not draw
+  /// the scene in three dimensions - and for a player who simply prefers a diagram.
+  void setFlatView(bool flat);
+  [[nodiscard]] bool flatView() const noexcept { return flat_; }
+
+  /// How long a move takes to draw, per cell travelled. Zero turns animation off, and
+  /// a move then simply appears where it landed.
+  void setAnimationSeconds(float secondsPerCell) { animSeconds_ = secondsPerCell; }
 
   /// A move the player has committed to except for what the pawn becomes.
   ///
@@ -95,6 +113,7 @@ class Session {
   Session() = default;
   void refreshSnapshot();
   void refreshView();
+  void applyViewMode();
   [[nodiscard]] const Move* findMove(CellId from, CellId to) const;
   [[nodiscard]] std::vector<PieceTypeId> promotionChoicesFor(CellId from,
                                                              CellId to) const;
@@ -106,6 +125,10 @@ class Session {
   view::ViewConfig viewCfg_;
   view::OrbitCamera camera_;
   std::vector<view::Placement> placements_;
+  view::SeamMap seams_;
+  view::MoveAnimation anim_;
+  float animSeconds_{0.085f};
+  bool flat_{false};
   CellId selected_{kInvalidCell};
   float boardAspect_{1.3f};
   bool framedOnce_{false};

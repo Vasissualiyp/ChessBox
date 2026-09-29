@@ -90,6 +90,7 @@ Result<Geometry> Geometry::create(const DimSpec& dims,
       }
       slot = true;
       g.faceXf_[d.axis][static_cast<std::size_t>(s)] = buildFaceTransform(dims, d, side);
+      g.faceKind_[d.axis][static_cast<std::size_t>(s)] = d.kind;
       g.hasIdents_ = true;
       if (g.faceXf_[d.axis][static_cast<std::size_t>(s)].reversesOrientation()) {
         g.reversingFace_ = true;
@@ -107,6 +108,12 @@ const Transform* Geometry::faceTransform(std::uint8_t axis, Side side) const {
   const auto s = static_cast<std::size_t>(side == Side::Min ? 0 : 1);
   if (axis >= dims_.dims() || !faceSet_[axis][s]) return nullptr;
   return &faceXf_[axis][s];
+}
+
+BoundaryKind Geometry::boundaryKind(std::uint8_t axis, Side side) const {
+  const auto s = static_cast<std::size_t>(side == Side::Min ? 0 : 1);
+  if (axis >= dims_.dims() || !faceSet_[axis][s]) return BoundaryKind::Open;
+  return faceKind_[axis][s];
 }
 
 bool Geometry::stepBoundary(Walker& w) const {

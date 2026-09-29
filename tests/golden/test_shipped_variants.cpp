@@ -50,6 +50,9 @@ TEST_CASE("every shipped variant loads, plays, and round-trips", "[golden][varia
     const VariantSpec& v = *loaded;
     REQUIRE(v.finalized());
     REQUIRE(v.variantId() != 0);
+    // A variant is a game someone should want to play, so it says what it is. The
+    // picker shows this line; an empty one is a hole in the interface.
+    REQUIRE_FALSE(v.description.empty());
 
     Position p = Position::startPosition(v);
     std::string why;

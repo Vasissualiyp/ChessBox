@@ -79,6 +79,12 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.showCoordinates = asBool(value);
     else if (key == "piece_height_scale")
       s.pieceHeightScale = asFloat(value, s.pieceHeightScale);
+    else if (key == "flat_view")
+      s.flatView = asBool(value);
+    else if (key == "animate_moves")
+      s.animateMoves = asBool(value);
+    else if (key == "animation_speed")
+      s.animationSpeed = asFloat(value, s.animationSpeed);
     else if (key == "orbit_sensitivity")
       s.orbitSensitivity = asFloat(value, s.orbitSensitivity);
     else if (key == "zoom_sensitivity")
@@ -120,6 +126,9 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "show_seams = " << boolText(showSeams) << '\n';
   out << "show_coordinates = " << boolText(showCoordinates) << '\n';
   out << "piece_height_scale = " << pieceHeightScale << '\n';
+  out << "flat_view = " << boolText(flatView) << '\n';
+  out << "animate_moves = " << boolText(animateMoves) << '\n';
+  out << "animation_speed = " << animationSpeed << '\n';
   out << "orbit_sensitivity = " << orbitSensitivity << '\n';
   out << "zoom_sensitivity = " << zoomSensitivity << '\n';
   out << "invert_orbit_y = " << boolText(invertOrbitY) << '\n';
@@ -136,6 +145,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
 void Settings::sanitize() {
   guiScale = std::clamp(guiScale, 0.6f, 3.0f);
   pieceHeightScale = std::clamp(pieceHeightScale, 0.0f, 2.0f);
+  animationSpeed = std::clamp(animationSpeed, 0.25f, 4.0f);
   orbitSensitivity = std::clamp(orbitSensitivity, 0.1f, 4.0f);
   zoomSensitivity = std::clamp(zoomSensitivity, 0.1f, 4.0f);
   volumeMaster = std::clamp(volumeMaster, 0.0f, 1.0f);

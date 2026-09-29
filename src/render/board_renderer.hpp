@@ -10,6 +10,8 @@
 #include "render/piece_mesh.hpp"
 #include "view/camera.hpp"
 #include "view/layout.hpp"
+#include "view/move_anim.hpp"
+#include "view/seams.hpp"
 #include "view/snapshot.hpp"
 #include "view/theme.hpp"
 
@@ -45,6 +47,10 @@ struct BoardOptions {
   bool showSeams{true};
   /// 1 keeps the height a piece's value implies; 0 makes every piece the same height.
   float pieceHeightScale{1.0f};
+  /// Draw the board flat, looking straight down, with pieces as tokens rather than as
+  /// models. Fewer triangles, no orbiting, and - the point of it - readable on a
+  /// machine that cannot comfortably draw the three-dimensional scene.
+  bool flat{false};
 };
 
 /// Instances grouped by the shape that draws them - one draw call per shape.
@@ -88,8 +94,13 @@ class BoardRenderer {
 
   /// Turn a snapshot into instances. Pure and side-effect free, so it is unit-testable
   /// with no Vulkan at all - which is where most rendering bugs are actually found.
-  [[nodiscard]] InstanceSet buildInstances(const view::PositionView& p,
-                                           const view::ViewConfig& cfg) const;
+  /// `seams` colours the edges that are not really edges, and `anim` moves one piece
+  /// off its cell while it is travelling. Both are optional: a still frame of a plain
+  /// box needs neither, and the tests that cover instance building pass nullptr.
+  [[nodiscard]] InstanceSet buildInstances(
+      const view::PositionView& p, const view::ViewConfig& cfg,
+      const view::SeamMap* seams = nullptr,
+      const view::MoveAnimation* anim = nullptr) const;
 
   /// Render one frame into `target`, leaving the colour image in TRANSFER_SRC_OPTIMAL.
   /// `overlay` records extra commands inside the same render pass, which is how the UI

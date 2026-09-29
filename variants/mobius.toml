@@ -13,6 +13,7 @@
 # documented in docs/plan/M3-geometry.md 3.4 for the variants that do want an answer.
 
 name = "mobius"
+description = "The files are glued with a half-twist. Ride the board twice and you come home mirrored."
 side_to_move = "white"
 en_passant = false
 stalemate = "draw"

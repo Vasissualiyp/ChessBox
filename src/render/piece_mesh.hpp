@@ -40,6 +40,8 @@ enum class Archetype : std::uint8_t {
   Crown,     ///< queen
   Monolith,  ///< king, or anything royal
   Horn,      ///< unicorn and other pieces that only exist above two dimensions
+  Portal,    ///< the opening a wrapped move passes through: a cube, so it can stand
+             ///< on whichever axis the seam it belongs to actually faces
   Count
 };
 

@@ -9,6 +9,7 @@
 # generalized machinery is correct (docs/plan/M1-core-2d.md, section M1.6).
 
 name = "standard"
+description = "The game you know, on a plain eight-by-eight board - the reference every other variant here is measured against."
 side_to_move = "white"
 en_passant = true
 stalemate = "draw"

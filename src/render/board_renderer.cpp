@@ -358,7 +358,9 @@ Result<void> BoardRenderer::ensureInstanceCapacity(std::size_t count) {
 }
 
 InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
-                                          const view::ViewConfig& cfg) const {
+                                          const view::ViewConfig& cfg,
+                                          const view::SeamMap* seams,
+                                          const view::MoveAnimation* anim) const {
   const VariantSpec& v = p.variant();
   const auto placements = view::layout(v.dims, cfg);
 
@@ -376,26 +378,55 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     return std::find(highlighted.begin(), highlighted.end(), c) != highlighted.end();
   };
 
-  // Which sides of a cell lie on a glued face. Computed per coordinate rather than per
-  // cell id so it stays correct in any number of dimensions.
-  const auto seamMask = [&](const Coord& c) {
-    float mask = 0;
-    for (std::size_t i = 0; i < cfg.screenAxes.size() && i < 2; ++i) {
-      const std::uint8_t axis = cfg.screenAxes[i];
-      if (c.c[axis] == 0 && v.geom.faceTransform(axis, Side::Min) != nullptr) {
-        mask += (i == 0) ? 1.0f : 4.0f;
-      }
-      if (c.c[axis] == v.dims.extent(axis) - 1 &&
-          v.geom.faceTransform(axis, Side::Max) != nullptr) {
-        mask += (i == 0) ? 2.0f : 8.0f;
-      }
-    }
-    return mask;
-  };
-
   // Two passes so instances of the same shape are contiguous: one draw call per shape.
   std::vector<std::vector<Instance>> byShape(static_cast<std::size_t>(Archetype::Count));
   const view::Vec3 half = cellHalfExtent();
+
+  // One piece, wherever it happens to be this frame. A travelling piece is the same
+  // call with a different position, which is what keeps the animation from being a
+  // second, subtly different way of drawing a piece.
+  const auto emitPiece = [&](Piece piece, float x, float y, float z, bool inCheck) {
+    view::Rgba pieceColor =
+        piece.colorOf() == Color::White ? theme_.whitePiece : theme_.blackPiece;
+    if (options_.showCheck && inCheck) pieceColor = mix(pieceColor, theme_.blood, 0.65f);
+
+    if (options_.flat) {
+      // Seen from straight above, a model is a blob. A token with the piece's letter on
+      // it - drawn by the interface, which is the only thing here that can render text -
+      // is what a flat board actually needs.
+      Instance disc{};
+      disc.center[0] = x;
+      disc.center[1] = y;
+      disc.center[2] = z + half.z * 1.6f;
+      disc.scale[0] = 0.40f / half.x;
+      disc.scale[1] = 0.40f / half.y;
+      disc.scale[2] = 0.05f / half.z;
+      toFloat4(pieceColor, disc.color);
+      byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(disc);
+
+      Instance inner = disc;
+      inner.center[2] = z + half.z * 2.4f;
+      inner.scale[0] = 0.33f / half.x;
+      inner.scale[1] = 0.33f / half.y;
+      toFloat4(mix(pieceColor, theme_.ink, 0.18f), inner.color);
+      byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(inner);
+      return;
+    }
+
+    Instance body{};
+    body.center[0] = x;
+    body.center[1] = y;
+    body.center[2] = z + half.z;
+    // The archetype already gives the piece its own height; this blends in the extra
+    // scaling that encodes value. At 0 every piece stands at its natural size - which is
+    // still different per shape - and nothing ever ends up shorter than its own model.
+    const float h = 1.0f + (height[piece.type] - 1.0f) * options_.pieceHeightScale;
+    body.scale[0] = 0.8f;
+    body.scale[1] = 0.8f;
+    body.scale[2] = 0.8f * h;
+    toFloat4(pieceColor, body.color);
+    byShape[static_cast<std::size_t>(shape[piece.type])].push_back(body);
+  };
 
   for (const view::Placement& pl : placements) {
     const Coord c = v.dims.toCoord(pl.cell);
@@ -424,34 +455,33 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     }
     toFloat4(fill, cell.color);
 
-    const float mask = options_.showSeams ? seamMask(c) : 0.0f;
-    if (mask > 0) {
-      toFloat4(theme_.rift, cell.edge);
-      cell.edgeMask = mask;
-    }
     byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(cell);
+
+    // A seam is drawn as a coloured rail along the face, one instance per face, so the
+    // two ends of one identification can carry the same colour. A single tint per cell
+    // could not: a corner cell is on two different portals at once.
+    if (options_.showSeams && seams != nullptr) {
+      for (const view::SeamFace& f : seams->at(pl.cell)) {
+        const float dir = f.side == Side::Min ? -1.0f : 1.0f;
+        Instance rail{};
+        rail.center[0] = pl.x + (f.screenAxis == 0 ? dir * 0.5f : 0.0f);
+        rail.center[1] = pl.y + (f.screenAxis == 1 ? dir * 0.5f : 0.0f);
+        rail.center[2] = pl.z + half.z * 0.6f;
+        rail.scale[0] = (f.screenAxis == 0 ? 0.07f : 0.5f) / half.x;
+        rail.scale[1] = (f.screenAxis == 1 ? 0.07f : 0.5f) / half.y;
+        rail.scale[2] = 0.055f / half.z;
+        toFloat4(f.color, rail.color);
+        byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(rail);
+      }
+    }
 
     const Piece piece = p.at(pl.cell);
     if (piece.empty()) continue;
+    // The travelling piece is drawn where it currently is, not where it has already
+    // arrived; skipping it here is what stops it being drawn twice.
+    if (anim != nullptr && anim->active() && pl.cell == anim->travellingTo()) continue;
 
-    Instance body{};
-    body.center[0] = pl.x;
-    body.center[1] = pl.y;
-    body.center[2] = pl.z + half.z;
-    // The archetype already gives the piece its own height; this blends in the extra
-    // scaling that encodes value. At 0 every piece stands at its natural size - which is
-    // still different per shape - and nothing ever ends up shorter than its own model.
-    const float h = 1.0f + (height[piece.type] - 1.0f) * options_.pieceHeightScale;
-    body.scale[0] = 0.8f;
-    body.scale[1] = 0.8f;
-    body.scale[2] = 0.8f * h;
-    view::Rgba pieceColor =
-        piece.colorOf() == Color::White ? theme_.whitePiece : theme_.blackPiece;
-    if (options_.showCheck && pl.cell == checkCell_) {
-      pieceColor = mix(pieceColor, theme_.blood, 0.65f);
-    }
-    toFloat4(pieceColor, body.color);
-    byShape[static_cast<std::size_t>(shape[piece.type])].push_back(body);
+    emitPiece(piece, pl.x, pl.y, pl.z, pl.cell == checkCell_);
   }
 
   // A plinth under each sub-board, so the cells sit on something instead of floating in
@@ -491,6 +521,48 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
       toFloat4(mix(theme_.emberDeep, theme_.rule, 0.45f), plinth.edge);
       plinth.edgeMask = 15.0f;
       byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(plinth);
+    }
+  }
+
+  // The travelling piece and any portal it is passing through. Drawn last so they sit
+  // above the board they are crossing.
+  if (anim != nullptr && anim->active()) {
+    const view::MoveAnimation::Sample at = anim->sample();
+    const Piece moving = p.at(anim->travellingTo());
+    if (at.moving && !moving.empty()) {
+      emitPiece(moving, at.x, at.y, at.z + at.lift, false);
+    }
+    for (const view::MoveAnimation::Portal& portal : anim->openPortals()) {
+      // A doorway standing across the seam the piece crossed: thin on the axis the
+      // portal faces, wide along the seam, and growing as it opens. It uses the cube
+      // archetype, not the flat cell slab - a slab lies on the board however it is
+      // scaled, which is why a portal on a vertical file seam used to come out flat.
+      const float open = portal.intensity;
+      const float ax = std::abs(portal.nx);
+      const float ay = std::abs(portal.ny);
+      const float az = std::abs(portal.nz);
+      const float wide = 0.46f;
+      float ex = wide;
+      float ey = wide;
+      float ez = 0.06f + 0.55f * open;
+      if (ax >= ay && ax >= az) {
+        ex = 0.05f;
+      } else if (ay >= az) {
+        ey = 0.05f;
+      } else {
+        ez = 0.05f;
+      }
+      Instance iris{};
+      iris.center[0] = portal.x;
+      iris.center[1] = portal.y;
+      iris.center[2] = portal.z + ez;  // stand it on the cell rather than through it
+      // The cube's own half-extent is 0.5, so the scale is the wanted half-extent
+      // doubled.
+      iris.scale[0] = ex * 2.0f;
+      iris.scale[1] = ey * 2.0f;
+      iris.scale[2] = ez * 2.0f;
+      toFloat4(portal.color, iris.color);
+      byShape[static_cast<std::size_t>(Archetype::Portal)].push_back(iris);
     }
   }
 

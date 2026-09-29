@@ -152,6 +152,16 @@ void Shell::pause() {
   if (session_ != nullptr) go(Screen::Paused);
 }
 
+std::string Shell::variantDescription(const std::string& name) const {
+  // Asking the running session first saves reloading a file the game already holds.
+  if (session_ != nullptr && currentVariant_ == name) {
+    return session_->variant().description;
+  }
+  if (!loader_) return {};
+  auto v = loader_(name);
+  return v.has_value() ? v->description : std::string{};
+}
+
 void Shell::resume() {
   if (session_ != nullptr) go(Screen::Game);
 }
@@ -159,6 +169,12 @@ void Shell::resume() {
 void Shell::applySettings() {
   settings_.sanitize();
   if (session_ != nullptr) {
+    session_->setFlatView(settings_.flatView);
+    // Seconds per cell travelled. Nought-point-nought-eight-five at speed 1 is about
+    // as fast as a move can be read; switching animation off means zero, not "instant",
+    // so the session has one rule for "do not animate" rather than two.
+    session_->setAnimationSeconds(
+        settings_.animateMoves ? 0.085f / settings_.animationSpeed : 0.0f);
     Action a;
     a.kind = ActionKind::SetPromotion;
     a.text = settings_.autoPromoteTo;

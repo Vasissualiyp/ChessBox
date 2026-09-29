@@ -132,29 +132,23 @@ UiRequest Ui::buildMainMenu(app::Shell& shell) {
   ImGui::Dummy(ImVec2(0, px(10)));
 
   const float width = ImGui::GetContentRegionAvail().x;
-  if (menuEntry("New game", "choose a variant from the library", t, display, small, width,
-                true, scale_)) {
+  if (menuEntry("New game", t, display, width, true, scale_)) {
     shell.go(app::Screen::NewGame);
   }
-  if (menuEntry("Continue", "resume the last saved game", t, display, small, width, false,
-                scale_)) {
+  if (menuEntry("Continue", t, display, width, false, scale_)) {
     // unreachable while disabled, but kept so enabling it is a one-word change
   }
   if (ImGui::IsItemHovered()) shell.noteUnbuilt(app::Unbuilt::Continue);
-  if (menuEntry("Multiplayer", "play someone over a network", t, display, small, width,
-                false, scale_)) {
+  if (menuEntry("Multiplayer", t, display, width, false, scale_)) {
   }
   if (ImGui::IsItemHovered()) shell.noteUnbuilt(app::Unbuilt::Multiplayer);
-  if (menuEntry("Creator", "design boards and pieces", t, display, small, width, true,
-                scale_)) {
+  if (menuEntry("Creator", t, display, width, true, scale_)) {
     shell.go(app::Screen::Creator);
   }
-  if (menuEntry("Settings", "display, board, camera, controls", t, display, small, width,
-                true, scale_)) {
+  if (menuEntry("Settings", t, display, width, true, scale_)) {
     shell.go(app::Screen::Settings);
   }
-  if (menuEntry("Quit", nullptr, t, display, small, width, true, scale_))
-    request.quit = true;
+  if (menuEntry("Quit", t, display, width, true, scale_)) request.quit = true;
 
   // Hovering something unbuilt explains where the game actually stands, rather than
   // leaving a dead entry with no reason attached.
@@ -178,54 +172,89 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   auto* display = static_cast<ImFont*>(fontDisplay_);
   auto* small = static_cast<ImFont*>(fontSmall_);
 
-  beginPlate("##newgame", t, ImVec2(px(660), px(470)), 0.5f);
+  beginPlate("##newgame", t, ImVec2(px(690), px(534)), 0.5f);
   ImGui::PushFont(display);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.ember));
   ImGui::TextUnformatted("NEW GAME");
   ImGui::PopStyleColor();
   ImGui::PopFont();
-  ImGui::Dummy(ImVec2(0, px(6)));
+  ImGui::Dummy(ImVec2(0, px(8)));
 
-  ImGui::BeginChild("##library", ImVec2(px(250), px(330)), ImGuiChildFlags_Border);
+  if (pickedVariant_.empty()) {
+    pickedVariant_ = shell.currentVariant();
+    if (pickedVariant_.empty() && !shell.library().empty()) {
+      pickedVariant_ = shell.library().front();
+    }
+  }
+  // The description lives in the variant file, so it is read once per selection rather
+  // than every frame. A variant that will not load simply has no blurb.
+  if (describedFor_ != pickedVariant_) {
+    describedFor_ = pickedVariant_;
+    pickedDescription_ = shell.variantDescription(pickedVariant_);
+  }
+
+  const float rowH = px(26.0f);
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, col(t.ink, 0.45f));
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+  ImGui::BeginChild("##library", ImVec2(px(240), px(384)), ImGuiChildFlags_Border);
   for (const std::string& name : shell.library()) {
     const bool active = name == pickedVariant_;
-    ImGui::PushStyleColor(ImGuiCol_Text, col(active ? t.ember : t.boneDim));
-    if (ImGui::Selectable(name.c_str(), active)) pickedVariant_ = name;
-    ImGui::PopStyleColor();
+    ImGui::PushID(name.c_str());
+    const float rowW = ImGui::GetContentRegionAvail().x;
+    const ImVec2 min = ImGui::GetCursorScreenPos();
+    const ImVec2 max(min.x + rowW, min.y + rowH);
+    const bool clicked = ImGui::InvisibleButton("##row", ImVec2(rowW, rowH));
+    const bool hovered = ImGui::IsItemHovered();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    if (active) {
+      dl->AddRectFilled(min, max, u32(t.emberDeep), px(4));
+      dl->AddRectFilled(ImVec2(min.x, min.y + px(3)),
+                        ImVec2(min.x + px(4), max.y - px(3)), u32(t.ember));
+    } else if (hovered) {
+      dl->AddRectFilled(min, max, u32(t.panelHi), px(4));
+    }
+    const ImU32 textCol = u32(active ? t.ink : (hovered ? t.bone : t.boneDim));
+    dl->AddText(ImVec2(min.x + px(12), min.y + (rowH - ImGui::GetFontSize()) * 0.5f),
+                textCol, upper(name).c_str());
+    if (clicked) pickedVariant_ = name;
+    ImGui::PopID();
   }
   ImGui::EndChild();
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor();
 
   ImGui::SameLine();
-  ImGui::BeginChild("##details", ImVec2(0, px(330)));
-  if (pickedVariant_.empty()) pickedVariant_ = shell.currentVariant();
+  ImGui::BeginChild("##details", ImVec2(0, px(384)));
   ImGui::PushFont(display);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.bone));
   ImGui::TextUnformatted(upper(pickedVariant_).c_str());
   ImGui::PopStyleColor();
   ImGui::PopFont();
-  ImGui::Dummy(ImVec2(0, px(4)));
-  ImGui::PushFont(small);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
-  // The description comes from the variant file itself once it is loaded; before that
-  // the honest thing is to say what we know, which is its name.
+  ImGui::Dummy(ImVec2(0, px(6)));
+  // The board's shape, once the game is actually loaded - real numbers rather than a
+  // promise. Before that the variant's own one-line pitch is the honest thing to show.
   if (const app::Session* loaded = shell.session();
       loaded != nullptr && loaded->variant().name == pickedVariant_) {
-    // Already loaded, so the real numbers can be shown rather than a promise.
+    ImGui::PushFont(small);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
     ImGui::TextUnformatted(describeBoard(loaded->variant()).c_str());
-    ImGui::Dummy(ImVec2(0, px(4)));
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+    ImGui::Dummy(ImVec2(0, px(8)));
   }
-  ImGui::TextWrapped(
-      "Its board, pieces and rules all come from variants/%s.toml - the engine has no "
-      "code specific to any of them.",
-      pickedVariant_.c_str());
+  ImGui::PushFont(small);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
+  if (!pickedDescription_.empty()) {
+    ImGui::TextWrapped("%s", pickedDescription_.c_str());
+  }
   ImGui::PopStyleColor();
   ImGui::PopFont();
   ImGui::EndChild();
 
-  ImGui::Dummy(ImVec2(0, px(4)));
-  if (button("START", t, px(140), true)) request.loadVariant = pickedVariant_;
+  ImGui::Dummy(ImVec2(0, px(8)));
+  if (button("START", t, px(150), true)) request.loadVariant = pickedVariant_;
   ImGui::SameLine();
-  if (button("BACK", t, px(100))) shell.back();
+  if (button("BACK", t, px(110))) shell.back();
   if (!shell.message().empty()) {
     ImGui::PushFont(small);
     ImGui::PushStyleColor(ImGuiCol_Text, col(t.blood));
@@ -257,25 +286,20 @@ UiRequest Ui::buildPause(app::Shell& shell) {
   ImGui::Dummy(ImVec2(0, px(10)));
 
   const float width = ImGui::GetContentRegionAvail().x;
-  if (menuEntry("Continue", nullptr, t, display, small, width, true, scale_))
-    shell.resume();
-  if (menuEntry("Game mode", "what this variant's rules actually are", t, display, small,
-                width, true, scale_)) {
+  if (menuEntry("Continue", t, display, width, true, scale_)) shell.resume();
+  if (menuEntry("Game mode", t, display, width, true, scale_)) {
     shell.go(app::Screen::GameInfo);
   }
-  if (menuEntry("Piece moves", "how every piece here moves", t, display, small, width,
-                true, scale_)) {
+  if (menuEntry("Piece moves", t, display, width, true, scale_)) {
     shell.go(app::Screen::PieceMoves);
   }
-  if (menuEntry("Settings", nullptr, t, display, small, width, true, scale_)) {
+  if (menuEntry("Settings", t, display, width, true, scale_)) {
     shell.go(app::Screen::Settings);
   }
-  if (menuEntry("Main menu", "abandons the current game", t, display, small, width, true,
-                scale_)) {
+  if (menuEntry("Main menu", t, display, width, true, scale_)) {
     shell.go(app::Screen::MainMenu);
   }
-  if (menuEntry("Quit", nullptr, t, display, small, width, true, scale_))
-    request.quit = true;
+  if (menuEntry("Quit", t, display, width, true, scale_)) request.quit = true;
   endPlate();
   return request;
 }
@@ -302,12 +326,10 @@ UiRequest Ui::buildCreator(app::Shell& shell) {
   ImGui::Dummy(ImVec2(0, px(10)));
 
   const float width = ImGui::GetContentRegionAvail().x;
-  if (menuEntry("Board designer", "axes, extents, gluing, opening position", t, display,
-                small, width, false, scale_)) {
+  if (menuEntry("Board designer", t, display, width, false, scale_)) {
   }
   if (ImGui::IsItemHovered()) shell.noteUnbuilt(app::Unbuilt::BoardDesigner);
-  if (menuEntry("Piece designer", "draw a move, see the directions it expands to", t,
-                display, small, width, false, scale_)) {
+  if (menuEntry("Piece designer", t, display, width, false, scale_)) {
   }
   if (ImGui::IsItemHovered()) shell.noteUnbuilt(app::Unbuilt::PieceDesigner);
 
@@ -352,6 +374,12 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::Checkbox("Fullscreen", &s.fullscreen);
   if (ImGui::IsItemDeactivatedAfterEdit()) request.toggleFullscreen = true;
   ImGui::Checkbox("Wait for vertical sync", &s.vsync);
+  ImGui::Checkbox("Flat 2D view", &s.flatView);
+  ImGui::PushFont(small);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::TextUnformatted("look straight down, pieces as tokens: cheaper to draw");
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
   ImGui::Dummy(ImVec2(0, px(8)));
 
   heading("BOARD", t, small);
@@ -372,6 +400,18 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::SliderFloat("Orbit sensitivity", &s.orbitSensitivity, 0.1f, 4.0f, "%.2f");
   ImGui::SliderFloat("Zoom sensitivity", &s.zoomSensitivity, 0.1f, 4.0f, "%.2f");
   ImGui::Checkbox("Invert vertical orbit", &s.invertOrbitY);
+  ImGui::Dummy(ImVec2(0, px(8)));
+
+  heading("ANIMATION", t, small);
+  ImGui::Checkbox("Animate moves", &s.animateMoves);
+  ImGui::BeginDisabled(!s.animateMoves);
+  ImGui::SliderFloat("Animation speed", &s.animationSpeed, 0.25f, 4.0f, "%.2fx");
+  ImGui::EndDisabled();
+  ImGui::PushFont(small);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::TextUnformatted("higher is faster; a wrapping move opens a portal on the edge");
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
   ImGui::Dummy(ImVec2(0, px(8)));
 
   heading("GAMEPLAY", t, small);
@@ -455,7 +495,9 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       before.vsync != s.vsync || before.showLegalMoves != s.showLegalMoves ||
       before.showLastMove != s.showLastMove || before.showCheck != s.showCheck ||
       before.showSeams != s.showSeams || before.showCoordinates != s.showCoordinates ||
-      before.pieceHeightScale != s.pieceHeightScale ||
+      before.pieceHeightScale != s.pieceHeightScale || before.flatView != s.flatView ||
+      before.animateMoves != s.animateMoves ||
+      before.animationSpeed != s.animationSpeed ||
       before.orbitSensitivity != s.orbitSensitivity ||
       before.zoomSensitivity != s.zoomSensitivity ||
       before.invertOrbitY != s.invertOrbitY || before.confirmMoves != s.confirmMoves ||

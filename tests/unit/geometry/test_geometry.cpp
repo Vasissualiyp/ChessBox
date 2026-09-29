@@ -51,13 +51,23 @@ TEST_CASE("a box board terminates rays at its walls", "[unit][geometry]") {
   const Geometry g = box2(8, 8);
   REQUIRE(g.isBox());
   REQUIRE(g.isOrientable());
-
   const DimSpec& d = g.dims();
   const Direction east = dir(d, {1, 0});
   const Orbit o = walk(g, d.toCell(Coord::of({0, 3})), east);
   REQUIRE_FALSE(o.closed);
   REQUIRE(o.cells.size() == 7);  // a1-side to the far wall
   REQUIRE(o.cells.back() == d.toCell(Coord::of({7, 3})));
+}
+
+TEST_CASE("a face reports whether it glues, reflects, or is open", "[unit][geometry]") {
+  // The move animation tells a portal from a bounce by asking this, so it has to be
+  // exact: an open face ends the ray, a mirror turns it, a periodic face relocates it.
+  const Geometry g = make(makeDims({8, 8}), {periodic(0), mirror(1, Side::Max)});
+  CHECK(g.boundaryKind(0, Side::Min) == BoundaryKind::Periodic);
+  CHECK(g.boundaryKind(0, Side::Max) == BoundaryKind::Periodic);
+  CHECK(g.boundaryKind(1, Side::Max) == BoundaryKind::Mirror);
+  CHECK(g.boundaryKind(1, Side::Min) == BoundaryKind::Open);
+  CHECK(box2(8, 8).boundaryKind(0, Side::Min) == BoundaryKind::Open);
 }
 
 TEST_CASE("interior steps are plain integer adds", "[unit][geometry]") {

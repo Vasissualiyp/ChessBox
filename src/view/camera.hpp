@@ -54,6 +54,11 @@ Mat4 lookAt(const Vec3& eye, const Vec3& center, const Vec3& up);
 /// clip space, so no flip is needed anywhere else.
 Mat4 perspective(float fovYRadians, float aspect, float nearZ, float farZ);
 
+/// Parallel projection, same conventions. Used by the flat board view, where a
+/// perspective would make the far rank smaller than the near one for no reason: a 2-D
+/// board is a diagram, and a diagram has no vanishing point.
+Mat4 orthographic(float halfHeight, float aspect, float nearZ, float farZ);
+
 /// An orbit camera, which is the only control scheme that makes sense for a board you
 /// are looking at rather than standing in.
 struct OrbitCamera {
@@ -64,6 +69,10 @@ struct OrbitCamera {
   float fovY{0.9f};
   float nearZ{0.1f};
   float farZ{1000.0f};
+  /// Look straight down with no perspective. The flat view sets this; everything else
+  /// - framing, zoom, picking - keeps working, which is why it is a flag on the camera
+  /// rather than a second camera class.
+  bool orthographic{false};
 
   /// Frame the whole laid-out scene, whatever its dimensionality.
   ///
@@ -74,7 +83,20 @@ struct OrbitCamera {
   static OrbitCamera frame(const Bounds& b, float aspect = 1.3f, float headroom = 1.4f);
 
   [[nodiscard]] Vec3 eye() const;
+  /// World up for the view basis. Looking straight down, the usual +Z is parallel to
+  /// the view direction and gives a degenerate basis, so the board's +Y takes over.
+  [[nodiscard]] Vec3 upHint() const;
   [[nodiscard]] Mat4 viewProj(float aspect) const;
+
+  /// A world point in pixels, origin top left - the inverse of pickRay. `visible` is
+  /// false when the point is behind the camera or outside the viewport, which is exactly
+  /// when nothing should be drawn there.
+  struct ScreenPoint {
+    float x{0}, y{0};
+    bool visible{false};
+  };
+  [[nodiscard]] ScreenPoint project(const Vec3& world, float aspect, float width,
+                                    float height) const;
 
   /// Screen-space pick ray. `px`,`py` are pixel coordinates with the origin at the
   /// top left, matching the rendered image.

@@ -2,6 +2,7 @@
 #include "render/ui.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <vector>
 
@@ -147,12 +148,14 @@ void Ui::applyStyle() {
   // Machined edges. Rounding is the single thing that makes ImGui look like a debug
   // overlay, so the panels get none and the controls get just enough to look milled.
   s.WindowRounding = 0.0f;
-  s.ChildRounding = 0.0f;
+  s.ChildRounding = 6.0f;
   s.FrameRounding = 2.0f;
   s.PopupRounding = 0.0f;
   s.ScrollbarRounding = 0.0f;
   s.GrabRounding = 2.0f;
-  s.WindowBorderSize = 1.0f;
+  // The plate draws its own thick outline; letting ImGui add a second, thin one on top
+  // of it just muddies the edge.
+  s.WindowBorderSize = 0.0f;
   s.ChildBorderSize = 1.0f;
   s.FrameBorderSize = 1.0f;
   s.PopupBorderSize = 1.0f;
@@ -190,6 +193,9 @@ void Ui::applyStyle() {
   c[ImGuiCol_ScrollbarGrabHovered] = col(t.emberDeep);
   c[ImGuiCol_ScrollbarGrabActive] = col(t.ember);
   c[ImGuiCol_CheckMark] = col(t.ember);
+  c[ImGuiCol_SliderGrab] = col(t.ember);
+  c[ImGuiCol_SliderGrabActive] = col(t.emberDeep);
+  c[ImGuiCol_TextSelectedBg] = col(t.emberDeep, 0.5f);
   c[ImGuiCol_ModalWindowDimBg] = col(t.ink, 0.72f);
 
   // Sizes scale with the interface; colours do not.
@@ -516,6 +522,32 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
         ImGui::CloseCurrentPopup();
       }
       ImGui::EndPopup();
+    }
+  }
+
+  // A flat board draws every piece as the same token, so the interface names them: the
+  // piece's own symbol, projected onto the cell it stands on. Without this a flat board
+  // is a diagram of discs and the game cannot be read.
+  if (session.flatView()) {
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    auto* glyphFont = static_cast<ImFont*>(fontBody_);
+    const float fs = px(16.0f);
+    const float w = vp->Size.x;
+    const float h = vp->Size.y;
+    for (const view::Placement& pl : session.placements()) {
+      const Piece piece = session.snapshot().at(pl.cell);
+      if (piece.empty() || glyphFont == nullptr) continue;
+      const view::OrbitCamera::ScreenPoint sp =
+          session.camera().project(view::Vec3{pl.x, pl.y, pl.z}, w / h, w, h);
+      if (!sp.visible) continue;
+      char text[2] = {v.pieces[piece.type].symbol, '\0'};
+      if (piece.colorOf() == Color::Black) {
+        text[0] = static_cast<char>(std::tolower(static_cast<unsigned char>(text[0])));
+      }
+      const ImVec2 ts = glyphFont->CalcTextSizeA(fs, 1000.0f, 0.0f, text);
+      const view::Rgba glyph = piece.colorOf() == Color::White ? t.ink : t.bone;
+      dl->AddText(glyphFont, fs, ImVec2(sp.x - ts.x * 0.5f, sp.y - ts.y * 0.5f),
+                  u32(glyph), text);
     }
   }
 

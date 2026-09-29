@@ -97,6 +97,10 @@ class Ui {
   float scale_{1.0f};
   /// Which variant the new-game screen is showing details for.
   std::string pickedVariant_;
+  /// That variant's own one-line description, and the name it was read for, so the file
+  /// is read once per selection rather than once per frame.
+  std::string pickedDescription_;
+  std::string describedFor_;
   /// Which pair of axes the "axes" control will show next.
   int axisRotation_{0};
   bool initialised_{false};

@@ -65,6 +65,16 @@ Mat4 perspective(float fovYRadians, float aspect, float nearZ, float farZ) {
   return m;
 }
 
+Mat4 orthographic(float halfHeight, float aspect, float nearZ, float farZ) {
+  Mat4 m{};
+  m[0] = 1.0f / (aspect * halfHeight);
+  m[5] = -1.0f / halfHeight;  // clip-space Y down, as in perspective() above
+  m[10] = 1.0f / (nearZ - farZ);
+  m[14] = nearZ / (nearZ - farZ);
+  m[15] = 1.0f;
+  return m;
+}
+
 OrbitCamera OrbitCamera::frame(const Bounds& b, float aspect, float headroom) {
   OrbitCamera cam;
   cam.target = Vec3{b.centerX(), b.centerY(), b.centerZ() + headroom * 0.5f};
@@ -99,7 +109,7 @@ OrbitCamera OrbitCamera::frame(const Bounds& b, float aspect, float headroom) {
 
   const Vec3 eye = cam.eye();
   const Vec3 forward = normalize(cam.target - eye);
-  const Vec3 right = normalize(cross(forward, Vec3{0, 0, 1}));
+  const Vec3 right = normalize(cross(forward, cam.upHint()));
   const Vec3 up = cross(right, forward);
 
   float extra = 0.0f;
@@ -123,12 +133,35 @@ Vec3 OrbitCamera::eye() const {
          Vec3{std::sin(yaw) * cp, -std::cos(yaw) * cp, std::sin(pitch)} * distance;
 }
 
+Vec3 OrbitCamera::upHint() const {
+  return std::abs(std::cos(pitch)) < 1e-3f ? Vec3{0, 1, 0} : Vec3{0, 0, 1};
+}
+
+OrbitCamera::ScreenPoint OrbitCamera::project(const Vec3& world, float aspect,
+                                              float width, float height) const {
+  const Mat4 vp = viewProj(aspect);
+  const float cx = vp[0] * world.x + vp[4] * world.y + vp[8] * world.z + vp[12];
+  const float cy = vp[1] * world.x + vp[5] * world.y + vp[9] * world.z + vp[13];
+  const float cw = vp[3] * world.x + vp[7] * world.y + vp[11] * world.z + vp[15];
+  ScreenPoint out;
+  if (cw <= 0.0f) return out;
+  // Half a pixel back, because pickRay works in pixel centres; without it a round trip
+  // through the two would drift by half a pixel every time.
+  out.x = (cx / cw * 0.5f + 0.5f) * width - 0.5f;
+  out.y = (cy / cw * 0.5f + 0.5f) * height - 0.5f;
+  out.visible = out.x >= 0.0f && out.y >= 0.0f && out.x < width && out.y < height;
+  return out;
+}
+
 Mat4 OrbitCamera::viewProj(float aspect) const {
   // Z is the board's "up" for 3-D boards, and the extra axes lay out in X and Y, so the
   // camera treats Z as up too - looking at a 2-D board then gives the familiar
   // over-the-table view with no special case.
-  return multiply(perspective(fovY, aspect, nearZ, farZ),
-                  lookAt(eye(), target, Vec3{0, 0, 1}));
+  const Mat4 proj =
+      orthographic
+          ? cb::view::orthographic(distance * std::tan(fovY * 0.5f), aspect, nearZ, farZ)
+          : perspective(fovY, aspect, nearZ, farZ);
+  return multiply(proj, lookAt(eye(), target, upHint()));
 }
 
 OrbitCamera::Ray OrbitCamera::pickRay(float px, float py, float width,
@@ -137,7 +170,7 @@ OrbitCamera::Ray OrbitCamera::pickRay(float px, float py, float width,
   // fewer operations, no near-singular cases, and it is obvious what it does.
   const Vec3 e = eye();
   const Vec3 forward = normalize(target - e);
-  const Vec3 right = normalize(cross(forward, Vec3{0, 0, 1}));
+  const Vec3 right = normalize(cross(forward, upHint()));
   const Vec3 up = cross(right, forward);
 
   const float aspect = width > 0 ? width / height : 1.0f;
@@ -147,6 +180,12 @@ OrbitCamera::Ray OrbitCamera::pickRay(float px, float py, float width,
   const float ndcX = (px + 0.5f) / width * 2.0f - 1.0f;
   const float ndcY = 1.0f - (py + 0.5f) / height * 2.0f;
 
+  if (orthographic) {
+    // Parallel rays: the pixel picks the point, not the angle.
+    const float halfH = distance * std::tan(fovY * 0.5f);
+    const Vec3 origin = e + right * (ndcX * halfH * aspect) + up * (ndcY * halfH);
+    return Ray{origin, forward};
+  }
   const Vec3 dir = normalize(forward + right * (ndcX * t * aspect) + up * (ndcY * t));
   return Ray{e, dir};
 }

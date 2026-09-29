@@ -51,6 +51,18 @@ struct Theme {
   Rgba rift{Rgba::hex(0x5FE3E0)};
   Rgba riftDeep{Rgba::hex(0x1E6F70)};
 
+  // Seams. A glued edge is coloured by the portal it belongs to, swept along a cold
+  // arc - green-cyan, through blue and violet, to magenta - so that the two ends of one
+  // identification share a colour and a twist shows up as a reversed ramp. Hue is in
+  // turns; the arc deliberately never reaches the warm half of the wheel, which belongs
+  // to the game rather than to the geometry.
+  float seamHueBegin{0.42f};
+  float seamHueEnd{0.88f};
+  float seamSaturation{0.72f};
+  float seamValue{0.95f};
+  /// A reflecting wall has nothing on the other side, so it gets no hue at all.
+  Rgba mirrorEdge{Rgba::hex(0xCBD2DC)};
+
   // Semantic, deliberately separate from the accent.
   Rgba moss{Rgba::hex(0x8FB65C)};
   Rgba blood{Rgba::hex(0xD4483B)};
