@@ -36,6 +36,17 @@ struct BoardRect {
   [[nodiscard]] bool valid() const noexcept { return width > 0 && height > 0; }
 };
 
+/// What the board shows. Driven by the player's settings; the renderer holds no
+/// opinions of its own about what is worth marking.
+struct BoardOptions {
+  bool showLegalMoves{true};
+  bool showLastMove{true};
+  bool showCheck{true};
+  bool showSeams{true};
+  /// 1 keeps the height a piece's value implies; 0 makes every piece the same height.
+  float pieceHeightScale{1.0f};
+};
+
 /// Instances grouped by the shape that draws them - one draw call per shape.
 struct InstanceSet {
   std::vector<Instance> instances;
@@ -63,6 +74,8 @@ class BoardRenderer {
 
   [[nodiscard]] const view::Theme& theme() const noexcept { return theme_; }
   void setTheme(const view::Theme& t) noexcept { theme_ = t; }
+  [[nodiscard]] const BoardOptions& options() const noexcept { return options_; }
+  void setOptions(const BoardOptions& o) noexcept { options_ = o; }
 
   /// Cells the engine says were part of the last move, drawn with a lingering mark so a
   /// player can see what just happened without reading the ledger.
@@ -94,11 +107,13 @@ class BoardRenderer {
 
  private:
   Result<void> buildPipeline();
+  Result<void> buildBackdropPipeline();
   Result<void> uploadGeometry();
   Result<void> ensureInstanceCapacity(std::size_t count);
 
   const VulkanContext* ctx_{nullptr};
   view::Theme theme_{};
+  BoardOptions options_{};
   MeshLibrary meshes_;
   CellId lastFrom_{kInvalidCell};
   CellId lastTo_{kInvalidCell};
@@ -108,6 +123,12 @@ class BoardRenderer {
   VkShaderModule frag_{VK_NULL_HANDLE};
   VkPipelineLayout layout_{VK_NULL_HANDLE};
   VkPipeline pipeline_{VK_NULL_HANDLE};
+
+  // The lit ground the board stands on, drawn first across the whole frame.
+  VkShaderModule backdropVert_{VK_NULL_HANDLE};
+  VkShaderModule backdropFrag_{VK_NULL_HANDLE};
+  VkPipelineLayout backdropLayout_{VK_NULL_HANDLE};
+  VkPipeline backdropPipeline_{VK_NULL_HANDLE};
 
   VkBuffer vertexBuffer_{VK_NULL_HANDLE};
   VkDeviceMemory vertexMem_{VK_NULL_HANDLE};

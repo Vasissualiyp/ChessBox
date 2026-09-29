@@ -2,11 +2,11 @@
 //
 // The playable window.
 //
-// Deliberately thin: every decision it makes is delegated to app::Session, which is
-// covered by scripted tests, and every pixel comes from the renderer and the interface,
-// which are covered by headless image tests. What is left here - translating events and
-// deciding when to redraw - is the only part that genuinely cannot be tested without a
-// display, so there is as little of it as possible.
+// Deliberately thin. Which screen the player is on, and what happens to a game while
+// they are elsewhere, is app::Shell - covered by tests that never open a window. Every
+// pixel comes from the renderer and the interface, covered by headless image tests.
+// What is left here is translating platform events and deciding when to redraw, which
+// is the only part that genuinely needs a display.
 #include <SDL3/SDL.h>
 
 #include <algorithm>
@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-#include "app/session.hpp"
+#include "app/shell.hpp"
 #include "io/variant_toml.hpp"
 #include "render/board_renderer.hpp"
 #include "render/image_io.hpp"
@@ -50,42 +50,74 @@ std::vector<std::string> variantLibrary() {
   return names;
 }
 
-std::unique_ptr<app::Session> openVariant(const std::string& name, std::string& error) {
-  auto variant = loadVariantFile(variantDir() / (name + ".toml"));
-  if (!variant.has_value()) {
-    error = variant.error().format();
-    return nullptr;
-  }
-  auto session = app::Session::create(std::move(*variant));
-  if (!session.has_value()) {
-    error = session.error().format();
-    return nullptr;
-  }
-  return std::move(*session);
+std::unique_ptr<app::Shell> makeShell() {
+  auto shell = app::Shell::create(variantLibrary());
+  shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
+    auto v = loadVariantFile(variantDir() / (name + ".toml"));
+    if (!v.has_value()) return fail(v.error().code, v.error().message);
+    return std::move(*v);
+  });
+  return shell;
 }
 
-}  // namespace
+render::BoardOptions optionsFrom(const app::Settings& s) {
+  render::BoardOptions o;
+  o.showLegalMoves = s.showLegalMoves;
+  o.showLastMove = s.showLastMove;
+  o.showCheck = s.showCheck;
+  o.showSeams = s.showSeams;
+  o.pieceHeightScale = s.pieceHeightScale;
+  return o;
+}
 
-/// Render a single frame - board and interface together - to a file and exit.
+/// Tell the renderer what the engine says just happened, so the board can show it.
+void syncMarks(render::BoardRenderer& renderer, const app::Session& session) {
+  const auto& history = session.game().moveHistory();
+  if (history.empty()) {
+    renderer.setLastMove(kInvalidCell, kInvalidCell);
+  } else {
+    renderer.setLastMove(history.back().from, history.back().to);
+  }
+  renderer.setCheckCell(
+      session.game().inCheck()
+          ? session.game().position().findRoyal(session.game().position().sideToMove())
+          : kInvalidCell);
+}
+
+/// Render a single frame - board and interface together - to a file, and exit.
 ///
-/// It needs no display: SDL's dummy video driver supplies a window for the interface's
-/// input mapping, and the frame goes to the same offscreen target the headless tests
-/// use. That makes the *whole* screen, panels included, capturable on a machine with no
-/// compositor - which is how the interface gets reviewed at all.
+/// It needs no display: SDL's dummy video driver supplies the window the interface uses
+/// for input mapping, and the frame goes to the same offscreen target the headless tests
+/// use. That makes the whole screen capturable on a machine with no compositor, which is
+/// how the interface gets reviewed at all.
 int captureFrame(const std::string& variantName, const std::string& path,
-                 const std::string& script) {
-  std::string error;
-  auto session = openVariant(variantName, error);
-  if (session == nullptr) {
-    std::fprintf(stderr, "cannot load '%s': %s\n", variantName.c_str(), error.c_str());
+                 const std::string& script, const std::string& screen) {
+  auto shell = makeShell();
+  if (auto ok = shell->startGame(variantName); !ok.has_value()) {
+    std::fprintf(stderr, "cannot load '%s': %s\n", variantName.c_str(),
+                 ok.error().format().c_str());
     return 1;
   }
   if (!script.empty()) {
-    if (auto ok = session->applyScript(script); !ok.has_value()) {
+    if (auto ok = shell->session()->applyScript(script); !ok.has_value()) {
       std::fprintf(stderr, "script: %s\n", ok.error().format().c_str());
       return 1;
     }
   }
+  if (screen == "menu")
+    shell->go(app::Screen::MainMenu);
+  else if (screen == "pause")
+    shell->pause();
+  else if (screen == "settings")
+    shell->go(app::Screen::Settings);
+  else if (screen == "creator")
+    shell->go(app::Screen::Creator);
+  else if (screen == "info")
+    shell->go(app::Screen::GameInfo);
+  else if (screen == "pieces")
+    shell->go(app::Screen::PieceMoves);
+  else if (screen == "newgame")
+    shell->go(app::Screen::NewGame);
 
   if (SDL_getenv("DISPLAY") == nullptr && SDL_getenv("WAYLAND_DISPLAY") == nullptr) {
     SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
@@ -111,6 +143,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
     std::fprintf(stderr, "cannot set up the renderer\n");
     return 1;
   }
+  renderer->setOptions(optionsFrom(shell->settings()));
 
 #ifdef CB_HAVE_IMGUI
   auto ui = render::Ui::create(*ctx, window, renderer->theme());
@@ -118,29 +151,38 @@ int captureFrame(const std::string& variantName, const std::string& path,
     std::fprintf(stderr, "%s\n", ui.error().format().c_str());
     return 1;
   }
-  // Two frames: ImGui sizes some things from the previous frame, so the first one can
-  // show a panel mid-layout.
+  // The capture has to show the interface at the scale the player set, or it is not a
+  // picture of what they would see.
+  (void)(*ui)->setScale(shell->settings().guiScale);
+  // Two frames: ImGui sizes some things from the previous frame, so the first can catch
+  // a panel mid-layout.
   for (int frame = 0; frame < 2; ++frame) {
     (*ui)->newFrame();
-    const render::UiRequest request =
-        (*ui)->build(*session, variantLibrary(), variantName, 60.0f);
+    const render::UiRequest request = (*ui)->build(*shell, 60.0f);
     (*ui)->endFrame();
-    const auto instances =
-        renderer->buildInstances(session->snapshot(), session->viewConfig());
     const render::BoardRect rect{request.boardRect[0], request.boardRect[1],
                                  request.boardRect[2], request.boardRect[3]};
+    render::InstanceSet instances;
+    if (shell->showsBoard()) {
+      if (rect.valid()) shell->session()->setBoardAspect(rect.width / rect.height);
+      syncMarks(*renderer, *shell->session());
+      instances = renderer->buildInstances(shell->session()->snapshot(),
+                                           shell->session()->viewConfig());
+    }
+    const view::OrbitCamera camera =
+        shell->showsBoard() ? shell->session()->camera() : view::OrbitCamera{};
     if (auto ok = renderer->render(
-            *target, instances, session->camera(),
-            [&](VkCommandBuffer cmd) { (*ui)->record(cmd); }, rect);
+            *target, instances, camera, [&](VkCommandBuffer cmd) { (*ui)->record(cmd); },
+            rect);
         !ok.has_value()) {
       std::fprintf(stderr, "%s\n", ok.error().format().c_str());
       return 1;
     }
   }
 #else
-  const auto instances =
-      renderer->buildInstances(session->snapshot(), session->viewConfig());
-  (void)renderer->render(*target, instances, session->camera());
+  const auto instances = renderer->buildInstances(shell->session()->snapshot(),
+                                                  shell->session()->viewConfig());
+  (void)renderer->render(*target, instances, shell->session()->camera());
 #endif
 
   auto pixels = target->readPixels();
@@ -164,38 +206,50 @@ int captureFrame(const std::string& variantName, const std::string& path,
   return validation == 0 ? 0 : 2;
 }
 
+}  // namespace
+
 int main(int argc, char** argv) {
-  std::string variantName = "standard";
+  std::string variantName;
   std::string shotPath;
   std::string script;
+  std::string screen;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "-h" || arg == "--help") {
       std::printf(
-          "chessbox_gui [variant] [--shot FILE] [--script TEXT]\n\n"
+          "chessbox_gui [variant] [--shot FILE [--screen NAME]] [--script TEXT]\n\n"
           "  left click    select a piece, then a lit cell to move it\n"
           "  right drag    orbit     wheel  zoom\n"
-          "  u  undo       r  reset  q/Esc  quit\n\n"
-          "Variants are listed in the left rail; anything in variants/ shows up there.\n"
-          "--shot renders one frame to a PPM and exits, with no display required.\n"
-          "--script runs actions first, e.g. 'click e2\\nclick e4'.\n");
+          "  Esc           pause     u  undo     r  reset\n\n"
+          "With no variant, the game opens on the main menu.\n"
+          "--shot renders one frame to a PPM and exits, with no display required;\n"
+          "--screen picks which one: menu, newgame, pause, settings, creator, info,\n"
+          "pieces, or the board by default.\n");
       return 0;
     }
-    if (arg == "--shot" && i + 1 < argc) {
+    if (arg == "--shot" && i + 1 < argc)
       shotPath = argv[++i];
-    } else if (arg == "--script" && i + 1 < argc) {
+    else if (arg == "--script" && i + 1 < argc)
       script = argv[++i];
-    } else if (!arg.starts_with("-")) {
+    else if (arg == "--screen" && i + 1 < argc)
+      screen = argv[++i];
+    else if (!arg.starts_with("-"))
       variantName = arg;
-    }
   }
-  if (!shotPath.empty()) return captureFrame(variantName, shotPath, script);
+  if (!shotPath.empty()) {
+    return captureFrame(variantName.empty() ? "standard" : variantName, shotPath, script,
+                        screen);
+  }
 
-  std::string error;
-  auto session = openVariant(variantName, error);
-  if (session == nullptr) {
-    std::fprintf(stderr, "cannot load '%s': %s\n", variantName.c_str(), error.c_str());
-    return 1;
+  auto shell = makeShell();
+  // Naming a variant on the command line starts it directly; otherwise the game opens
+  // where a game should, on its menu.
+  if (!variantName.empty()) {
+    if (auto ok = shell->startGame(variantName); !ok.has_value()) {
+      std::fprintf(stderr, "cannot load '%s': %s\n", variantName.c_str(),
+                   ok.error().format().c_str());
+      return 1;
+    }
   }
 
   auto window = render::Window::create("ChessBox", 1440, 900);
@@ -216,6 +270,7 @@ int main(int argc, char** argv) {
                  target.error().format().c_str());
     return 1;
   }
+  renderer->setOptions(optionsFrom(shell->settings()));
 
 #ifdef CB_HAVE_IMGUI
   auto ui = render::Ui::create(window->context(), window->handle(), renderer->theme());
@@ -224,24 +279,23 @@ int main(int argc, char** argv) {
                  ui.error().format().c_str());
     return 1;
   }
+  (void)(*ui)->setScale(shell->settings().guiScale);
 #endif
+  if (shell->settings().fullscreen) SDL_SetWindowFullscreen(window->handle(), true);
 
-  const std::vector<std::string> library = variantLibrary();
-  bool running = true;
-  bool orbiting = false;
   render::BoardRect boardRect{0, 0, static_cast<float>(window->width()),
                               static_cast<float>(window->height())};
+  bool running = true;
+  bool orbiting = false;
   auto lastFrame = std::chrono::steady_clock::now();
   float fps = 0.0f;
 
-  while (running) {
+  while (running && !shell->quitRequested()) {
     SDL_Event e;
     // Wait for input rather than spinning: a board game has nothing to animate, and
-    // redrawing an unchanged position would only heat the room. A short timeout keeps
-    // the frame counter and any hover feedback alive.
-    if (!SDL_WaitEventTimeout(&e, 100)) {
-      e.type = SDL_EVENT_POLL_SENTINEL;
-    }
+    // redrawing an unchanged position would only heat the room. The timeout keeps the
+    // frame counter and hover feedback alive.
+    if (!SDL_WaitEventTimeout(&e, 100)) e.type = SDL_EVENT_POLL_SENTINEL;
     do {
       if (e.type == SDL_EVENT_POLL_SENTINEL) continue;
 #ifdef CB_HAVE_IMGUI
@@ -249,6 +303,9 @@ int main(int argc, char** argv) {
 #else
       const bool consumed = false;
 #endif
+      const app::Settings& settings = shell->settings();
+      const bool inGame = shell->screen() == app::Screen::Game && shell->hasGame();
+
       switch (e.type) {
         case SDL_EVENT_QUIT:
           running = false;
@@ -264,12 +321,13 @@ int main(int argc, char** argv) {
           break;
         }
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
-          if (consumed) break;
+          if (consumed || !inGame) break;
           if (e.button.button == SDL_BUTTON_LEFT) {
             // Picking uses the same rectangle the board was drawn into, or a click
             // would land on a different cell than the one under the cursor.
-            session->clickPixel(e.button.x - boardRect.x, e.button.y - boardRect.y,
-                                boardRect.width, boardRect.height);
+            shell->session()->clickPixel(e.button.x - boardRect.x,
+                                         e.button.y - boardRect.y, boardRect.width,
+                                         boardRect.height);
           } else if (e.button.button == SDL_BUTTON_RIGHT) {
             orbiting = true;
           }
@@ -278,37 +336,46 @@ int main(int argc, char** argv) {
           if (e.button.button == SDL_BUTTON_RIGHT) orbiting = false;
           break;
         case SDL_EVENT_MOUSE_MOTION:
-          if (orbiting) {
+          if (orbiting && shell->hasGame()) {
             app::Action a;
             a.kind = app::ActionKind::Orbit;
-            a.dx = e.motion.xrel * 0.01f;
-            a.dy = e.motion.yrel * -0.01f;
-            (void)session->apply(a);
+            a.dx = e.motion.xrel * 0.01f * settings.orbitSensitivity;
+            a.dy = e.motion.yrel * -0.01f * settings.orbitSensitivity *
+                   (settings.invertOrbitY ? -1.0f : 1.0f);
+            (void)shell->session()->apply(a);
           }
           break;
         case SDL_EVENT_MOUSE_WHEEL: {
-          if (consumed) break;
+          if (consumed || !shell->hasGame()) break;
           app::Action a;
           a.kind = app::ActionKind::Zoom;
-          a.dx = e.wheel.y > 0 ? 0.9f : 1.1f;
-          (void)session->apply(a);
+          const float step = 0.1f * settings.zoomSensitivity;
+          a.dx = e.wheel.y > 0 ? 1.0f - step : 1.0f + step;
+          (void)shell->session()->apply(a);
           break;
         }
         case SDL_EVENT_KEY_DOWN: {
           if (consumed) break;
           app::Action a;
           switch (e.key.key) {
-            case SDLK_Q:
             case SDLK_ESCAPE:
-              running = false;
+              // Esc is "step back one screen", which from the board means pause.
+              shell->back();
+              break;
+            case SDLK_Q:
+              if (shell->screen() == app::Screen::MainMenu) running = false;
               break;
             case SDLK_U:
-              a.kind = app::ActionKind::Undo;
-              (void)session->apply(a);
+              if (inGame) {
+                a.kind = app::ActionKind::Undo;
+                (void)shell->session()->apply(a);
+              }
               break;
             case SDLK_R:
-              a.kind = app::ActionKind::Reset;
-              (void)session->apply(a);
+              if (inGame) {
+                a.kind = app::ActionKind::Reset;
+                (void)shell->session()->apply(a);
+              }
               break;
             default:
               break;
@@ -325,42 +392,43 @@ int main(int argc, char** argv) {
     lastFrame = now;
     if (dt > 0.0f) fps = fps * 0.9f + (1.0f / dt) * 0.1f;
 
-    // The board shows what just happened and who is in trouble; both come from the
-    // engine, so the renderer has no opinion of its own to be wrong about.
-    const auto& history = session->game().moveHistory();
-    if (history.empty()) {
-      renderer->setLastMove(kInvalidCell, kInvalidCell);
-    } else {
-      renderer->setLastMove(history.back().from, history.back().to);
-    }
-    renderer->setCheckCell(session->game().inCheck()
-                               ? session->game().position().findRoyal(
-                                     session->game().position().sideToMove())
-                               : kInvalidCell);
-
 #ifdef CB_HAVE_IMGUI
     (*ui)->newFrame();
-    const render::UiRequest request = (*ui)->build(*session, library, variantName, fps);
+    const render::UiRequest request = (*ui)->build(*shell, fps);
     (*ui)->endFrame();
+
+    if (request.quit) running = false;
+    if (!request.loadVariant.empty() && request.loadVariant != shell->currentVariant()) {
+      (void)shell->startGame(request.loadVariant);
+      renderer->setOptions(optionsFrom(shell->settings()));
+    }
+    if (request.settingsChanged) {
+      shell->applySettings();
+      renderer->setOptions(optionsFrom(shell->settings()));
+    }
+    if (request.toggleFullscreen) {
+      SDL_SetWindowFullscreen(window->handle(), shell->settings().fullscreen);
+    }
     if (request.boardRect[2] > 0) {
       boardRect = render::BoardRect{request.boardRect[0], request.boardRect[1],
                                     request.boardRect[2], request.boardRect[3]};
     }
-    if (request.quit) running = false;
-    if (!request.loadVariant.empty() && request.loadVariant != variantName) {
-      std::string loadError;
-      if (auto fresh = openVariant(request.loadVariant, loadError); fresh != nullptr) {
-        session = std::move(fresh);
-        variantName = request.loadVariant;
-      } else {
-        std::fprintf(stderr, "cannot load '%s': %s\n", request.loadVariant.c_str(),
-                     loadError.c_str());
-      }
-    }
+#else
+    const render::UiRequest request{};
 #endif
 
-    const auto instances =
-        renderer->buildInstances(session->snapshot(), session->viewConfig());
+    render::InstanceSet instances;
+    view::OrbitCamera camera;
+    if (shell->showsBoard()) {
+      if (boardRect.valid()) {
+        shell->session()->setBoardAspect(boardRect.width / boardRect.height);
+      }
+      syncMarks(*renderer, *shell->session());
+      instances = renderer->buildInstances(shell->session()->snapshot(),
+                                           shell->session()->viewConfig());
+      camera = shell->session()->camera();
+    }
+
     const auto overlay = [&](VkCommandBuffer cmd) {
 #ifdef CB_HAVE_IMGUI
       (*ui)->record(cmd);
@@ -368,8 +436,7 @@ int main(int argc, char** argv) {
       (void)cmd;
 #endif
     };
-    if (auto ok =
-            renderer->render(*target, instances, session->camera(), overlay, boardRect);
+    if (auto ok = renderer->render(*target, instances, camera, overlay, boardRect);
         !ok.has_value()) {
       std::fprintf(stderr, "render failed: %s\n", ok.error().format().c_str());
       break;
@@ -378,6 +445,11 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "present failed: %s\n", ok.error().format().c_str());
       break;
     }
+
+#ifdef CB_HAVE_IMGUI
+    // Rescaling rebuilds the font atlas, so it happens between frames, never inside one.
+    if (request.applyScale) (void)(*ui)->setScale(shell->settings().guiScale);
+#endif
   }
   return 0;
 }

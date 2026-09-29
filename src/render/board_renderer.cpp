@@ -15,6 +15,13 @@ struct PushConstants {
 };
 static_assert(sizeof(PushConstants) == 80);
 
+struct BackdropPush {
+  float inner[4]{};
+  float outer[4]{};
+  float params[4]{0.5f, 0.34f, 1.25f, 0.62f};
+};
+static_assert(sizeof(BackdropPush) == 48);
+
 void toFloat4(const view::Rgba& c, float out[4]) {
   out[0] = c.r;
   out[1] = c.g;
@@ -207,6 +214,101 @@ Result<void> BoardRenderer::buildPipeline() {
   return {};
 }
 
+Result<void> BoardRenderer::buildBackdropPipeline() {
+  const auto vs = makeShader(*ctx_, spv::backdrop_vert_spv_span());
+  if (!vs.has_value()) return fail(vs.error().code, vs.error().message);
+  backdropVert_ = *vs;
+  const auto fs = makeShader(*ctx_, spv::backdrop_frag_spv_span());
+  if (!fs.has_value()) return fail(fs.error().code, fs.error().message);
+  backdropFrag_ = *fs;
+
+  VkPushConstantRange push{};
+  push.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  push.size = sizeof(BackdropPush);
+  VkPipelineLayoutCreateInfo plci{};
+  plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  plci.pushConstantRangeCount = 1;
+  plci.pPushConstantRanges = &push;
+  if (const VkResult r =
+          vkCreatePipelineLayout(ctx_->device(), &plci, nullptr, &backdropLayout_);
+      r != VK_SUCCESS) {
+    return fail(ErrorCode::Internal, "cannot create the backdrop layout: " + describe(r));
+  }
+
+  // No vertex input at all: the shader derives a full-screen triangle from the index.
+  VkPipelineVertexInputStateCreateInfo vi{};
+  vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+  VkPipelineInputAssemblyStateCreateInfo ia{};
+  ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+  ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  VkPipelineViewportStateCreateInfo vp{};
+  vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+  vp.viewportCount = 1;
+  vp.scissorCount = 1;
+  VkPipelineRasterizationStateCreateInfo rs{};
+  rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+  rs.polygonMode = VK_POLYGON_MODE_FILL;
+  rs.cullMode = VK_CULL_MODE_NONE;
+  rs.lineWidth = 1.0f;
+  VkPipelineMultisampleStateCreateInfo ms{};
+  ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+  ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+  // It is behind everything, so it neither tests nor writes depth.
+  VkPipelineDepthStencilStateCreateInfo ds{};
+  ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+  VkPipelineColorBlendAttachmentState blend{};
+  blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                         VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+  VkPipelineColorBlendStateCreateInfo cb{};
+  cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+  cb.attachmentCount = 1;
+  cb.pAttachments = &blend;
+  const VkDynamicState dynamics[2]{VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+  VkPipelineDynamicStateCreateInfo dy{};
+  dy.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+  dy.dynamicStateCount = 2;
+  dy.pDynamicStates = dynamics;
+
+  VkPipelineShaderStageCreateInfo stages[2]{};
+  stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+  stages[0].module = backdropVert_;
+  stages[0].pName = "main";
+  stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+  stages[1].module = backdropFrag_;
+  stages[1].pName = "main";
+
+  const VkFormat colorFormat = OffscreenTarget::kColorFormat;
+  VkPipelineRenderingCreateInfo rendering{};
+  rendering.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+  rendering.colorAttachmentCount = 1;
+  rendering.pColorAttachmentFormats = &colorFormat;
+  rendering.depthAttachmentFormat = OffscreenTarget::kDepthFormat;
+
+  VkGraphicsPipelineCreateInfo gpi{};
+  gpi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+  gpi.pNext = &rendering;
+  gpi.stageCount = 2;
+  gpi.pStages = stages;
+  gpi.pVertexInputState = &vi;
+  gpi.pInputAssemblyState = &ia;
+  gpi.pViewportState = &vp;
+  gpi.pRasterizationState = &rs;
+  gpi.pMultisampleState = &ms;
+  gpi.pDepthStencilState = &ds;
+  gpi.pColorBlendState = &cb;
+  gpi.pDynamicState = &dy;
+  gpi.layout = backdropLayout_;
+  if (const VkResult r = vkCreateGraphicsPipelines(ctx_->device(), VK_NULL_HANDLE, 1,
+                                                   &gpi, nullptr, &backdropPipeline_);
+      r != VK_SUCCESS) {
+    return fail(ErrorCode::Internal,
+                "cannot create the backdrop pipeline: " + describe(r));
+  }
+  return {};
+}
+
 Result<void> BoardRenderer::uploadGeometry() {
   const VkDeviceSize vbytes = meshes_.vertices.size() * sizeof(MeshVertex);
   const VkDeviceSize ibytes = meshes_.indices.size() * sizeof(std::uint16_t);
@@ -312,17 +414,17 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     view::Rgba fill = (parity % 2 == 0) ? theme_.boardDark : theme_.boardLight;
     if (pl.cell == p.selected()) {
       fill = theme_.ember;
-    } else if (isHighlighted(pl.cell)) {
+    } else if (options_.showLegalMoves && isHighlighted(pl.cell)) {
       // A legal destination that would take something is marked differently from an
       // empty one, so a capture never comes as a surprise.
       fill = p.at(pl.cell).empty() ? mix(fill, theme_.moss, 0.72f)
                                    : mix(fill, theme_.blood, 0.62f);
-    } else if (pl.cell == lastFrom_ || pl.cell == lastTo_) {
+    } else if (options_.showLastMove && (pl.cell == lastFrom_ || pl.cell == lastTo_)) {
       fill = mix(fill, theme_.ember, 0.22f);
     }
     toFloat4(fill, cell.color);
 
-    const float mask = seamMask(c);
+    const float mask = options_.showSeams ? seamMask(c) : 0.0f;
     if (mask > 0) {
       toFloat4(theme_.rift, cell.edge);
       cell.edgeMask = mask;
@@ -336,15 +438,60 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     body.center[0] = pl.x;
     body.center[1] = pl.y;
     body.center[2] = pl.z + half.z;
-    const float h = height[piece.type];
+    // The archetype already gives the piece its own height; this blends in the extra
+    // scaling that encodes value. At 0 every piece stands at its natural size - which is
+    // still different per shape - and nothing ever ends up shorter than its own model.
+    const float h = 1.0f + (height[piece.type] - 1.0f) * options_.pieceHeightScale;
     body.scale[0] = 0.8f;
     body.scale[1] = 0.8f;
     body.scale[2] = 0.8f * h;
     view::Rgba pieceColor =
         piece.colorOf() == Color::White ? theme_.whitePiece : theme_.blackPiece;
-    if (pl.cell == checkCell_) pieceColor = mix(pieceColor, theme_.blood, 0.65f);
+    if (options_.showCheck && pl.cell == checkCell_) {
+      pieceColor = mix(pieceColor, theme_.blood, 0.65f);
+    }
     toFloat4(pieceColor, body.color);
     byShape[static_cast<std::size_t>(shape[piece.type])].push_back(body);
+  }
+
+  // A plinth under each sub-board, so the cells sit on something instead of floating in
+  // the dark. One per slice, because a grid of sub-boards should read as separate boards.
+  {
+    struct Extent {
+      float minX{0}, maxX{0}, minY{0}, maxY{0}, z{0};
+      bool seen{false};
+    };
+    std::vector<Extent> extents(view::enumerateSlices(v.dims, cfg).size());
+    for (const view::Placement& pl : placements) {
+      Extent& e = extents[pl.slice];
+      if (!e.seen) {
+        e = Extent{pl.x, pl.x, pl.y, pl.y, pl.z, true};
+        continue;
+      }
+      e.minX = std::min(e.minX, pl.x);
+      e.maxX = std::max(e.maxX, pl.x);
+      e.minY = std::min(e.minY, pl.y);
+      e.maxY = std::max(e.maxY, pl.y);
+      e.z = std::min(e.z, pl.z);
+    }
+    // Warm, dark, and clearly not the ground: a table the board is standing on.
+    const view::Rgba wood = mix(theme_.ink, theme_.rule, 0.85f);
+    for (const Extent& e : extents) {
+      if (!e.seen) continue;
+      Instance plinth{};
+      plinth.center[0] = (e.minX + e.maxX) * 0.5f;
+      plinth.center[1] = (e.minY + e.maxY) * 0.5f;
+      plinth.center[2] = e.z - half.z - 0.13f;
+      plinth.scale[0] = ((e.maxX - e.minX) * 0.5f + 0.78f) / half.x;
+      plinth.scale[1] = ((e.maxY - e.minY) * 0.5f + 0.78f) / half.y;
+      plinth.scale[2] = 0.13f / half.z;
+      toFloat4(wood, plinth.color);
+      // A warm rim around the edge of the table, which is what makes it read as an
+      // object rather than as a darker rectangle.
+      toFloat4(mix(theme_.emberDeep, theme_.rule, 0.45f), plinth.edge);
+      plinth.edgeMask = 15.0f;
+      byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(plinth);
+    }
   }
 
   InstanceSet out;
@@ -515,6 +662,10 @@ BoardRenderer& BoardRenderer::operator=(BoardRenderer&& o) noexcept {
   std::swap(frag_, o.frag_);
   std::swap(layout_, o.layout_);
   std::swap(pipeline_, o.pipeline_);
+  std::swap(backdropVert_, o.backdropVert_);
+  std::swap(backdropFrag_, o.backdropFrag_);
+  std::swap(backdropLayout_, o.backdropLayout_);
+  std::swap(backdropPipeline_, o.backdropPipeline_);
   std::swap(vertexBuffer_, o.vertexBuffer_);
   std::swap(vertexMem_, o.vertexMem_);
   std::swap(indexBuffer_, o.indexBuffer_);
@@ -530,6 +681,12 @@ BoardRenderer::~BoardRenderer() {
   const VkDevice d = ctx_->device();
   if (pipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(d, pipeline_, nullptr);
   if (layout_ != VK_NULL_HANDLE) vkDestroyPipelineLayout(d, layout_, nullptr);
+  if (backdropPipeline_ != VK_NULL_HANDLE)
+    vkDestroyPipeline(d, backdropPipeline_, nullptr);
+  if (backdropLayout_ != VK_NULL_HANDLE)
+    vkDestroyPipelineLayout(d, backdropLayout_, nullptr);
+  if (backdropVert_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, backdropVert_, nullptr);
+  if (backdropFrag_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, backdropFrag_, nullptr);
   if (vert_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, vert_, nullptr);
   if (frag_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, frag_, nullptr);
   for (auto [buf, mem] :

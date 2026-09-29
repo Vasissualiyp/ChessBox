@@ -27,6 +27,7 @@ layout(location = 2) out vec2 fragLocal;
 layout(location = 3) out vec4 fragEdge;
 layout(location = 4) out float fragEdgeMask;
 layout(location = 5) out float fragHeight;
+layout(location = 6) out vec2 fragEdgeInset;
 
 void main() {
     vec3 world = instCenter + inPosition * instScale;
@@ -37,4 +38,11 @@ void main() {
     fragEdge = instEdge;
     fragEdgeMask = instEdgeMask;
     fragHeight = inHeight;
+
+    // Where the seam band begins, in the box's own coordinates. Derived from the
+    // instance's scale so the band is a constant *world* width: without this a large
+    // instance - the plinth under the board - gets a border a third of its width, which
+    // stops reading as a rim and starts reading as a paint job.
+    const float kBandWorld = 0.085;
+    fragEdgeInset = vec2(0.5) - kBandWorld / max(abs(instScale.xy), vec2(0.001));
 }

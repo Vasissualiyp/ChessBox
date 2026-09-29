@@ -110,11 +110,10 @@ TEST_CASE("instances are built from a snapshot without a GPU", "[render]") {
   const view::ViewConfig cfg = view::ViewConfig::forBoard(v.dims);
   const InstanceSet set = renderer.buildInstances(snap, cfg);
 
-  // 64 cells plus 32 pieces, one instance each.
-  REQUIRE(set.size() == 64 + 32);
-  // Cells are one batch; the pieces are spread over the archetypes their movement
-  // implies, and every instance belongs to exactly one batch.
-  REQUIRE(set.batches[static_cast<std::size_t>(Archetype::Cell)].count == 64);
+  // 64 cells, 32 pieces, and the plinth the board stands on - which is drawn with the
+  // same slab mesh as a cell, so it lands in the cell batch.
+  REQUIRE(set.size() == 64 + 32 + 1);
+  REQUIRE(set.batches[static_cast<std::size_t>(Archetype::Cell)].count == 64 + 1);
   std::uint32_t counted = 0;
   for (const auto& b : set.batches) counted += b.count;
   REQUIRE(counted == set.size());
@@ -152,21 +151,29 @@ TEST_CASE("instances are built from a snapshot without a GPU", "[render]") {
 TEST_CASE("a glued board marks its seams, a box board does not", "[render]") {
   // The cold colour is spent only where the board stops being flat, and the mask says
   // *which* sides are glued - so a player can pair the two edges by eye.
+  //
+  // The plinth the board stands on carries a warm rim of its own, so a seam is
+  // identified by its colour rather than merely by having an edge.
   BoardRenderer renderer;
+  const view::Rgba rift = renderer.theme().rift;
+  const auto isSeam = [&](const Instance& i) {
+    return i.edgeMask > 0.0f && std::abs(i.edge[0] - rift.r) < 0.01f &&
+           std::abs(i.edge[2] - rift.b) < 0.01f;
+  };
 
   const VariantSpec box = test::loadVariant("standard");
   const Position bp = Position::startPosition(box);
   const InstanceSet plain = renderer.buildInstances(view::PositionView::capture(bp),
                                                     view::ViewConfig::forBoard(box.dims));
-  for (const Instance& i : plain.instances) REQUIRE(i.edgeMask == 0.0f);
+  for (const Instance& i : plain.instances) REQUIRE_FALSE(isSeam(i));
 
   const VariantSpec torus = test::loadVariant("torus");
   const Position tp = Position::startPosition(torus);
-  const InstanceSet glued = renderer.buildInstances(
-      view::PositionView::capture(tp), view::ViewConfig::forBoard(torus.dims));
+  const InstanceSet glued = renderer.buildInstances(view::PositionView::capture(tp),
+                                                    view::ViewConfig::forBoard(torus.dims));
   int marked = 0;
   for (const Instance& i : glued.instances) {
-    if (i.edgeMask > 0.0f) ++marked;
+    if (isSeam(i)) ++marked;
   }
   // Both axes are glued, so the whole border is a seam: 8x8 minus the 6x6 interior.
   REQUIRE(marked == 64 - 36);

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "app/session.hpp"
+#include "app/shell.hpp"
 #include "render/vulkan_context.hpp"
 #include "view/theme.hpp"
 
@@ -26,6 +27,11 @@ struct UiRequest {
   /// drawn and picked in this rectangle, so it is centred in what the player can
   /// actually see rather than behind a panel.
   float boardRect[4]{0, 0, 0, 0};
+  /// A setting changed and should be written to disk.
+  bool settingsChanged{false};
+  /// The interface scale changed; fonts have to be rebuilt at the new size.
+  bool applyScale{false};
+  bool toggleFullscreen{false};
 };
 
 /// The game's interface: rails, ledger, status, promotion, library.
@@ -51,9 +57,15 @@ class Ui {
   [[nodiscard]] bool capturesKeyboard() const;
 
   void newFrame();
-  /// Build the whole interface for this frame.
-  UiRequest build(app::Session& session, const std::vector<std::string>& library,
-                  const std::string& currentVariant, float fps);
+
+  /// Build whichever screen the shell says the player is on.
+  UiRequest build(app::Shell& shell, float fps);
+
+  /// Rebuild the fonts at a new interface scale.
+  ///
+  /// The atlas is regenerated rather than the existing glyphs stretched: a scale option
+  /// that produces blurry text is not worth having. Must not be called inside a frame.
+  Result<void> setScale(float scale);
   /// Finish the frame and record its draw commands into the board's render pass.
   void endFrame();
   void record(VkCommandBuffer cmd);
@@ -63,6 +75,18 @@ class Ui {
   void applyStyle();
   Result<void> loadFonts();
 
+  UiRequest buildGameHud(app::Shell& shell, float fps);
+  /// Pixels at the current interface scale. Every hardcoded size goes through this, or
+  /// the scale option moves the text and leaves the panels behind.
+  [[nodiscard]] float px(float v) const noexcept { return v * scale_; }
+  UiRequest buildMainMenu(app::Shell& shell);
+  UiRequest buildNewGame(app::Shell& shell);
+  UiRequest buildPause(app::Shell& shell);
+  UiRequest buildSettings(app::Shell& shell);
+  UiRequest buildCreator(app::Shell& shell);
+  UiRequest buildGameInfo(app::Shell& shell);
+  UiRequest buildPieceMoves(app::Shell& shell);
+
   const VulkanContext* ctx_{nullptr};
   SDL_Window* window_{nullptr};
   view::Theme theme_{};
@@ -70,6 +94,11 @@ class Ui {
   void* fontDisplay_{nullptr};  ///< ImFont*, kept opaque so the header stays light
   void* fontBody_{nullptr};
   void* fontSmall_{nullptr};
+  float scale_{1.0f};
+  /// Which variant the new-game screen is showing details for.
+  std::string pickedVariant_;
+  /// Which pair of axes the "axes" control will show next.
+  int axisRotation_{0};
   bool initialised_{false};
 };
 

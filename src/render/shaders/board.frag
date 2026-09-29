@@ -11,6 +11,7 @@ layout(location = 2) in vec2 fragLocal;
 layout(location = 3) in vec4 fragEdge;
 layout(location = 4) in float fragEdgeMask;
 layout(location = 5) in float fragHeight;
+layout(location = 6) in vec2 fragEdgeInset;
 
 layout(push_constant) uniform Push {
     mat4 viewProj;
@@ -43,15 +44,19 @@ void main() {
     // on the sides the geometry actually identified, so a player can pair the two edges
     // by eye rather than being told the whole cell is special.
     if (fragEdge.a > 0.0 && n.z > 0.35) {
-        const float kInner = 0.33;   // the slab's half-extent is 0.46
+        vec2 inset = clamp(fragEdgeInset, vec2(0.0), vec2(0.49));
         bool onEdge =
-            (maskHas(fragEdgeMask, 0) && fragLocal.x < -kInner) ||
-            (maskHas(fragEdgeMask, 1) && fragLocal.x >  kInner) ||
-            (maskHas(fragEdgeMask, 2) && fragLocal.y < -kInner) ||
-            (maskHas(fragEdgeMask, 3) && fragLocal.y >  kInner);
+            (maskHas(fragEdgeMask, 0) && fragLocal.x < -inset.x) ||
+            (maskHas(fragEdgeMask, 1) && fragLocal.x >  inset.x) ||
+            (maskHas(fragEdgeMask, 2) && fragLocal.y < -inset.y) ||
+            (maskHas(fragEdgeMask, 3) && fragLocal.y >  inset.y) ||
+            // The sides of the box always take the rim, which is what gives the board's
+            // plinth a lit edge you can see from a low angle.
+            (fragEdgeMask >= 15.0 && n.z < 0.35);
         if (onEdge) {
-            float glow = smoothstep(kInner, 0.46, max(abs(fragLocal.x), abs(fragLocal.y)));
-            rgb = mix(rgb, fragEdge.rgb, clamp(0.35 + 0.65 * glow, 0.0, 1.0));
+            float reach = max(abs(fragLocal.x) - inset.x, abs(fragLocal.y) - inset.y);
+            float glow = clamp(reach / max(0.5 - min(inset.x, inset.y), 0.001), 0.0, 1.0);
+            rgb = mix(rgb, fragEdge.rgb, clamp(0.30 + 0.55 * glow, 0.0, 1.0));
         }
     }
 

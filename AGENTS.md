@@ -39,6 +39,7 @@ nix flake check                  # THE gate: both compilers, sanitizers, coverag
 ./build/dev/src/gui/chessbox_gui                       # standard chess
 ./build/dev/src/gui/chessbox_gui klein                 # any variant in variants/
 ./build/dev/src/gui/chessbox_gui cube5 --shot out.ppm --script "click c1"
+./build/dev/src/gui/chessbox_gui --shot out.ppm --screen settings   # any screen
 ```
 
 **A build directory remembers which shell configured it.** One configured under
@@ -76,7 +77,7 @@ Each layer is a CMake target linking only to lower layers, so a violation is a
 | L110 | `src/cli` | the scriptable command-line front end |
 | L110 | `src/gui` | the playable window's main loop (exe only) |
 | L100 | `src/render` | Vulkan, offscreen target, instanced renderer, piece meshes, ImGui panels |
-| L95 | `src/app` | interaction: actions in, snapshot out; no front end in it |
+| L95 | `src/app` | screens, settings, interaction: actions in, snapshot out |
 | L90 | `src/io` | variant TOML loader, notation, FEN-N, ASCII board, replay |
 | L80 | `src/game` | history, undo, adjudication, repetition, clocks |
 | L70 | `src/temporal` | turn/timeline axes, present, branching (M6) |
@@ -165,5 +166,13 @@ These are the ones that have actually cost time here, not hypotheticals.
 - The palette is `view::Theme`, one struct. Retheming must not touch the renderer.
 - Cyan (`rift`) is reserved for geometry that is not flat: seams, wrapped moves, extra
   axes. Spending it on anything else breaks the one rule a player learns by playing.
+- **Every hardcoded pixel size in the interface goes through `Ui::px()`.** A missed one
+  scales the text and leaves the panel behind. `widgets::menuEntry` takes its scale as a
+  required argument for exactly this reason - a default let four menu rows draw at the
+  wrong size and the menu looked ragged.
+- Draw overlays from `ImGui::GetItemRectMin()`, never from the cursor position captured
+  before the item: they are not always the same.
+- The seam rim is a constant *world* width, derived in the shader from the instance's
+  scale. A fraction-of-the-box band turns the board's plinth into a solid orange slab.
 - Debug is pinned to `-O0` because nix injects `-O2`; a Catch2 `[.]`-hidden test still
   runs if a filter matches any of its other tags.

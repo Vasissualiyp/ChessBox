@@ -48,10 +48,15 @@ set_tests_properties(property PROPERTIES TIMEOUT 900)
 # validation layers say anything. It is the only automated check that the panels and the
 # board agree about where the board is, and it needs no compositor to run.
 if(TARGET chessbox_gui)
-  add_test(NAME gui-frame
-    COMMAND chessbox_gui standard --shot ${CMAKE_BINARY_DIR}/render-captures/gui.ppm
-            --script "click e2"
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-  set_tests_properties(gui-frame PROPERTIES LABELS "render;gui" TIMEOUT 120
-    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  # Every screen, not just the board: a menu that fails to lay out, or a panel that makes
+  # the validation layers complain, is caught here rather than by someone opening it.
+  foreach(screen board menu newgame pause settings creator info pieces)
+    add_test(NAME gui-${screen}
+      COMMAND chessbox_gui standard
+              --shot ${CMAKE_BINARY_DIR}/render-captures/gui-${screen}.ppm
+              --screen ${screen} --script "click e2"
+      WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(gui-${screen} PROPERTIES LABELS "render;gui" TIMEOUT 120
+      ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  endforeach()
 endif()

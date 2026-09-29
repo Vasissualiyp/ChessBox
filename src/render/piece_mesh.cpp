@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "render/piece_mesh.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 
@@ -279,16 +280,23 @@ Archetype archetypeFor(const PieceTypeDef& piece) {
 float heightFor(const PieceTypeDef& piece) {
   if (piece.heightPermille > 0) return static_cast<float>(piece.heightPermille) / 1000.0f;
 
-  // No declaration: infer from how far the piece can go. Unlimited sliders stand tall,
-  // single-step pieces stay low, so an unfamiliar army still has a readable hierarchy.
-  float tallest = 0.8f;
+  // The archetypes already differ in height - a dome is short, a monolith is tall - so
+  // this is a multiplier *around* that, not a replacement for it. It reads how far and
+  // how freely the piece moves, which is the engine's best evidence of what it is worth,
+  // and spreads the result widely enough that an unfamiliar army has a visible hierarchy.
+  float reach = 0.0f;
+  std::size_t widest = 1;
   for (const MoveAtom& a : piece.atoms) {
-    const float reach =
-        a.maxK == kUnlimited ? 1.0f : std::min(1.0f, static_cast<float>(a.maxK) / 4.0f);
-    tallest = std::max(tallest, 0.8f + 0.35f * reach);
+    widest = std::max(widest, a.mags.size());
+    const float atomReach =
+        a.maxK == kUnlimited ? 1.0f : std::min(1.0f, static_cast<float>(a.maxK) / 3.0f);
+    reach = std::max(reach, atomReach);
   }
-  if (piece.royal) tallest = std::max(tallest, 1.25f);
-  return tallest;
+  float scale = 0.92f + 0.30f * reach + 0.08f * static_cast<float>(widest - 1);
+  // Several different ways of moving is itself a sign of a powerful piece.
+  if (piece.atoms.size() >= 2) scale += 0.10f;
+  if (piece.royal) scale = std::max(scale, 1.45f);
+  return std::clamp(scale, 0.85f, 1.6f);
 }
 
 MeshLibrary MeshLibrary::build() {
