@@ -90,6 +90,10 @@ class Ui {
   /// The two-pane frame every menu screen sits in: the drifting field, the screen's
   /// own object, and the depth ladder. Returns the rectangle the menu itself gets.
   void drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax);
+  /// The piece designer's left half: a board with the selected piece at its centre and
+  /// the cells it can reach marked quiet or capture. Reads the editor's atoms and walks
+  /// them, so it shows the real movement rather than a picture of it.
+  void drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& max);
 
   /// Where a pane sits in the shell's transition, as the scale and fade the pane is
   /// drawn with. The arriving pane and the departing ghost ask for their own.

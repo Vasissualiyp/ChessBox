@@ -406,6 +406,41 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     return request;
   }
 
+  // Help: what a piece's movement actually is, in the engine's own terms. Reached from
+  // the piece designer, so the words on it are the words the controls use.
+  if (editorPage_ == 2) {
+    screenTitle("How movement works", t, display, scale_, 1.6f);
+    ImGui::PushFont(small);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextUnformatted(
+        "A piece is a list of atoms. An atom is a multiset of magnitudes - [1] is one "
+        "step, [1,2] is a knight's leap - expanded over every pair of axes and every "
+        "sign, so the same atom means the rook's four moves in 2-D and the knight's "
+        "twenty-four in 4-D.");
+    ImGui::Spacing();
+    ImGui::TextUnformatted(
+        "Mode: slide runs until something blocks it, leap ignores whatever is between, "
+        "hop needs a hurdle to jump over. Capture: may takes or stays put, must only "
+        "takes, cannot only moves to an empty cell - a pawn's push is a cannot atom and "
+        "its capture is a must. Ride repeats the atom to the edge; forward keeps only "
+        "the half facing the orientation axis, which is what makes a piece pawn-like "
+        "in any number of dimensions.");
+    ImGui::Spacing();
+    ImGui::TextUnformatted(
+        "Compose by adding atoms. Rook [1] plus bishop [1,1] is a queen in 2-D - the "
+        "same two atoms, reinterpreted, are a different piece on a higher-dimensional "
+        "board. The board on the left previews the selected piece's reach from the "
+        "centre: moss is a quiet move, red a capture.");
+    ImGui::PopTextWrapPos();
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+    ImGui::Dummy(ImVec2(0, px(12)));
+    if (button("BACK", t, px(120), false, false, true, display)) editorPage_ = 1;
+    endPane();
+    return request;
+  }
+
   screenTitle("Piece designer", t, display, scale_, 1.9f);
 
   app::Editor* editor = shell.editor();
@@ -461,6 +496,8 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   if (button("SAVE", t, px(84), editor->dirty(), false, false, display)) {
     (void)shell.saveEditor();
   }
+  ImGui::SameLine();
+  if (button("HELP", t, px(84), false, true, false, display)) editorPage_ = 2;
   ImGui::Dummy(ImVec2(0, px(8)));
 
   const std::vector<std::string> names = editor->pieceNames();

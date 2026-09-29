@@ -13,6 +13,7 @@
 #include <imgui_impl_vulkan.h>
 
 #include "io/notation.hpp"
+#include "pieces/atom.hpp"
 #include "render/deco.hpp"
 #include "render/offscreen_target.hpp"
 #include "render/piece_icon.hpp"
@@ -391,6 +392,12 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
              outZoom, 1.0f - outE);
   }
 
+  // The piece designer's object *is* a board: the selected piece at its centre and the
+  // cells its atoms reach, in the half the decoration would otherwise occupy.
+  if (shell.screen() == app::Screen::Editor && editorPage_ == 1) {
+    drawEditorPreview(shell, decoMin, decoMax);
+  }
+
   // A hairline between the object and the menu, and the depth ladder on the far left.
   dl->AddLine(ImVec2(split, min.y), ImVec2(split, max.y), u32(theme_.rule, 0.6f));
 
@@ -418,6 +425,75 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
                   u32(on ? theme_.boneDim : theme_.rule), rungs[i]);
     }
   }
+}
+
+void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& max) {
+  const app::Editor* editor = shell.editor();
+  if (editor == nullptr) return;
+  const std::vector<std::string> names = editor->pieceNames();
+  if (names.empty()) return;
+  const int index = std::clamp(editorPiece_, 0, static_cast<int>(names.size()) - 1);
+  auto atoms = editor->pieceAtoms(names[static_cast<std::size_t>(index)]);
+  if (!atoms.has_value()) return;
+
+  constexpr int kN = 10;
+  const ImVec2 span(max.x - min.x, max.y - min.y);
+  const float side = std::min(span.x, span.y) * 0.72f;
+  const float cell = side / static_cast<float>(kN);
+  const ImVec2 origin(min.x + (span.x - side) * 0.5f, min.y + (span.y - side) * 0.5f);
+  ImDrawList* dl = ImGui::GetBackgroundDrawList();
+  const view::Theme& t = theme_;
+
+  // The board replaces the decorative object here: the object *is* the board.
+  dl->AddRectFilled(min, max, u32(t.ink));
+
+  bool quiet[kN][kN] = {};
+  bool capture[kN][kN] = {};
+  const int cx = kN / 2;
+  const int cy = kN / 2;
+  for (const MoveAtom& a : *atoms) {
+    if (a.mode == MoveMode::Hop) continue;  // needs a hurdle; none on an empty board
+    const std::vector<Direction> dirs =
+        a.oriented ? expandAtomOriented(a.mags, 2, 0, Color::White)
+                   : expandAtom(a.mags, 2);
+    const int steps =
+        a.mode == MoveMode::Slide ? kN - 1 : std::min(static_cast<int>(a.maxK), kN - 1);
+    for (const Direction& d : dirs) {
+      for (int n = 1; n <= steps; ++n) {
+        const int x = cx + n * d.v[0];
+        const int y = cy + n * d.v[1];
+        if (x < 0 || x >= kN || y < 0 || y >= kN) break;
+        if (a.capture == CapturePolicy::Must) {
+          capture[y][x] = true;
+        } else {
+          quiet[y][x] = true;
+        }
+      }
+    }
+  }
+
+  for (int y = 0; y < kN; ++y) {
+    for (int x = 0; x < kN; ++x) {
+      const ImVec2 a(origin.x + static_cast<float>(x) * cell,
+                     origin.y + static_cast<float>(y) * cell);
+      const ImVec2 b(a.x + cell, a.y + cell);
+      dl->AddRectFilled(a, b, u32(((x + y) & 1) != 0 ? t.boardDark : t.boardLight));
+      if (capture[y][x]) {
+        dl->AddRectFilled(a, b, u32(t.blood, 0.55f));
+      } else if (quiet[y][x]) {
+        dl->AddRectFilled(a, b, u32(t.moss, 0.5f));
+      }
+    }
+  }
+  dl->AddRect(origin, ImVec2(origin.x + side, origin.y + side), u32(t.rule, 0.8f));
+
+  PieceTypeDef def;
+  def.atoms = *atoms;
+  const Archetype shape = archetypeFor(def);
+  const ImVec2 centre(origin.x + (static_cast<float>(cx) + 0.5f) * cell,
+                      origin.y + (static_cast<float>(cy) + 0.5f) * cell);
+  drawPieceGlyph(dl, centre, cell * 0.42f, u32(t.bone), u32(t.boardLight), shape,
+                 iconStyle_);
 }
 
 float Ui::outEase() const noexcept {
