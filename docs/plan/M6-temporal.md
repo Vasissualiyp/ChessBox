@@ -66,9 +66,10 @@ time-travel rules subtly wrong, which is the dominant risk of this milestone.
 
 Configuration-only, each with tests, proving the framework claim:
 
-- **Toroidal timeline**: a periodic identification on the `l` axis (M3 machinery).
-- **Two multiverse axes**: `l1`, `l2` with the same policies — the policies are
-  written against "the set of multiverse axes", not against a single `l`.
+- **Toroidal timeline** - *planned, not required for M6*: a periodic identification on
+  the `l` axis (M3 machinery).
+- **Two multiverse axes** - *planned, not required for M6*: `l1`, `l2` with the same
+  policies, written against "the set of multiverse axes" rather than a single `l`.
 - **5D chess on a 5-torus**: 5 spatial + `t` + `l` = 7 axes, all spatial axes
   periodic. This is the spec's stated worst case; it must *load and play*, with a
   documented (possibly modest) performance figure rather than a promise.
@@ -90,3 +91,22 @@ is an identification block.
 6. The 7-axis torus variant loads and plays; its throughput is measured and
    documented.
 7. Dimension-lift invariance (M2.2) still holds with temporal axes present.
+
+## Status: the temporal model and 5D play ship; two generalizations planned
+
+Recorded 2026-09-29.
+
+`t` and `l` are ordinary lattice axes carrying their kinds (`AxisKind::Temporal`,
+`Multiverse`), with `pitch = 2` on the turn axis because boards along it alternate
+whose move it is (ADR-0013); boards are `(t, l)` slices, not separate objects. A
+`Game` opens on one board, appends a board per move, and branches a timeline when a
+piece travels into the past; the branch records the board it came from
+(`Timeline::parentLine`/`parentTurn` via `Multiverse`), which the shell draws as a
+connector between two rails. The present/turn/branch policies are data
+(`TemporalPolicy` in the variant's `[temporal]` block), and the 5d variant plays.
+
+**Deferred, and not required.** The transcribed reference corpus (M6.0) was not done -
+the rules were settled with the variant's author directly, and the golden perft counts
+pin the movement half. The two M6.4 axis generalizations - a **toroidal timeline** and
+**two multiverse axes** - are **planned**, not built: each is an axis declaration plus
+an identification block, so they cost data when wanted.

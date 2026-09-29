@@ -27,12 +27,12 @@ directory. Read `docs/ARCHITECTURE.md` first.
 | M1 | 2D generalized core engine, headless | standard chess, perft-exact to depth 6, ASCII CLI | **done** | [M1](M1-core-2d.md) |
 | M2 | N-dimensional generalization | 3D/4D boards, dimension-lift invariance | **done**, dim dispatch deliberately not built | [M2](M2-nd-generalization.md) |
 | M3 | Boundary geometry | cylinder, torus, Möbius, Klein, mirrors, N-D analogues | **done**, two gaps recorded | [M3](M3-geometry.md) |
-| M4 | Vulkan renderer + interaction | playable 2D/3D/4D+ board on screen | next | [M4](M4-renderer.md) |
-| M5 | Variant VM + custom fields | explosive, checkers, regional variants; quantum design | | [M5](M5-variant-vm.md) |
-| M6 | Temporal / multiverse (5D chess) | faithful 5D chess, generalized extra axes | | [M6](M6-temporal.md) |
-| M7 | Client–server multiplayer | authoritative server, lockstep-verified replay | | [M7](M7-net.md) |
-| M8 | Steam Workshop + packaging | variant packages, validation, signing, distribution | | [M8](M8-workshop.md) |
-| M9 | Trainable per-variant AI | search + learned eval, self-play harness | | [M9](M9-ai.md) |
+| M4 | Vulkan renderer + interaction | playable 2D/3D/4D+ board on screen | **done**, three deviations recorded | [M4](M4-renderer.md) |
+| M5 | Variant VM + custom fields | explosive, checkers, regional variants; quantum design | **done**, variant catalogue partial | [M5](M5-variant-vm.md) |
+| M6 | Temporal / multiverse (5D chess) | faithful 5D chess, generalized extra axes | **done**; two axis generalizations planned, not required | [M6](M6-temporal.md) |
+| M7 | Client–server multiplayer | authoritative server, lockstep-verified replay | not started | [M7](M7-net.md) |
+| M8 | Steam Workshop + packaging | variant packages, validation, signing, distribution | not started | [M8](M8-workshop.md) |
+| M9 | Trainable per-variant AI | search + learned eval, self-play harness | not started | [M9](M9-ai.md) |
 
 Each completed milestone's plan file ends with a **Status** section recording what was
 built, what was deferred, and why - including the places where the plan turned out to

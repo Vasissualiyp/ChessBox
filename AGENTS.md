@@ -5,8 +5,9 @@ Read this first. It is the map. Design rationale is in
 [`docs/plan/00-roadmap.md`](docs/plan/00-roadmap.md); decisions are in
 [`docs/adr/`](docs/adr/README.md).
 
-**Status: M0-M3 complete.** A headless, perft-exact engine with N-dimensional boards
-and non-trivial boundary topology. Next: M4, the Vulkan renderer.
+**Status: M0-M6 complete.** A playable, perft-exact engine with N-dimensional boards,
+non-trivial boundary topology, a Vulkan interface, a rule VM, and 5D-chess-style time
+travel. Next: M7 (multiplayer), M8 (Workshop), M9 (AI).
 See [`docs/plan/00-roadmap.md`](docs/plan/00-roadmap.md); each milestone plan ends with
 a status section recording what was built, what was deferred, and why.
 
