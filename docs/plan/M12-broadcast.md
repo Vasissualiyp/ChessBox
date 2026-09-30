@@ -133,3 +133,14 @@ Camera policy (M11.1) is data. M12 lets it be authored and shared:
 Planned, not started. Depends on M11 (hard), M9 and M8 (for the sharing and live halves).
 The frame-sequence exporter and the `[camera]` document extension are the two pieces that
 touch existing code; everything else is presentation over seams that already exist.
+
+### As built (2026-09-30)
+
+M12.1 cinema mode and M12.2 clip export are in: `--cinema` fills the frame with the board
+and records no interface; `--follow off|piece|route` and `--move-t 0..1` show the move
+camera in a capture; `--clip DIR --frames N --t0 a --t1 b` renders a numbered PPM sequence
+deterministically - a clip frame is byte-identical to the `--shot` at the same `t` - and
+muxing stays external.
+
+**Deferred to Wave 4:** camera presets (M12.4, needs M9) and live spectating (M12.5, needs
+M8). The `[camera]` document extension rides M12.4.

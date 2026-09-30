@@ -34,12 +34,12 @@ directory. Read `docs/ARCHITECTURE.md` first.
 | M8 | Client–server multiplayer | authoritative server, lockstep-verified replay | not started | [M8](M8-net.md) |
 | M9 | Steam Workshop + packaging | variant packages, validation, signing, distribution | not started | [M9](M9-workshop.md) |
 | M10 | Trainable per-variant AI | search + learned eval, self-play harness | not started | [M10](M10-ai.md) |
-| M11 | The move camera | follow a move through any geometry: seams, mirrors, grid axes, 4-D+ | not started | [M11](M11-move-camera.md) |
-| M12 | Spectator, replay and the clip | cinema view, deterministic clip export, shared camera presets, live spectating | not started, optional | [M12](M12-broadcast.md) |
-| M13 | Generic variant overtures | a data-only variant animates on the library screen: derived surface, derived move, no scene code | not started | [M13](M13-overtures.md) |
+| M11 | The move camera | follow a move through any geometry: seams, mirrors, grid axes, 4-D+ | in progress: pose/policy, portalled and grid-axis behaviour, session integration and docs done; image goldens deferred (a pose property test stands in) | [M11](M11-move-camera.md) |
+| M12 | Spectator, replay and the clip | cinema view, deterministic clip export, shared camera presets, live spectating | in progress: cinema mode and the frame-sequence clip exporter done; presets/spectator are Wave 4 | [M12](M12-broadcast.md) |
+| M13 | Generic variant overtures | a data-only variant animates on the library screen: derived surface, derived move, no scene code | in progress: signature, surface catalogue, selection and the demo move done (2-D 8x8); higher-D extruded grid outstanding | [M13](M13-overtures.md) |
 | M14 | Onboarding, tutorial and first-run polish | a stranger is playing something interesting within ten minutes and understands why it is different | not started | [M14](M14-onboarding.md) |
 | M15 | Campaign: the geometry ladder | a designed progression with a concept boss per leg, ending on a `t6` puzzle finale | not started | [M15](M15-campaign.md) |
-| M16 | Steam publishing: store, demo and release | Coming Soon page, build pipeline, demo/Next Fest, ratings, launch | not started | [M16](M16-publishing.md) |
+| M16 | Steam publishing: store, demo and release | Coming Soon page, build pipeline, demo/Next Fest, ratings, launch | in progress: M16.2 packaging + SteamPipe scaffolding done; M16.1 store page is process | [M16](M16-publishing.md) |
 
 Each completed milestone's plan file ends with a **Status** section recording what was
 built, what was deferred, and why - including the places where the plan turned out to

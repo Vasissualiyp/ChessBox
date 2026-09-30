@@ -134,3 +134,16 @@ Planned, not started. Its phases are placed across the release waves: M16.1 (sto
 belongs with Wave 1's visuals; M16.2/M16.3 (pipeline, demo) with Wave 2 for the February
 2027 Next Fest; M16.4/M16.5 (release) after the game wave. It depends on M11/M13 for the
 assets and M14 for the demo scope; it is independent of M9 and must not absorb it.
+
+### As built (2026-09-30)
+
+M16.2's pipeline is in: `tools/package.sh` installs a self-contained prefix
+(`bin/` + `share/chessbox/{variants,fonts}`) with `cmake --install` and smoke-tests it by
+running the packaged game headlessly from the package root - the CI shape of "a downloaded
+build launches and renders a frame". `tools/steam_upload.sh` fills the SteamPipe scripts in
+`packaging/steam/` from `STEAM_APPID`/`STEAM_DEPOTID`/`STEAM_USER` and runs `steamcmd` (or
+prints the command), with credentials never in the repository and `STEAM_PREVIEW=1` to
+validate without publishing.
+
+**Outstanding:** the store page, content survey, age ratings and the release itself are
+process (M16.1/M16.4/M16.5); the demo (M16.3) waits on M14.

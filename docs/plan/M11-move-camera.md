@@ -412,3 +412,19 @@ tested: `MovePath`/`tracePath` (topology as tags), `layout`/`Placement` (dimensi
 world positions), `SeamMap` (portal partners and colour), `MoveAnimation` (run
 decomposition), and `Session::camera()` (the single choke point). No new engine concept
 is introduced; the milestone is a `view`/`app` change with an oracle and goldens.
+
+### As built (2026-09-30)
+
+The camera is `view::moveCamera` (`src/view/move_camera.hpp/.cpp`), a pure function of
+`MovePath`/`Placement`/`ViewConfig`/`CameraPolicy`/`t` with no dimension or topology
+branch. `routeRuns` decomposes the traced route (shared with the animation), a run carries
+its post-transport direction, a portal or bounce ends a run, and a grid-axis run cuts
+rather than pans. `Session::camera()` folds the shot in as an eased offset scaled by
+`followStrength`; `shotInFlight()` locks picking, and `clickPixel` uses the effective
+camera. Settings `cameraMode`/`followStrength`. Docs: `docs/camera.md`, ADR-0016/0017.
+Tests: purity, the frame-the-cell oracle, the transported turn, the grid-axis cut, and a
+safe-zone sweep over `klein`/`cube5`/`hyper4`/`t6`.
+
+**Deferred:** committed image goldens. A driver-independent pose property test stands in,
+because a committed frame depends on the GPU driver and the compiler and would not survive
+the gcc/clang gate.

@@ -254,3 +254,16 @@ Planned, not started. The generic path is new, but it rests on existing, tested 
 the identification model (M3), `view::layout` (M4), `expandAtom`/`tracePath` (M5/M4), and
 M11's camera shots. The hand-authored scenes become the oracle for the generated ones, so
 the risky part — surface closure — is checked against something already correct.
+
+### As built (2026-09-30)
+
+`app::overtureSignature` derives a `SurfaceKind` from the identifications (never the name);
+`render::derivedSurfaceAt` maps it to the same warps the authored scenes use, asserted
+pointwise-equal to them; and `Ui` uses the authored scene when the name has one, else
+`derivedOvertureScene`, so a variant that exists only as TOML animates with no scene code.
+The derived scene opens on the variant's own start position and plays a real traced move
+(M13.3) for a 2-D 8×8 board. Tests: a signature table over every shipped variant, the
+differential surface, and a data-only TOML torus. Docs: `docs/overtures.md`.
+
+**Deferred:** the D ≥ 3 extruded-`layout` overture, and rule-flavoured scenes (M13.6, a
+stated partial). `--shot` of a derived variant forces the library picker to it.
