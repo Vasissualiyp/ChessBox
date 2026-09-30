@@ -24,3 +24,5 @@ Template: [`template.md`](template.md).
 | [0011](0011-headless-first-renderer.md) | Headless-first renderer; the window is a blit | Accepted |
 | [0012](0012-quantum-chess.md) | Quantum chess needs an ensemble; not built, and why | Accepted |
 | [0013](0013-axis-pitch.md) | An axis may be sampled more finely than a piece moves along it | Accepted |
+| [0016](0016-move-camera-is-pure-over-the-trace.md) | The move camera is a pure function of the generalised move trace | Accepted |
+| [0017](0017-camera-policy-is-data-keyed-by-geometry.md) | Camera policy is data, keyed by geometry kind, not by dimension | Accepted |
