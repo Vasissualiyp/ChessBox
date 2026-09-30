@@ -80,3 +80,18 @@ client naming a different variant is turned away.
 Not built yet: the socket transport and TLS, the lobby / matchmaking / spectators /
 reconnection, the latency-and-loss harness, and the adversarial-client corpus. Nothing
 here touches a real network yet - the socket transport is one more `Transport`.
+
+## Status addendum: server, clients, harness and TCP
+
+Beyond the first slice: the server owns several links and broadcasts each accepted move;
+a hello is answered with the current position, so a first join and a reconnect are one
+path. An adversarial corpus (frames before hello, non-frames, a lying length prefix,
+trailing bytes, replays, out-of-turn moves, and a deterministic random-byte stream)
+proves the game never moves on bad input and the server stays up. `FaultyTransport`
+injects drops, truncation and duplicates on a frame counter. `SocketTransport` speaks the
+same `Transport` over TCP, reassembling the length-prefixed frames, with a loopback test
+that skips where sockets are unavailable.
+
+Still not built: TLS (a `TlsTransport` wrapping `SocketTransport`; the interface does not
+change), the lobby / matchmaking / spectators UI and server-side game persistence, and
+wiring host/join into a screen.
