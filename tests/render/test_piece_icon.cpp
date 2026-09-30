@@ -3,13 +3,17 @@
 // The flat board's pieces are data, so the things that make an icon set usable can be
 // checked rather than eyeballed: every archetype has one, nothing escapes its box, and
 // the cheap set is actually cheap.
-#include <algorithm>
-#include <cmath>
-
 #include <catch2/catch_test_macros.hpp>
 
-#include "render/piece_icon.hpp"
+#include <algorithm>
+#include <cmath>
+#include <vector>
 
+#include "assets/piece_model.hpp"
+#include "render/piece_icon.hpp"
+#include "render/ui_widgets.hpp"
+
+using namespace cb;
 using namespace cb::render;
 
 namespace {
@@ -142,4 +146,76 @@ TEST_CASE("a temporal board draws a rail under each timeline", "[render]") {
   // piece's wedge - so this cannot pass just because a variant happens to field knights.
   CHECK(temporal.batches[static_cast<std::size_t>(Archetype::Arrow)].count > 0);
 }
+
+TEST_CASE("a valley in an outline stays a valley", "[render]") {
+  // The bug this exists for: a notch cut into a piece's outline came back filled, so the
+  // notch disappeared. A fill that triangulates properly conserves the polygon's area;
+  // one that treats the shape as convex invents the area of the notch.
+  const auto area = [](const std::vector<ImVec2>& p) {
+    float a = 0.0f;
+    for (std::size_t i = 0; i < p.size(); ++i) {
+      const ImVec2& u = p[i];
+      const ImVec2& v = p[(i + 1) % p.size()];
+      a += u.x * v.y - v.x * u.y;
+    }
+    return std::abs(a) * 0.5f;
+  };
+  const auto triArea = [](const std::vector<ImVec2>& p, const std::vector<int>& idx) {
+    float a = 0.0f;
+    for (std::size_t i = 0; i + 2 < idx.size(); i += 3) {
+      const ImVec2& u = p[static_cast<std::size_t>(idx[i])];
+      const ImVec2& v = p[static_cast<std::size_t>(idx[i + 1])];
+      const ImVec2& w = p[static_cast<std::size_t>(idx[i + 2])];
+      a += std::abs((v.x - u.x) * (w.y - u.y) - (w.x - u.x) * (v.y - u.y)) * 0.5f;
+    }
+    return a;
+  };
+
+  SECTION("a square notch cut into the top of a block") {
+    const std::vector<ImVec2> p{{0, 100}, {100, 100}, {100, 0}, {70, 0},
+                                {70, 60}, {30, 60},   {30, 0},  {0, 0}};
+    std::vector<int> idx;
+    widgets::triangulate(p.data(), static_cast<int>(p.size()), idx);
+    REQUIRE(idx.size() == (p.size() - 2) * 3);
+    CHECK(std::abs(triArea(p, idx) - area(p)) < 1.0f);
+    // And the notch really is missing area: a convex reading would give the full block.
+    CHECK(area(p) < 100.0f * 100.0f - 100.0f);
+  }
+
+  SECTION("wound the other way round, it fills the same") {
+    std::vector<ImVec2> p{{0, 100}, {100, 100}, {100, 0}, {70, 0},
+                          {70, 60}, {30, 60},   {30, 0},  {0, 0}};
+    std::reverse(p.begin(), p.end());
+    std::vector<int> idx;
+    widgets::triangulate(p.data(), static_cast<int>(p.size()), idx);
+    REQUIRE(idx.size() == (p.size() - 2) * 3);
+    CHECK(std::abs(triArea(p, idx) - area(p)) < 1.0f);
+  }
+
+  SECTION("every shipped icon outline triangulates") {
+    for (const IconStyle style : {IconStyle::Faceted, IconStyle::Primitive}) {
+      for (int a = 1; a <= 7; ++a) {
+        const PieceIcon icon = pieceIcon(style, static_cast<Archetype>(a));
+        for (const IconPoly& poly : icon.fills) {
+          std::vector<ImVec2> pts;
+          for (const IconPoint& q : poly) pts.push_back(ImVec2(q.x, q.y));
+          std::vector<int> idx;
+          widgets::triangulate(pts.data(), static_cast<int>(pts.size()), idx);
+          INFO("archetype " << a << " with " << pts.size() << " points");
+          CHECK(idx.size() == (pts.size() - 2) * 3);
+        }
+      }
+    }
+  }
+
+  SECTION("an outline that is not a shape is caught before it is drawn") {
+    // Not by the filler - ear clipping fills, it does not validate, and on four points
+    // it will happily halve a bow tie. Whether an outline crosses itself is a question
+    // about the *model*, and the designers ask it there before an author can save.
+    assets::IconModel bad;
+    bad.fills.push_back(assets::Outline{{{0, 0}, {400, 0}, {0, 400}, {400, 400}}});
+    CHECK_FALSE(assets::validate(bad).has_value());
+  }
+}
+
 #endif

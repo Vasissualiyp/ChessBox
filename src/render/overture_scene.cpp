@@ -1701,7 +1701,7 @@ void drawIcon(ImDrawList* dl, IconStyle style, Archetype shape, ImVec2 centre, f
       dl->PathLineTo(ImVec2(centre.x + (p.x - 50.0f) * sx, centre.y + (p.y - 50.0f) * k));
     }
     const ImVector<ImVec2> path = dl->_Path;
-    dl->PathFillConcave(fill);
+    widgets::fillPolygon(dl, dl->_Path.Data, dl->_Path.Size, fill);
     dl->_Path = path;
     dl->PathStroke(line, ImDrawFlags_Closed, std::max(1.0f, size * 0.022f));
   }
@@ -1901,8 +1901,10 @@ void drawOverture(ImDrawList* dl, const OvertureScene& scene, ImVec2 min, ImVec2
       }
       case Kind::Token: {
         const OvToken& tk = scene.tokens[i];
+        // Same rule as the flat board: the figure in its own colour, on a token that is
+        // the same for both sides.
         const view::Rgba fill = tk.white ? theme.whitePiece : theme.blackPiece;
-        const view::Rgba line = tk.white ? theme.blackPiece : theme.whitePiece;
+        const view::Rgba line = theme.pieceToken;
         drawIcon(dl, iconStyle, archetypeOf(tk.glyph), tokenShots[i].at,
                  tokenShots[i].size, tk.mirrored,
                  widgets::u32(fill, 0.97f * tk.fade * alpha),

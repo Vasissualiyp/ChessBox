@@ -9,6 +9,7 @@
 
 #include "app/session.hpp"
 #include "app/shell.hpp"
+#include "assets/piece_model.hpp"
 #include "render/deco.hpp"
 #include "render/piece_icon.hpp"
 #include "render/vulkan_context.hpp"
@@ -79,6 +80,15 @@ class Ui {
   /// that produces blurry text is not worth having. Must not be called inside a frame.
   Result<void> setScale(float scale);
   void setIconStyle(IconStyle s) noexcept { iconStyle_ = s; }
+  /// Open the editor on a page, and the piece designer on one of its tabs. For `--shot`,
+  /// so every designer is reviewable the same way every other screen is.
+  void openEditorPage(int page, int tab = 0) noexcept {
+    editorPage_ = page;
+    designTab_ = tab;
+  }
+  /// How many dimensions the move preview shows. For `--shot`, so a 4-D preview is
+  /// reviewable without a mouse.
+  void setPreviewDims(int dims) noexcept { previewDims_ = dims; }
   /// Swap the palette. The theme is read every frame, so a change is immediate - and a
   /// retheme never touches the renderer.
   void setTheme(const view::Theme& t) noexcept { theme_ = t; }
@@ -145,6 +155,26 @@ class Ui {
   UiRequest buildPauseQuitConfirm(app::Shell& shell);
   UiRequest buildGameInfo(app::Shell& shell);
   UiRequest buildPieceMoves(app::Shell& shell);
+  /// The piece designer's three tabs. They share one pane, because they are three jobs
+  /// on one piece and moving between them must not feel like leaving the piece behind.
+  void drawMovesTab(app::Shell& shell, const std::string& piece);
+  /// The body: a side profile, a revolve and a symmetry (M7.3.2, M7.3.3).
+  void drawBodyTab(app::Shell& shell);
+  /// The flat outline the board draws when it is drawn flat (M7.3.5).
+  void drawIconTab(app::Shell& shell);
+  /// Load the working model and icon for whichever piece is selected, once per
+  /// selection. Seeded from the shipped archetype, so "start from the queen" always
+  /// gives something editable rather than an empty canvas.
+  void syncDesignAssets(app::Shell& shell);
+  /// One editable closed outline on a grid. Returns true when the author changed it.
+  ///
+  /// Shared by both designers because they are the same job on different axes - which
+  /// is also why the spec asks for one drawing surface rather than two.
+  bool outlineEditor(const char* id, ImVec2 min, ImVec2 max, assets::Outline& outline,
+                     int& selected, bool yUp, const char* xLabel, const char* yLabel);
+  /// The profile swept, drawn as a wireframe by the same rule the mesh would use.
+  void drawRevolvePreview(ImDrawList* dl, ImVec2 min, ImVec2 max,
+                          const assets::PieceModel& model, float spin);
 
   const VulkanContext* ctx_{nullptr};
   SDL_Window* window_{nullptr};
@@ -174,6 +204,26 @@ class Ui {
   /// The editor's own page: its home (pick a designer), the piece designer, or its help.
   /// Kept here rather than as a Screen so stepping in does not change the shell's depth.
   int editorPage_{0};
+
+  /// The piece body and flat icon being designed, and which piece they were loaded for.
+  /// Editing state, like `editorPiece_`: the document the shell owns is the variant, and
+  /// these are not part of it until they are saved.
+  assets::PieceModel designModel_{};
+  assets::IconModel designIcon_{};
+  std::string designFor_;
+  int designProfilePoint_{-1};
+  int designIconPoint_{-1};
+  std::size_t designIconPoly_{0};
+  /// Draw the right half and mirror it: an authoring aid, not a model operation. What
+  /// is stored is always the finished outline, so an icon stays as dumb as the shipped
+  /// tables.
+  bool designIconMirror_{false};
+  /// Which of the piece designer's three tabs is showing.
+  int designTab_{0};
+  /// How many dimensions the move preview board has, and how wide it is. A piece is
+  /// declared once and played on whatever board a variant declares, so "what does this
+  /// do on a 4-D board" is a question the designer has to be able to answer.
+  int previewDims_{2};
 
   /// The piece preview's board: the size, where it was drawn, and what the player has
   /// placed on it (0 empty, 1 black, 2 white). The selected piece is white and stands at

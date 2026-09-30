@@ -136,9 +136,11 @@ void drawPieceGlyph(ImDrawList* dl, ImVec2 c, float r, ImU32 col, ImU32 behind,
     for (const IconPoint& p : poly) {
       dl->PathLineTo(ImVec2(c.x + (p.x - 50.0f) * k, c.y + (p.y - 50.0f) * k));
     }
-    // Concave: a rook's crenellations and a queen's points are not convex hulls, and
-    // the convex filler turns them into blocks.
-    dl->PathFillConcave(fill);
+    // Concave, and properly so: a rook's crenellations, a queen's coronet and any
+    // valley an author draws are not convex hulls, and a fill that treats them as one
+    // closes the notches over.
+    fillPolygon(dl, dl->_Path.Data, dl->_Path.Size, fill);
+    dl->PathClear();
   };
   for (const IconPoly& poly : icon.fills) trace(poly, col);
   for (const IconPoly& poly : icon.cuts) trace(poly, behind);
@@ -522,100 +524,210 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
   auto atoms = editor->pieceAtoms(names[static_cast<std::size_t>(index)]);
   if (!atoms.has_value()) return;
 
-  constexpr int kN = kPreviewN;
-  const ImVec2 span(max.x - min.x, max.y - min.y);
-  const float side = std::min(span.x, span.y) * 0.72f;
-  const float cell = side / static_cast<float>(kN);
-  const ImVec2 origin(min.x + (span.x - side) * 0.5f, min.y + (span.y - side) * 0.5f);
-  previewOrigin_ = origin;
-  previewCell_ = cell;
-  previewValid_ = true;
+  // A piece is declared once and played on whatever board a variant declares, so the
+  // question "what does this do on a four-dimensional board" is one the designer has to
+  // answer. The extent shrinks as the dimension grows for the obvious reason: nine to
+  // the fourth is six and a half thousand cells and nothing can be read in it.
+  const int dims = std::clamp(previewDims_, 2, 4);
+  const int extent = dims == 2 ? 9 : (dims == 3 ? 7 : 5);
+  std::vector<AxisDecl> decls;
+  static const char* kAxisNames[4]{"file", "rank", "level", "aeon"};
+  for (int i = 0; i < dims; ++i) {
+    AxisDecl d;
+    d.extent = extent;
+    d.name = kAxisNames[i];
+    decls.push_back(d);
+  }
+  auto spec = DimSpec::create(decls);
+  if (!spec.has_value()) return;
+  const DimSpec& ds = *spec;
+  const view::ViewConfig cfg = view::ViewConfig::forBoard(ds);
+  const std::vector<view::Placement> cells = view::layout(ds, cfg);
+  if (cells.empty()) return;
 
   ImDrawList* dl = ImGui::GetBackgroundDrawList();
   const view::Theme& t = theme_;
-  // The board replaces the decorative object here: the object *is* the board.
   dl->AddRectFilled(min, max, u32(t.ink));
-  const auto baseColour = [&](int x, int y) {
-    return ((x + y) & 1) != 0 ? t.boardDark : t.boardLight;
-  };
-  PieceTypeDef shapeDef;
-  shapeDef.atoms = *atoms;
-  const Archetype shape = archetypeFor(shapeDef);
 
-  bool quiet[kN][kN] = {};
-  bool capture[kN][kN] = {};
-  const int cx = kN / 2;
-  const int cy = kN / 2;
-  // A 2-D preview only has two axes; the variant's forward axis is whichever of them it
-  // declared (standard chess means the rank), and anything else reads as the second.
+  // Where the piece stands: the middle of the board on every axis.
+  Coord centre(static_cast<std::uint8_t>(dims));
+  for (std::size_t i = 0; i < static_cast<std::size_t>(dims); ++i) {
+    centre.c[i] = static_cast<std::int16_t>(extent / 2);
+  }
+  const CellId origin = ds.toCell(centre);
+
+  std::vector<std::uint8_t> mark(cells.size() == 0 ? 0 : (ds.cellCount()), 0);
   const int orientIndex = editor->orientationAxis() == 0 ? 0 : 1;
-  const auto up = static_cast<std::size_t>(orientIndex);
-  const auto right = static_cast<std::size_t>(orientIndex == 0 ? 1 : 0);
   for (const MoveAtom& a : *atoms) {
     if (a.mode == MoveMode::Hop) continue;  // needs a hurdle; not modelled here
     const std::vector<Direction> dirs =
-        a.oriented ? expandAtomOriented(a.mags, 2, static_cast<std::uint8_t>(orientIndex),
-                                        Color::White)
-                   : expandAtom(a.mags, 2);
-    // Step range from the move's own min/max: a rider runs to the edge, an exact-n move
-    // like a pawn's double step lands only where it says.
+        a.oriented
+            ? expandAtomOriented(a.mags, static_cast<std::uint8_t>(dims),
+                                 static_cast<std::uint8_t>(orientIndex), Color::White)
+            : expandAtom(a.mags, static_cast<std::uint8_t>(dims));
     const int first = std::max(1, static_cast<int>(a.minK));
-    const int last =
-        a.maxK == kUnlimited ? kN - 1 : std::min(static_cast<int>(a.maxK), kN - 1);
+    const int last = a.maxK == kUnlimited
+                         ? extent - 1
+                         : std::min(static_cast<int>(a.maxK), extent - 1);
     for (const Direction& d : dirs) {
       for (int n = first; n <= last; ++n) {
-        // The forward axis is drawn up the screen and the other to the right, so a
-        // forward-only piece reads as moving up, the way a player expects to see it.
-        const int x = cx + n * d.v[right];
-        const int y = cy - n * d.v[up];
-        if (x < 0 || x >= kN || y < 0 || y >= kN) break;
-        const std::uint8_t occ =
-            previewCells_[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)];
+        Coord p = centre;
+        for (std::uint8_t k = 0; k < d.nsup; ++k) {
+          const std::uint8_t ax = d.sup[k];
+          p.c[ax] = static_cast<std::int16_t>(p.c[ax] + n * d.v[ax]);
+        }
+        if (!ds.inRange(p)) break;
+        const CellId c = ds.toCell(p);
+        // Only the two-dimensional board carries the scratch pieces, so above it every
+        // ray simply runs to the edge - which is the thing worth seeing there anyway.
+        std::uint8_t occ = 0;
+        if (dims == 2) {
+          const int gx = p.c[0];
+          const int gy = extent - 1 - p.c[1];
+          if (gx >= 0 && gx < kPreviewN && gy >= 0 && gy < kPreviewN) {
+            occ =
+                previewCells_[static_cast<std::size_t>(gy)][static_cast<std::size_t>(gx)];
+          }
+        }
         if (occ != 0) {
-          // A black piece here can be taken if the move allows it. A slider stops at it;
-          // a leap carries on over it.
-          if (occ == 1 && a.capture != CapturePolicy::Cannot) capture[y][x] = true;
+          if (occ == 1 && a.capture != CapturePolicy::Cannot) mark[c] = 2;
           if (a.mode != MoveMode::Leap) break;
           continue;
         }
-        if (a.capture != CapturePolicy::Must) quiet[y][x] = true;
+        if (a.capture != CapturePolicy::Must && mark[c] == 0) mark[c] = 1;
       }
     }
   }
 
-  for (int y = 0; y < kN; ++y) {
-    for (int x = 0; x < kN; ++x) {
-      const ImVec2 a(origin.x + static_cast<float>(x) * cell,
-                     origin.y + static_cast<float>(y) * cell);
-      const ImVec2 b(a.x + cell, a.y + cell);
-      dl->AddRectFilled(a, b, u32(baseColour(x, y)));
-      if (capture[y][x]) {
-        dl->AddRectFilled(a, b, u32(t.blood, 0.5f));
-      } else if (quiet[y][x]) {
-        dl->AddRectFilled(a, b, u32(t.moss, 0.45f));
+  // The camera. A flat board is looked at from almost straight down, as a diagram; a
+  // solid one is stepped back so its depth reads. The drag adds to both, so the same
+  // gesture that turns the menu's object turns this board.
+  const float yaw = (dims == 2 ? 0.0f : 0.62f) + objectYaw_;
+  const float elev = std::clamp((dims == 2 ? 1.50f : 0.92f) + objectElev_, 0.12f, 1.55f);
+  const float cy = std::cos(yaw);
+  const float sy = std::sin(yaw);
+  const float ce = std::cos(elev);
+  const float se = std::sin(elev);
+  const view::Bounds bounds = view::boundsOf(cells);
+  const auto raw = [&](float x, float y, float z) {
+    const float dx = x - bounds.centerX();
+    const float dy = y - bounds.centerY();
+    const float dz = z - bounds.centerZ();
+    const float x1 = dx * cy + dy * sy;
+    const float y1 = -dx * sy + dy * cy;
+    const float up = dz * ce + y1 * se;
+    const float depth = -dz * se + y1 * ce;
+    return std::array<float, 3>{x1, -up, depth};
+  };
+  float ext = 0.001f;
+  for (const view::Placement& pl : cells) {
+    const auto q = raw(pl.x, pl.y, pl.z);
+    ext = std::max(ext, std::max(std::abs(q[0]), std::abs(q[1])));
+  }
+  const float span = std::min(max.x - min.x, max.y - min.y);
+  const float scale = span * 0.40f / (ext + 0.8f);
+  const ImVec2 mid((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
+  const auto at = [&](float x, float y, float z) {
+    const auto q = raw(x, y, z);
+    return ImVec2(mid.x + q[0] * scale, mid.y + q[1] * scale);
+  };
+
+  struct Tile {
+    ImVec2 p[4];
+    float depth{0};
+    CellId cell{0};
+    bool light{false};
+  };
+  std::vector<Tile> tiles;
+  tiles.reserve(cells.size());
+  for (const view::Placement& pl : cells) {
+    const Coord p = ds.toCoord(pl.cell);
+    int parity = 0;
+    for (std::size_t i = 0; i < static_cast<std::size_t>(dims); ++i) {
+      parity += p.c[i];
+    }
+    Tile tile;
+    tile.p[0] = at(pl.x - 0.46f, pl.y - 0.46f, pl.z);
+    tile.p[1] = at(pl.x + 0.46f, pl.y - 0.46f, pl.z);
+    tile.p[2] = at(pl.x + 0.46f, pl.y + 0.46f, pl.z);
+    tile.p[3] = at(pl.x - 0.46f, pl.y + 0.46f, pl.z);
+    tile.depth = raw(pl.x, pl.y, pl.z)[2];
+    tile.cell = pl.cell;
+    tile.light = (parity & 1) == 0;
+    tiles.push_back(tile);
+  }
+  // Far to near: a board of boards overlaps itself from every useful angle, and without
+  // the sort the far ones paint over the near ones.
+  std::sort(tiles.begin(), tiles.end(),
+            [](const Tile& a, const Tile& b) { return a.depth > b.depth; });
+
+  const bool solid = dims == 2;
+  for (const Tile& tile : tiles) {
+    const view::Rgba base = tile.light ? t.boardLight : t.boardDark;
+    // Above two dimensions the board is mostly cells the piece cannot reach - a knight
+    // on a 5^4 lattice lights 48 of 625 - so the ones it can have to win. The board
+    // steps back and the marks stay at full strength.
+    const bool lit = mark[tile.cell] != 0;
+    const float ground = solid ? 1.0f : (lit ? 0.9f : 0.34f);
+    dl->AddQuadFilled(tile.p[0], tile.p[1], tile.p[2], tile.p[3], u32(base, ground));
+    if (mark[tile.cell] == 2) {
+      dl->AddQuadFilled(tile.p[0], tile.p[1], tile.p[2], tile.p[3], u32(t.blood, 0.7f));
+    } else if (mark[tile.cell] == 1) {
+      dl->AddQuadFilled(tile.p[0], tile.p[1], tile.p[2], tile.p[3], u32(t.moss, 0.65f));
+    }
+    if (tile.cell == origin) {
+      dl->AddQuad(tile.p[0], tile.p[1], tile.p[2], tile.p[3], u32(t.ember), 2.0f);
+    }
+  }
+
+  // The scratch pieces, and the piece itself, on the flat board only.
+  PieceTypeDef shapeDef;
+  shapeDef.atoms = *atoms;
+  const Archetype shape = archetypeFor(shapeDef);
+  const float cell =
+      std::hypot(at(1, 0, 0).x - at(0, 0, 0).x, at(1, 0, 0).y - at(0, 0, 0).y);
+  if (dims == 2) {
+    for (int gy = 0; gy < kPreviewN; ++gy) {
+      for (int gx = 0; gx < kPreviewN; ++gx) {
+        const std::uint8_t occ =
+            previewCells_[static_cast<std::size_t>(gy)][static_cast<std::size_t>(gx)];
+        if (occ == 0) continue;
+        Coord p(2);
+        p.c[0] = static_cast<std::int16_t>(gx);
+        p.c[1] = static_cast<std::int16_t>(extent - 1 - gy);
+        if (!ds.inRange(p)) continue;
+        for (const view::Placement& pl : cells) {
+          if (pl.cell != ds.toCell(p)) continue;
+          const ImVec2 c = at(pl.x, pl.y, pl.z);
+          dl->AddCircleFilled(c, cell * 0.36f, u32(t.pieceToken), 18);
+          drawPieceGlyph(dl, c, cell * 0.30f, u32(occ == 1 ? t.blackPiece : t.whitePiece),
+                         u32(t.pieceToken), Archetype::Dome, iconStyle_);
+          break;
+        }
       }
     }
   }
-  dl->AddRect(origin, ImVec2(origin.x + side, origin.y + side), u32(t.rule, 0.8f));
+  for (const view::Placement& pl : cells) {
+    if (pl.cell != origin) continue;
+    const ImVec2 c = at(pl.x, pl.y, pl.z);
+    dl->AddCircleFilled(c, cell * 0.36f, u32(t.pieceToken), 18);
+    drawPieceGlyph(dl, c, cell * 0.30f, u32(t.whitePiece), u32(t.pieceToken), shape,
+                   iconStyle_);
+  }
 
-  // Pieces the player placed are always pawns - the piece under test is the one at the
-  // centre - then the piece being designed, in white, at the centre.
-  for (int y = 0; y < kN; ++y) {
-    for (int x = 0; x < kN; ++x) {
-      const std::uint8_t occ =
-          previewCells_[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)];
-      if (occ == 0) continue;
-      const ImVec2 c(origin.x + (static_cast<float>(x) + 0.5f) * cell,
-                     origin.y + (static_cast<float>(y) + 0.5f) * cell);
-      const view::Rgba col = occ == 1 ? t.blackPiece : t.whitePiece;
-      drawPieceGlyph(dl, c, cell * 0.42f, u32(col), u32(baseColour(x, y)),
-                     Archetype::Dome, iconStyle_);
+  // The click target for the scratch board, on the flat board only: above two dimensions
+  // a drag has to reach the board to turn it, and a window over it would eat the drag.
+  if (dims == 2) {
+    const view::Placement* first = nullptr;
+    for (const view::Placement& pl : cells) {
+      if (first == nullptr || pl.x < first->x || pl.y > first->y) first = &pl;
+    }
+    if (first != nullptr) {
+      previewOrigin_ = ImVec2(at(-0.5f, static_cast<float>(extent) - 0.5f, 0.0f));
+      previewCell_ = cell;
+      previewValid_ = true;
     }
   }
-  const ImVec2 centre(origin.x + (static_cast<float>(cx) + 0.5f) * cell,
-                      origin.y + (static_cast<float>(cy) + 0.5f) * cell);
-  drawPieceGlyph(dl, centre, cell * 0.42f, u32(t.whitePiece), u32(baseColour(cx, cy)),
-                 shape, iconStyle_);
 }
 
 void Ui::pauseFrame(UiRequest& request, ImVec2& menuMin, ImVec2& menuMax) {

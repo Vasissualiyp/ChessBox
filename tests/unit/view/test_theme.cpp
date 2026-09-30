@@ -40,6 +40,24 @@ TEST_CASE("both piece colours read on both squares", "[unit][view]") {
   }
 }
 
+TEST_CASE("both piece colours read on the token they stand on", "[unit][view]") {
+  // A flat board draws each piece as a figure on a disc, and the disc is the *same*
+  // colour for both sides - so it is the one colour that has to work twice. If either
+  // piece sinks into it the flat view loses the distinction the solid view carries by
+  // shape and shadow.
+  for (const Theme& t : {Theme::manifold(), Theme::console()}) {
+    CHECK(contrast(t.whitePiece, t.pieceToken) > 2.4f);
+    CHECK(contrast(t.blackPiece, t.pieceToken) > 2.4f);
+    // And the token itself has to be visible against the squares it sits on, or the
+    // piece appears to float on nothing.
+    // Only modestly, and that is not slack: clearing both piece colours confines the
+    // token to a luminance band that overlaps the squares, so a token that stood well
+    // clear of the board would have to sink one of the pieces.
+    CHECK(contrast(t.pieceToken, t.boardLight) > 1.18f);
+    CHECK(contrast(t.pieceToken, t.boardDark) > 1.18f);
+  }
+}
+
 TEST_CASE("body text is legible on the ground it is drawn on", "[unit][view]") {
   for (const Theme& t : {Theme::manifold(), Theme::console()}) {
     CHECK(contrast(t.bone, t.ink) > 7.0f);       // primary type

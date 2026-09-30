@@ -97,6 +97,20 @@ struct Theme {
   /// thing standing on the page rather than as a pattern printed on it.
   Rgba boardRim{Rgba::hex(0x241C15)};
 
+  /// The disc a flat board's piece stands on.
+  ///
+  /// One colour for *both* sides, deliberately. Drawing a white piece as a dark figure
+  /// on a light token and a black piece as a light figure on a dark one makes the two
+  /// tokens read as different objects - the eye sorts them by the disc, which is the
+  /// largest shape, and the figure it is supposed to be reading becomes the background.
+  /// With a single token behind both, the disc is furniture and the piece is the piece.
+  /// It has to clear both piece colours, and that pins it into a narrow band: too light
+  /// and the white piece sinks into it, too dark and the black one does. The band
+  /// overlaps the two square colours by construction, so the token's separation from the
+  /// board is modest and deliberate - it is furniture, not another piece. `test_theme`
+  /// holds both ends of it.
+  Rgba pieceToken{Rgba::hex(0x85714F)};
+
   Rgba whitePiece{Rgba::hex(0xE8DCC4)};
   // Lifted off the true near-black of the ground: a black piece standing on a dark
   // cell has to stay a piece, not a hole.
@@ -146,6 +160,7 @@ struct Theme {
     t.boardLight = Rgba::hex(0x98A4BE);
     t.boardDark = Rgba::hex(0x59637E);
     t.boardRim = Rgba::hex(0x39415A);
+    t.pieceToken = Rgba::hex(0x7C8AA6);
     t.whitePiece = Rgba::hex(0xF6F9FF);
     t.blackPiece = Rgba::hex(0x10141E);
     t.light = true;

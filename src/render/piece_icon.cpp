@@ -48,14 +48,31 @@ constexpr std::array<P, 4> kSpireCollar{{{36, 52}, {64, 52}, {60, 45}, {40, 45}}
 constexpr std::array<P, 5> kSpireMitre{
     {{50, 12}, {63, 33}, {59, 45}, {41, 45}, {37, 33}}};
 
-constexpr std::array<P, 4> kCrownShaft{{{32, 80}, {35, 53}, {65, 53}, {68, 80}}};
-constexpr std::array<P, 4> kCrownCollar{{{30, 53}, {70, 53}, {70, 45}, {30, 45}}};
-// Three sharp points, drawn as separate triangles rather than cut out of a band: a crown
-// tooth is a spike, not a square merlon, and a triangular notch would leave the outer
-// teeth square anyway.
-constexpr std::array<P, 3> kCrownToothL{{{23, 45}, {39, 45}, {31, 17}}};
-constexpr std::array<P, 3> kCrownToothC{{{42, 45}, {58, 45}, {50, 11}}};
-constexpr std::array<P, 3> kCrownToothR{{{61, 45}, {77, 45}, {69, 17}}};
+// The queen. Three sharp triangles on a stick read as a fork, not as a coronet - so the
+// crown is one zigzag band with five points, which is what a queen actually wears, and
+// the tips are blunt rather than needles: at the size a flat board draws these, a needle
+// is one pixel and disappears while a short flat tip survives. The body is waisted under
+// a collar, so the silhouette narrows before it flares, which is the other half of what
+// separates a queen from a rook.
+constexpr std::array<P, 6> kCrownShaft{
+    {{30, 80}, {35, 70}, {37, 61}, {63, 61}, {65, 70}, {70, 80}}};
+constexpr std::array<P, 4> kCrownCollar{{{28, 61}, {72, 61}, {70, 53}, {30, 53}}};
+constexpr std::array<P, 16> kCrownCoronet{{{24, 53},
+                                           {26, 22},
+                                           {30, 22},
+                                           {34, 39},
+                                           {37, 16},
+                                           {42, 16},
+                                           {45, 39},
+                                           {48, 11},
+                                           {53, 11},
+                                           {56, 39},
+                                           {59, 16},
+                                           {64, 16},
+                                           {67, 39},
+                                           {70, 22},
+                                           {75, 22},
+                                           {76, 53}}};
 
 constexpr std::array<P, 4> kMonoShaft{{{33, 80}, {36, 53}, {64, 53}, {67, 80}}};
 constexpr std::array<P, 4> kMonoBlock{{{31, 53}, {69, 53}, {65, 25}, {35, 25}}};
@@ -88,10 +105,12 @@ constexpr std::array<P, 4> kPTowerMerlonR{{{60, 40}, {70, 40}, {70, 24}, {60, 24
 constexpr std::array<P, 6> kPWedge{
     {{34, 74}, {30, 42}, {52, 18}, {72, 32}, {62, 52}, {66, 74}}};
 constexpr std::array<P, 5> kPSpire{{{50, 16}, {68, 62}, {58, 74}, {42, 74}, {32, 62}}};
-constexpr std::array<P, 4> kPCrownBody{{{26, 90}, {74, 90}, {66, 46}, {34, 46}}};
-constexpr std::array<P, 3> kPCrownToothL{{{36, 46}, {44, 46}, {40, 18}}};
-constexpr std::array<P, 3> kPCrownToothC{{{47, 46}, {53, 46}, {50, 14}}};
-constexpr std::array<P, 3> kPCrownToothR{{{56, 46}, {64, 46}, {60, 18}}};
+constexpr std::array<P, 6> kPCrownBody{
+    {{26, 90}, {74, 90}, {66, 62}, {68, 46}, {32, 46}, {34, 62}}};
+// One zigzag instead of three triangles - same shape language as the faceted queen, and
+// still one convex-enough piece and eight points, which is what the cheap set costs.
+constexpr std::array<P, 8> kPCrownTeeth{
+    {{30, 46}, {34, 20}, {42, 38}, {50, 14}, {58, 38}, {66, 20}, {70, 46}, {50, 46}}};
 constexpr std::array<P, 4> kPMonoBlock{{{34, 74}, {34, 34}, {66, 34}, {66, 74}}};
 constexpr std::array<P, 4> kPMonoCrossV{{{45, 10}, {55, 10}, {55, 30}, {45, 30}}};
 constexpr std::array<P, 4> kPMonoCrossH{{{36, 16}, {64, 16}, {64, 24}, {36, 24}}};
@@ -106,8 +125,8 @@ constexpr std::array<IconPoly, 2> kFWedge{kBaseNarrow, kWedgeHead};
 constexpr std::array<IconPoly, 1> kFWedgeCut{kWedgeEye};
 constexpr std::array<IconPoly, 4> kFSpire{kBaseNarrow, kSpireShaft, kSpireCollar,
                                           kSpireMitre};
-constexpr std::array<IconPoly, 6> kFCrown{kBaseMid,     kCrownShaft,  kCrownCollar,
-                                          kCrownToothL, kCrownToothC, kCrownToothR};
+constexpr std::array<IconPoly, 4> kFCrown{kBaseMid, kCrownShaft, kCrownCollar,
+                                          kCrownCoronet};
 constexpr std::array<IconPoly, 5> kFMono{kBaseMid, kMonoShaft, kMonoBlock, kMonoCrossV,
                                          kMonoCrossH};
 constexpr std::array<IconPoly, 3> kFHorn{kBaseNarrow, kHornShaft, kHornSpike};
@@ -119,8 +138,7 @@ constexpr std::array<IconPoly, 4> kPTowerSet{kPTowerBody, kPTowerMerlonL, kPTowe
                                              kPTowerMerlonR};
 constexpr std::array<IconPoly, 2> kPWedgeSet{kPBaseWide, kPWedge};
 constexpr std::array<IconPoly, 2> kPSpireSet{kPBaseNarrow, kPSpire};
-constexpr std::array<IconPoly, 4> kPCrownSet{kPCrownBody, kPCrownToothL, kPCrownToothC,
-                                             kPCrownToothR};
+constexpr std::array<IconPoly, 2> kPCrownSet{kPCrownBody, kPCrownTeeth};
 constexpr std::array<IconPoly, 4> kPMonoSet{kPBaseWide, kPMonoBlock, kPMonoCrossV,
                                             kPMonoCrossH};
 constexpr std::array<IconPoly, 2> kPHornSet{kPBaseNarrow, kPHorn};

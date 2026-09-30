@@ -82,7 +82,7 @@ void icon(ImDrawList* dl, IconStyle style, Archetype shape, ImVec2 centre, float
     // Stroke before fill would be lost under it; the outline is what keeps a pale piece
     // visible on a pale tile.
     const ImVector<ImVec2> path = dl->_Path;
-    dl->PathFillConcave(fill);
+    widgets::fillPolygon(dl, dl->_Path.Data, dl->_Path.Size, fill);
     dl->_Path = path;
     dl->PathStroke(line, ImDrawFlags_Closed, std::max(1.0f, size * 0.022f));
   }

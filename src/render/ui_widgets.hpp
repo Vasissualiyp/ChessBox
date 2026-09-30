@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <initializer_list>
 #include <string>
+#include <vector>
 
 #include <imgui.h>
 
@@ -44,6 +46,47 @@ void keyValue(const char* key, const std::string& value, const view::Theme& them
 /// "primary" sets the label in the accent; "cold" marks a control that acts on geometry
 /// or time rather than on the game; `font` is the label typeface, the same one a menu
 /// entry passes, or null for the interface's body font.
+/// Triangulate a simple polygon, by ear clipping. Indices into `pts`, three per triangle.
+///
+/// ImGui's own concave fill does not handle every simple polygon, and the case it gets
+/// wrong is the one an author reaches for first: a valley - a notch cut into an outline -
+/// comes back filled in, so the notch disappears. This is the whole reason a piece's
+/// outline needs a fill of its own rather than the draw list's.
+///
+/// This fills; it does not validate. Whether an outline is a shape at all - whether it
+/// crosses itself - is `assets::validate`'s job, and the designers ask it before they let
+/// an author save. What is guaranteed here is only that a polygon with no ear anywhere
+/// comes back empty instead of spinning.
+void triangulate(const ImVec2* pts, int n, std::vector<int>& outIndices);
+
+/// Fill a simple polygon, valleys and all.
+void fillPolygon(ImDrawList* dl, const ImVec2* pts, int n, ImU32 col);
+
+/// A heading with a rule running to the right of it, the way a plate is labelled.
+///
+/// Shared because a screen made of unlabelled rows of controls is the thing that makes
+/// an editor feel like a pile of widgets rather than a tool: the rule is what says where
+/// one job ends and the next begins.
+void sectionHead(const char* label, const view::Theme& theme, void* displayFont,
+                 float scale);
+
+/// A row of tabs. Returns true when the selection changed.
+///
+/// Underlined rather than boxed: a box around the active tab is a second rectangle
+/// fighting the pane it sits in, and the only thing that has to read is which of the
+/// words is the live one.
+bool tabRow(std::initializer_list<const char*> labels, int& selected,
+            const view::Theme& theme, void* displayFont, float scale);
+
+/// A number with a step above it and a step below it, in a cell of its own.
+///
+/// Stacked rather than `- n +` in a line: the axes of a move sit next to each other, and
+/// a row of horizontal steppers runs into one long strip where it is not obvious which
+/// sign belongs to which number. Clicking the number opens a box to type it in, because
+/// stepping from 1 to 9 is eight clicks.
+bool stepper(const char* id, int& value, int lo, int hi, const view::Theme& theme,
+             float scale, float width = 0.0f);
+
 bool button(const char* label, const view::Theme& theme, float width = 0.0f,
             bool primary = false, bool cold = false, bool enabled = true,
             ImFont* font = nullptr);

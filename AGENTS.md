@@ -42,6 +42,8 @@ nix flake check                  # THE gate: both compilers, sanitizers, coverag
 ./build/dev/src/gui/chessbox_gui cube5 --shot out.ppm --script "click c1"
 ./build/dev/src/gui/chessbox_gui --shot out.ppm --screen settings   # any screen
 ./build/dev/src/gui/chessbox_gui torus --shot o.ppm --screen newgame --t 0.6  # an overture
+./build/dev/src/gui/chessbox_gui standard --shot o.ppm --screen body   # the designer tabs
+./build/dev/src/gui/chessbox_gui standard --shot o.ppm --screen designer --dims 4
 ```
 
 **A build directory remembers which shell configured it.** One configured under
@@ -88,6 +90,7 @@ Each layer is a CMake target linking only to lower layers, so a violation is a
 | L50 | `src/movegen` | expansion, ray walk, staged gen, legality, perft |
 | L40 | `src/position` | cells, occupancy, field columns, hash, make/unmake |
 | L30/35 | `src/pieces`, `src/variant` | vector-move algebra, resolved `VariantSpec` |
+| L25 | `src/assets` | authored content: a piece's body and flat icon, as integer vector data |
 | L20 | `src/geometry` | identifications, transition group, transport |
 | L10 | `src/space` | `DimSpec`, `Coord`, `Direction`, strides, `CellId` |
 | L0/5 | `src/base`, `src/diag` | containers, arenas, `Result`, bitsets, RNG, Zobrist, tracing |
@@ -113,6 +116,7 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | A piece's look | `variants/*.toml` `shape` / `height` (data only) | `cb-new-piece` |
 | UI colours | `src/view/theme.hpp` - two themes, one struct, no renderer changes | |
 | A flat piece icon | `src/render/piece_icon.cpp` - polygon tables, two styles | |
+| An authored piece body or icon | `src/assets/piece_model.cpp`; the designers are `src/render/ui_designer.cpp` | |
 | A menu's decorative object | `src/render/deco.cpp` + `decoForScreen` | |
 | How a menu object answers a drag | `Ui::updateObjectDrag`; the turn is an offset on the object's own animation | |
 | A variant's library animation | `src/render/overture_scene.cpp`; which one, and its cycle, in `src/app/overture.cpp` | |
@@ -167,6 +171,33 @@ These are the ones that have actually cost time here, not hypotheticals.
   support (1–3 axes), not the dimension count; `docs/plan/M2-nd-generalization.md`
   records the measurement reasoning.
 - `kMaxDims = 8` lives in `src/space/dims.hpp` and nowhere else.
+- **A piece model is integer permille and has no floats in it.** `src/assets` is content:
+  it is saved, shared and eventually signed, so two machines must agree on it byte for
+  byte. Trigonometry belongs to the assembly step above it. Geometry is cosmetic and does
+  **not** enter `VariantId` - changing how a bishop looks must not make a saved game
+  unreplayable.
+- A flat piece is a figure in its *own* colour on a token that is the **same** for both
+  sides. Drawing white as dark-on-light and black as light-on-dark makes the disc the
+  thing the eye sorts by, and the disc is the furniture. `Theme::pieceToken` is the one
+  colour that has to clear both piece colours, which pins it into a narrow band.
+- An editor page that draws its own frame must be dispatched *before* `buildEditor` opens
+  the shared one - a page that begins a second pane inside the first leaves ImGui holding
+  both, and says so in a red box.
+- Placing a widget with `SetCursorScreenPos` moves the layout cursor. Put it back, or
+  everything drawn after lands inside whatever you were drawing on.
+- **`widgets::fillPolygon`, never `PathFillConcave`, for a piece outline.** ImGui's own
+  concave fill closes a valley over - a notch an author cuts comes back filled - so the
+  fill here ear-clips instead. It *copies* its points first, and that is not tidiness:
+  callers pass `dl->_Path`, and every triangle drawn rewrites `_Path` underneath the loop
+  reading it. The symptom is vertices in the 1e33 range, not anything that looks like a
+  drawing bug. `triangulate` fills; it does not validate - `assets::validate` is what
+  decides whether an outline is a shape at all.
+- The piece designer is one pane with three tabs, and the two model tabs draw *inside*
+  it. An editor page that opens its own pane must be dispatched before `buildEditor`
+  opens the shared one.
+- The designer's move preview builds a real `DimSpec` and runs the real `expandAtom`, so
+  "what does this piece do on a 4-D board" is answered by the engine rather than by a
+  drawing. Extent shrinks as dimension grows - 9, 7, 5 - because 9^4 is unreadable.
 - **An atom's magnitudes are units of *movement*, not cells** - see ADR-0013. An axis
   declares a `pitch` for how many cells one unit covers; the turn axis uses 2, because
   boards along it alternate whose move it is and one turn of travel is two boards. The

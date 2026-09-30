@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <map>
+#include <vector>
 
 namespace cb::render::widgets {
 namespace {
@@ -169,6 +170,236 @@ bool rowControl(const char* id, const char* label, const view::Theme& theme, ImF
 }
 
 }  // namespace
+
+namespace {
+
+float twiceArea(const ImVec2* p, int n) {
+  float a = 0.0f;
+  for (int i = 0; i < n; ++i) {
+    const ImVec2& u = p[i];
+    const ImVec2& v = p[(i + 1) % n];
+    a += u.x * v.y - v.x * u.y;
+  }
+  return a;
+}
+
+float cross2(const ImVec2& o, const ImVec2& a, const ImVec2& b) {
+  return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+}
+
+bool inTriangle(const ImVec2& a, const ImVec2& b, const ImVec2& c, const ImVec2& p) {
+  const float d1 = cross2(a, b, p);
+  const float d2 = cross2(b, c, p);
+  const float d3 = cross2(c, a, p);
+  const bool neg = d1 < 0 || d2 < 0 || d3 < 0;
+  const bool pos = d1 > 0 || d2 > 0 || d3 > 0;
+  return !(neg && pos);
+}
+
+}  // namespace
+
+void triangulate(const ImVec2* pts, int n, std::vector<int>& out) {
+  out.clear();
+  if (pts == nullptr || n < 3) return;
+  std::vector<int> poly(static_cast<std::size_t>(n));
+  for (int i = 0; i < n; ++i) poly[static_cast<std::size_t>(i)] = i;
+  // Work anticlockwise, whichever way the author wound it: an outline is a shape, not a
+  // direction, and both windings have to fill the same.
+  if (twiceArea(pts, n) < 0.0f) std::reverse(poly.begin(), poly.end());
+
+  out.reserve(static_cast<std::size_t>(n - 2) * 3);
+  int guard = n * n;  // a self-intersecting outline has no ear; stop rather than spin
+  while (poly.size() > 3 && guard-- > 0) {
+    bool clipped = false;
+    const int m = static_cast<int>(poly.size());
+    for (int i = 0; i < m; ++i) {
+      const int ia = poly[static_cast<std::size_t>((i + m - 1) % m)];
+      const int ib = poly[static_cast<std::size_t>(i)];
+      const int ic = poly[static_cast<std::size_t>((i + 1) % m)];
+      const ImVec2& a = pts[ia];
+      const ImVec2& b = pts[ib];
+      const ImVec2& c = pts[ic];
+      // Reflex corners are not ears - this is the test that keeps a valley a valley.
+      if (cross2(a, b, c) <= 0.0f) continue;
+      bool contains = false;
+      for (const int j : poly) {
+        if (j == ia || j == ib || j == ic) continue;
+        if (inTriangle(a, b, c, pts[j])) {
+          contains = true;
+          break;
+        }
+      }
+      if (contains) continue;
+      out.push_back(ia);
+      out.push_back(ib);
+      out.push_back(ic);
+      poly.erase(poly.begin() + i);
+      clipped = true;
+      break;
+    }
+    if (!clipped) {
+      out.clear();  // no ear anywhere: not a simple polygon
+      return;
+    }
+  }
+  if (poly.size() == 3) {
+    out.push_back(poly[0]);
+    out.push_back(poly[1]);
+    out.push_back(poly[2]);
+  }
+}
+
+void fillPolygon(ImDrawList* dl, const ImVec2* pts, int n, ImU32 col) {
+  if (pts == nullptr || n < 3) return;
+  // Copied first, and this is not defensive tidiness: callers pass `dl->_Path`, and
+  // every triangle drawn below rewrites `_Path` on its way through PathFillConvex. The
+  // points would change under the loop that is reading them, which shows up as vertices
+  // in the 1e33 range rather than as anything that looks like a drawing bug.
+  const std::vector<ImVec2> p(pts, pts + n);
+  std::vector<int> idx;
+  triangulate(p.data(), n, idx);
+  if (idx.empty()) return;
+  // Anti-aliased fill is turned off across the triangles: each one would otherwise
+  // feather its own edges, and the shared edges between them show as pale hairlines
+  // through what is meant to be one solid shape.
+  const ImDrawListFlags saved = dl->Flags;
+  dl->Flags &= ~static_cast<ImDrawListFlags>(ImDrawListFlags_AntiAliasedFill);
+  for (std::size_t i = 0; i + 2 < idx.size(); i += 3) {
+    dl->AddTriangleFilled(p[static_cast<std::size_t>(idx[i])],
+                          p[static_cast<std::size_t>(idx[i + 1])],
+                          p[static_cast<std::size_t>(idx[i + 2])], col);
+  }
+  dl->Flags = saved;
+}
+
+void sectionHead(const char* label, const view::Theme& theme, void* displayFont,
+                 float scale) {
+  ImGui::Dummy(ImVec2(0, 6.0f * scale));
+  if (displayFont != nullptr) ImGui::PushFont(static_cast<ImFont*>(displayFont));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(theme.boneFaint));
+  ImGui::TextUnformatted(label);
+  ImGui::PopStyleColor();
+  if (displayFont != nullptr) ImGui::PopFont();
+  const ImVec2 lo = ImGui::GetItemRectMin();
+  const ImVec2 hi = ImGui::GetItemRectMax();
+  const float avail = ImGui::GetContentRegionAvail().x;
+  // Drawn from the item's own rectangle, never from a cursor position captured before
+  // it - those are not always the same, and the rule ends up floating.
+  ImGui::GetWindowDrawList()->AddLine(ImVec2(hi.x + 8.0f * scale, (lo.y + hi.y) * 0.5f),
+                                      ImVec2(lo.x + avail, (lo.y + hi.y) * 0.5f),
+                                      u32(theme.rule, 0.8f), 1.0f);
+  ImGui::Dummy(ImVec2(0, 3.0f * scale));
+}
+
+bool tabRow(std::initializer_list<const char*> labels, int& selected,
+            const view::Theme& theme, void* displayFont, float scale) {
+  bool changed = false;
+  ImGui::Dummy(ImVec2(0, 8.0f * scale));
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  int i = 0;
+  const float startY = ImGui::GetCursorScreenPos().y;
+  for (const char* label : labels) {
+    if (i != 0) ImGui::SameLine(0.0f, 22.0f * scale);
+    const bool live = i == selected;
+    if (displayFont != nullptr) ImGui::PushFont(static_cast<ImFont*>(displayFont));
+    ImGui::PushStyleColor(ImGuiCol_Text, col(live ? theme.bone : theme.boneFaint));
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0, 0, 0, 0));
+    if (ImGui::Button(label)) {
+      if (selected != i) changed = true;
+      selected = i;
+    }
+    ImGui::PopStyleColor(4);
+    if (displayFont != nullptr) ImGui::PopFont();
+    const ImVec2 lo = ImGui::GetItemRectMin();
+    const ImVec2 hi = ImGui::GetItemRectMax();
+    if (live) {
+      dl->AddLine(ImVec2(lo.x, hi.y + 1.0f), ImVec2(hi.x, hi.y + 1.0f), u32(theme.ember),
+                  2.0f * scale);
+    }
+    ++i;
+  }
+  const float endY = ImGui::GetItemRectMax().y;
+  // One hairline under the whole row, so the tabs read as a strip rather than as a
+  // handful of words that happen to be in a line.
+  dl->AddLine(
+      ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMin().x, endY + 1.0f),
+      ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x, endY + 1.0f),
+      u32(theme.rule, 0.7f), 1.0f);
+  (void)startY;
+  ImGui::Dummy(ImVec2(0, 10.0f * scale));
+  return changed;
+}
+
+bool stepper(const char* id, int& value, int lo, int hi, const view::Theme& theme,
+             float scale, float width) {
+  bool changed = false;
+  const float w = width > 0.0f ? width : 34.0f * scale;
+  ImGui::PushID(id);
+  ImGui::BeginGroup();
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  const ImVec2 origin = ImGui::GetCursorScreenPos();
+
+  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 1.0f));
+  ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, col(theme.panelHi));
+  ImGui::PushStyleColor(ImGuiCol_ButtonActive, col(theme.panelHi));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(theme.boneDim));
+  if (ImGui::Button("+", ImVec2(w, 0.0f)) && value < hi) {
+    ++value;
+    changed = true;
+  }
+  ImGui::PopStyleColor(4);
+
+  // The number is a button: clicking it opens a box to type in, which beats eight
+  // clicks to get from 1 to 9.
+  char text[16];
+  std::snprintf(text, sizeof(text), "%d", value);
+  ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, col(theme.panelHi));
+  ImGui::PushStyleColor(ImGuiCol_ButtonActive, col(theme.panelHi));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(theme.bone));
+  if (ImGui::Button(text, ImVec2(w, 0.0f))) ImGui::OpenPopup("##type");
+  ImGui::PopStyleColor(4);
+
+  ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, col(theme.panelHi));
+  ImGui::PushStyleColor(ImGuiCol_ButtonActive, col(theme.panelHi));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(theme.boneDim));
+  if (ImGui::Button("-", ImVec2(w, 0.0f)) && value > lo) {
+    --value;
+    changed = true;
+  }
+  ImGui::PopStyleColor(4);
+  ImGui::PopStyleVar();
+
+  if (ImGui::BeginPopup("##type")) {
+    int typed = value;
+    ImGui::SetNextItemWidth(90.0f * scale);
+    ImGui::SetKeyboardFocusHere();
+    if (ImGui::InputInt(
+            "##v", &typed, 1, 1,
+            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
+      const int want = typed < lo ? lo : (typed > hi ? hi : typed);
+      if (want != value) {
+        value = want;
+        changed = true;
+      }
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+  ImGui::EndGroup();
+  // A cell drawn round the whole stack, so a run of axes reads as a run of cells rather
+  // than as one long strip of signs.
+  const ImVec2 hi2 = ImGui::GetItemRectMax();
+  dl->AddRect(ImVec2(origin.x - 2.0f, origin.y - 2.0f),
+              ImVec2(hi2.x + 2.0f, hi2.y + 2.0f), u32(theme.rule, 0.85f), 2.0f * scale, 0,
+              1.0f);
+  ImGui::PopID();
+  return changed;
+}
 
 bool button(const char* label, const view::Theme& theme, float width, bool primary,
             bool cold, bool enabled, ImFont* font) {

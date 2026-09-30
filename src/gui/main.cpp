@@ -186,7 +186,8 @@ void syncMarks(render::BoardRenderer& renderer, const app::Session& session) {
 /// use. That makes the whole screen capturable on a machine with no compositor, which is
 /// how the interface gets reviewed at all.
 int captureFrame(const std::string& variantName, const std::string& path,
-                 const std::string& script, const std::string& screen, float overtureT) {
+                 const std::string& script, const std::string& screen, float overtureT,
+                 int previewDims) {
   // Captures use default settings, never the person's own. A screenshot that changes
   // because whoever ran it likes a larger interface is not a screenshot of the game -
   // and `ctest -R gui-` would then pass or fail by whose machine it ran on.
@@ -211,7 +212,11 @@ int captureFrame(const std::string& variantName, const std::string& path,
     shell->go(app::Screen::Settings);
   else if (screen == "editor")
     shell->go(app::Screen::Editor);
-  else if (screen == "info")
+  else if (screen == "designer" || screen == "body" || screen == "flat") {
+    // The designers need a document open, which the editor's own entry does for them.
+    (void)shell->openEditor(variantName);
+    shell->go(app::Screen::Editor);
+  } else if (screen == "info")
     shell->go(app::Screen::GameInfo);
   else if (screen == "pieces")
     shell->go(app::Screen::PieceMoves);
@@ -269,6 +274,12 @@ int captureFrame(const std::string& variantName, const std::string& path,
     renderer->setTheme(theme);
     (*ui)->setTheme(theme);
   }
+  // Which page of the editor a designer capture wants. Set here rather than inside the
+  // loop: it is where the review is pointed, not something a frame decides.
+  if (screen == "designer") (*ui)->openEditorPage(1, 0);
+  if (screen == "body") (*ui)->openEditorPage(1, 1);
+  if (screen == "flat") (*ui)->openEditorPage(1, 2);
+  (*ui)->setPreviewDims(previewDims);
   // Two frames: ImGui sizes some things from the previous frame, so the first can catch
   // a panel mid-layout.
   for (int frame = 0; frame < 2; ++frame) {
@@ -347,6 +358,7 @@ int main(int argc, char** argv) {
   std::string script;
   std::string screen;
   float overtureT = 0.78f;
+  int previewDims = 2;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "-h" || arg == "--help") {
@@ -357,10 +369,11 @@ int main(int argc, char** argv) {
           "  Esc           pause     u  undo     r  reset\n\n"
           "With no variant, the game opens on the main menu.\n"
           "--shot renders one frame to a PPM and exits, with no display required;\n"
-          "--screen picks which one: menu, newgame, pause, settings, editor, info,\n"
-          "pieces, or the board by default.\n"
+          "--screen picks which one: menu, newgame, pause, settings, editor, designer,\n"
+          "body, flat, info, pieces, or the board by default.\n"
           "--t 0..1 is where the library screen's overture is in its cycle: 0 the flat\n"
-          "board every variant starts from, 1 the shape it becomes.\n");
+          "board every variant starts from, 1 the shape it becomes.\n"
+          "--dims 2..4 is how many dimensions the designer's move preview shows.\n");
       return 0;
     }
     if (arg == "--shot" && i + 1 < argc)
@@ -371,12 +384,14 @@ int main(int argc, char** argv) {
       screen = argv[++i];
     else if (arg == "--t" && i + 1 < argc)
       overtureT = std::strtof(argv[++i], nullptr);
+    else if (arg == "--dims" && i + 1 < argc)
+      previewDims = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
     else if (!arg.starts_with("-"))
       variantName = arg;
   }
   if (!shotPath.empty()) {
     return captureFrame(variantName.empty() ? "standard" : variantName, shotPath, script,
-                        screen, overtureT);
+                        screen, overtureT, previewDims);
   }
 
   auto shell = makeShell();

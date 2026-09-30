@@ -54,13 +54,13 @@ if(SDL3_FOUND)
   list(APPEND CB_RENDER_SOURCES window.cpp)
   if(imgui_FOUND)
     list(APPEND CB_RENDER_SOURCES ui.cpp ui_menus.cpp ui_widgets.cpp deco.cpp
-                                 overture_scene.cpp)
+                                 overture_scene.cpp ui_designer.cpp)
   endif()
 endif()
 
 cb_layer(chessbox_render LEVEL 100
   SOURCES ${CB_RENDER_SOURCES}
-  DEPS chessbox_view chessbox_app
+  DEPS chessbox_view chessbox_app chessbox_assets
   SYSTEM_DEPS Vulkan::Vulkan)
 target_include_directories(chessbox_render PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/generated)
 if(SDL3_FOUND)

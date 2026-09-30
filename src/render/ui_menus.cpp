@@ -694,7 +694,6 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   if (button("CLEAR", t, px(88), false, true, true, display)) {
     for (auto& row : previewCells_) row.fill(0);
   }
-  ImGui::Dummy(ImVec2(0, px(8)));
 
   // The controls are ImGui's, but they wear the game's clothes: rounded, panel-coloured,
   // ember for the marks, so the designer sits in the same world as the menus rather than
@@ -716,195 +715,36 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   if (names.empty()) {
     ImGui::TextUnformatted("This variant declares no pieces.");
   } else {
-    if (editorPiece_ < 0 || editorPiece_ >= static_cast<int>(names.size()))
+    if (editorPiece_ < 0 || editorPiece_ >= static_cast<int>(names.size())) {
       editorPiece_ = 0;
-
-    // The pieces as a lit row of buttons, not a list: the move editor below wants the
-    // whole pane width, and a table fought it for it.
+    }
+    sectionHead("PIECE", t, fontSmall_, scale_);
     ImGui::PushFont(small);
     for (int i = 0; i < static_cast<int>(names.size()); ++i) {
       if (i != 0) ImGui::SameLine();
       const bool selected = i == editorPiece_;
-      ImGui::PushStyleColor(ImGuiCol_Button, col(selected ? t.emberDeep : t.panelHi,
-                                                 selected ? 1.0f : 0.6f));
-      ImGui::PushStyleColor(ImGuiCol_Text, col(selected ? t.bone : t.boneDim));
-      if (ImGui::SmallButton(names[static_cast<std::size_t>(i)].c_str()))
+      ImGui::PushStyleColor(ImGuiCol_Button, col(t.panelHi, selected ? 1.0f : 0.45f));
+      ImGui::PushStyleColor(ImGuiCol_Text, col(selected ? t.ember : t.boneDim));
+      if (ImGui::SmallButton(names[static_cast<std::size_t>(i)].c_str())) {
         editorPiece_ = i;
+      }
       ImGui::PopStyleColor(2);
     }
     ImGui::PopFont();
-    ImGui::Dummy(ImVec2(0, px(4)));
+
+    // Three jobs on one piece - how it moves, what its body is, what its flat outline
+    // is - so three tabs rather than three screens. Moving between them must not feel
+    // like leaving the piece behind.
+    designTab_ = std::clamp(designTab_, 0, 2);
+    tabRow({"MOVES", "BODY", "FLAT ICON"}, designTab_, t, fontDisplay_, scale_);
 
     const std::string piece = names[static_cast<std::size_t>(editorPiece_)];
-    auto atoms = editor->pieceAtoms(piece);
-    if (!atoms.has_value()) {
-      ImGui::TextUnformatted("this piece could not be read");
+    if (designTab_ == 0) {
+      drawMovesTab(shell, piece);
+    } else if (designTab_ == 1) {
+      drawBodyTab(shell);
     } else {
-      std::vector<MoveAtom> list = *atoms;
-      bool changed = false;
-      std::size_t removeAt = list.size();
-      // A small coloured button: the editor's controls say what they are by their hue -
-      // add is warm, remove is cool, and each kind of move has its own colour.
-      const auto chip = [&](const char* label, const view::Rgba& c, float w) {
-        ImGui::PushStyleColor(ImGuiCol_Button, col(c, 0.85f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, col(c));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, col(c));
-        const bool pressed = ImGui::Button(label, ImVec2(w, 0.0f));
-        ImGui::PopStyleColor(3);
-        return pressed;
-      };
-      ImGui::PushFont(small);
-      for (std::size_t i = 0; i < list.size(); ++i) {
-        ImGui::PushID(static_cast<int>(i));
-        ImGui::Text("%2zu", i + 1);
-        ImGui::SameLine();
-        // Each step size is its own - n +, coloured so remove reads cool and add warm.
-        for (std::size_t k = 0; k < list[i].mags.size(); ++k) {
-          ImGui::PushID(static_cast<int>(k) + 1);
-          if (chip("-", t.panelHi, px(22))) {
-            if (list[i].mags[k] > 1) {
-              list[i].mags[k] = static_cast<std::int16_t>(list[i].mags[k] - 1);
-              changed = true;
-            }
-          }
-          ImGui::SameLine();
-          ImGui::Text("%d", static_cast<int>(list[i].mags[k]));
-          ImGui::SameLine();
-          if (chip("+", t.ember, px(22))) {
-            list[i].mags[k] = static_cast<std::int16_t>(list[i].mags[k] + 1);
-            changed = true;
-          }
-          ImGui::PopID();
-          ImGui::SameLine();
-        }
-        // One fewer / one more step size, in a cooler pair so it is not confused with a
-        // value stepper.
-        if (chip("-", t.panelHi, px(22))) {
-          if (list[i].mags.size() > 1) {
-            list[i].mags.pop();
-            changed = true;
-          }
-        }
-        ImGui::SameLine();
-        if (chip("+", t.rift, px(22))) {
-          if (list[i].mags.size() < kMaxDims) {
-            list[i].mags.push(1);
-            changed = true;
-          }
-        }
-        ImGui::SameLine();
-        // The kind and the capture rule are buttons that cycle, not menus: one tap
-        // changes the state, and the colour says which state it is on.
-        {
-          const bool slide = list[i].mode == MoveMode::Slide;
-          const bool hop = list[i].mode == MoveMode::Hop;
-          const view::Rgba modeCol = slide ? t.diffMedium
-                                     : hop ? t.diffImpossible
-                                           : t.moss;
-          if (chip(slide ? "slide" : hop ? "hop" : "leap", modeCol, px(66))) {
-            list[i].mode = slide ? MoveMode::Leap : hop ? MoveMode::Slide : MoveMode::Hop;
-            changed = true;
-          }
-        }
-        ImGui::SameLine();
-        {
-          const bool may = list[i].capture == CapturePolicy::May;
-          const bool cannot = list[i].capture == CapturePolicy::Cannot;
-          const view::Rgba capCol = may ? t.ember : cannot ? t.panelHi : t.blood;
-          if (chip(may ? "may" : cannot ? "cannot" : "must", capCol, px(72))) {
-            list[i].capture = may      ? CapturePolicy::Must
-                              : cannot ? CapturePolicy::May
-                                       : CapturePolicy::Cannot;
-            changed = true;
-          }
-        }
-        ImGui::SameLine();
-        bool rider = list[i].maxK == kUnlimited;
-        if (ImGui::Checkbox("runs", &rider)) {
-          list[i].maxK = rider ? kUnlimited : 1;
-          changed = true;
-        }
-        ImGui::SameLine();
-        if (ImGui::Checkbox("forward", &list[i].oriented)) changed = true;
-        ImGui::SameLine();
-        if (chip("x", t.blood, px(22))) removeAt = i;
-        ImGui::PopID();
-      }
-      ImGui::PopFont();
-      if (removeAt < list.size()) {
-        list.erase(list.begin() + static_cast<std::ptrdiff_t>(removeAt));
-        changed = true;
-      }
-
-      // The composition palette: dropping a bundle in unions its atoms, which is how
-      // rook + bishop becomes a queen in 2-D and something else entirely above it.
-      ImGui::Dummy(ImVec2(0, px(6)));
-      const auto addAtom = [&](std::initializer_list<std::int16_t> mags,
-                               std::uint32_t maxK, MoveMode m, CapturePolicy c,
-                               bool fwd) {
-        MoveAtom a;
-        for (std::int16_t v : mags) a.mags.push(v);
-        a.maxK = maxK;
-        a.mode = m;
-        a.capture = c;
-        a.oriented = fwd;
-        auto canon = MoveAtom::canonicalize(a);
-        if (canon.has_value()) list.push_back(*canon);
-        changed = true;
-      };
-      if (chip("ADD MOVE", t.ember, 0.0f)) {
-        addAtom({1}, 1, MoveMode::Leap, CapturePolicy::May, false);
-      }
-      ImGui::SameLine();
-      if (chip("+ rook", t.diffEasy, 0.0f)) {
-        addAtom({1}, kUnlimited, MoveMode::Slide, CapturePolicy::May, false);
-      }
-      ImGui::SameLine();
-      if (chip("+ bishop", t.diffMedium, 0.0f)) {
-        addAtom({1, 1}, kUnlimited, MoveMode::Slide, CapturePolicy::May, false);
-      }
-      ImGui::SameLine();
-      if (chip("+ knight", t.diffHard, 0.0f)) {
-        addAtom({1, 2}, 1, MoveMode::Leap, CapturePolicy::May, false);
-      }
-      ImGui::SameLine();
-      if (chip("+ king", t.diffImpossible, 0.0f)) {
-        addAtom({1}, 1, MoveMode::Leap, CapturePolicy::May, false);
-      }
-      ImGui::SameLine();
-      if (chip("+ diagonal step", t.rift, 0.0f)) {
-        addAtom({1, 1}, 1, MoveMode::Leap, CapturePolicy::May, false);
-      }
-      ImGui::SameLine();
-      if (chip("+ forward step", t.moss, 0.0f)) {
-        addAtom({1}, 1, MoveMode::Leap, CapturePolicy::Cannot, true);
-      }
-      ImGui::SameLine();
-      if (chip("+ forward capture", t.blood, 0.0f)) {
-        addAtom({1, 1}, 1, MoveMode::Leap, CapturePolicy::Must, true);
-      }
-
-      if (changed) {
-        // Keep whatever the controls produced legal, so a write is never silently
-        // dropped and the control does not spring back: a leap cannot ask for two
-        // steps, a hop is single-step, and a minimum cannot exceed its maximum.
-        bool ok = true;
-        for (MoveAtom& a : list) {
-          if (a.mode == MoveMode::Leap && a.minK > 1) a.minK = 1;
-          if (a.mode == MoveMode::Hop) {
-            a.minK = 1;
-            a.maxK = 1;
-          }
-          if (a.maxK != kUnlimited && a.minK > a.maxK) a.minK = a.maxK;
-          auto canon = MoveAtom::canonicalize(a);
-          if (!canon.has_value()) {
-            ok = false;
-            break;
-          }
-          a = *canon;
-        }
-        if (ok) (void)editor->setPieceAtoms(piece, list);
-      }
+      drawIconTab(shell);
     }
   }
   ImGui::PopStyleColor(9);
