@@ -100,6 +100,9 @@ class Session {
   /// Move the animation on. Returns true while something is still moving, which is how
   /// the front end knows to keep drawing frames.
   bool advanceAnimation(float dt);
+  /// Pin the running move at progress `t` in [0,1], for a capture that states its own
+  /// time. Does nothing when no move is animating.
+  void setMoveProgress(float t) noexcept { anim_.setProgress(t); }
   [[nodiscard]] const std::vector<view::Placement>& placements() const noexcept {
     return placements_;
   }

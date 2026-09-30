@@ -101,6 +101,10 @@ class MoveAnimation {
   void clear();
 
   void advance(float dt);
+  /// Put the animation at an exact point and hold it there, for a capture. A screenshot
+  /// or a clip frame has to state its `t` rather than integrate towards one, or it is a
+  /// different picture on a faster machine. Does nothing while inactive.
+  void setProgress(float t) noexcept;
   [[nodiscard]] bool active() const noexcept { return active_; }
   /// How far through the move, 0 to 1. The clock both the animation and the move camera
   /// read, so they cannot disagree about where the piece is.

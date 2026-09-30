@@ -194,7 +194,8 @@ void syncMarks(render::BoardRenderer& renderer, const app::Session& session) {
 /// video from them is an external convenience, never a codec in the engine.
 int captureFrame(const std::string& variantName, const std::string& path,
                  const std::string& script, const std::string& screen, float overtureT,
-                 int previewDims, bool clip, int clipFrames, float clipT0, float clipT1) {
+                 int previewDims, bool clip, int clipFrames, float clipT0, float clipT1,
+                 bool cinema, const std::string& followMode, float moveT) {
   // Captures use default settings, never the person's own. A screenshot that changes
   // because whoever ran it likes a larger interface is not a screenshot of the game -
   // and `ctest -R gui-` would then pass or fail by whose machine it ran on.
@@ -239,6 +240,17 @@ int captureFrame(const std::string& variantName, const std::string& path,
     shell->overtures().setProgress(overtureT);
   } else if (screen == "quit")
     shell->go(app::Screen::QuitConfirm);
+
+  // A capture that wants to show the move camera states it rather than relying on the
+  // player's settings (a capture uses defaults, where following is off). `--move-t` pins
+  // the move itself, the same way `--t` pins the overture.
+  if (shell->session() != nullptr) {
+    if (!followMode.empty()) {
+      shell->session()->setCameraMode(followMode);
+      shell->session()->setFollowStrength(1.0f);
+    }
+    if (moveT >= 0.0f) shell->session()->setMoveProgress(moveT);
+  }
 
   if (SDL_getenv("DISPLAY") == nullptr && SDL_getenv("WAYLAND_DISPLAY") == nullptr) {
     SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
@@ -298,17 +310,25 @@ int captureFrame(const std::string& variantName, const std::string& path,
     (*ui)->newFrame();
     const render::UiRequest request = (*ui)->build(*shell, 60.0f);
     (*ui)->endFrame();
-    const render::BoardRect rect{request.boardRect[0], request.boardRect[1],
-                                 request.boardRect[2], request.boardRect[3]};
+    const render::BoardRect uiRect{request.boardRect[0], request.boardRect[1],
+                                   request.boardRect[2], request.boardRect[3]};
+    // Cinema is the board and the move and nothing else: the whole frame is the board and
+    // the interface emits nothing (the overlay is not recorded), so a clip reads as
+    // footage rather than as a screenshot of the game's furniture.
+    const render::BoardRect frame =
+        cinema ? render::BoardRect{0.0f, 0.0f, static_cast<float>(target->width()),
+                                   static_cast<float>(target->height())}
+               : uiRect;
     render::InstanceSet instances;
     if (shell->showsBoard()) {
       // A capture of a screen that sits over the board shows it exactly as a player
       // would see it - stepped back and out of focus - which is also what puts the blur
-      // passes under the validation layers in `ctest -R gui-pause`.
-      const float away = shell->screen() == app::Screen::Game ? 0.0f : 1.0f;
+      // passes under the validation layers in `ctest -R gui-pause`. Cinema never blurs:
+      // the board is the subject.
+      const float away = (shell->screen() == app::Screen::Game || cinema) ? 0.0f : 1.0f;
       shell->session()->setPullBack(away);
       renderer->setBlur(away);
-      if (rect.valid()) shell->session()->setBoardAspect(rect.width / rect.height);
+      if (frame.valid()) shell->session()->setBoardAspect(frame.width / frame.height);
       syncMarks(*renderer, *shell->session());
       instances = renderer->buildInstances(
           shell->session()->snapshot(), shell->session()->viewConfig(),
@@ -319,9 +339,12 @@ int captureFrame(const std::string& variantName, const std::string& path,
     }
     const view::OrbitCamera camera =
         shell->showsBoard() ? shell->session()->camera() : view::OrbitCamera{};
-    if (auto ok = renderer->render(
-            *target, instances, camera, [&](VkCommandBuffer cmd) { (*ui)->record(cmd); },
-            rect);
+    const std::function<void(VkCommandBuffer)> drawUi = [&](VkCommandBuffer cmd) {
+      (*ui)->record(cmd);
+    };
+    const std::function<void(VkCommandBuffer)> noUi{};
+    if (auto ok =
+            renderer->render(*target, instances, camera, cinema ? noUi : drawUi, frame);
         !ok.has_value()) {
       std::fprintf(stderr, "%s\n", ok.error().format().c_str());
       return std::nullopt;
@@ -367,8 +390,13 @@ int captureFrame(const std::string& variantName, const std::string& path,
                                   : clipT0 + (clipT1 - clipT0) * static_cast<float>(i) /
                                                  static_cast<float>(frames - 1);
       // Pin the cycle outright: a clip is only deterministic if every frame states its
-      // own `t` rather than integrating towards it.
-      if (screen == "newgame") shell->overtures().setProgress(t);
+      // own `t` rather than integrating towards it. The library sweeps the overture;
+      // every other screen sweeps the running move, so a board clip is a gameplay shot.
+      if (screen == "newgame") {
+        shell->overtures().setProgress(t);
+      } else if (shell->session() != nullptr) {
+        shell->session()->setMoveProgress(t);
+      }
       char name[32];
       std::snprintf(name, sizeof(name), "frame_%04d.ppm", i);
       const std::optional<render::Image> img = renderFrame(0.0f);
@@ -415,11 +443,14 @@ int main(int argc, char** argv) {
   std::string script;
   std::string screen;
   std::string clipDir;
+  std::string followMode;
   float overtureT = 0.78f;
+  float moveT = -1.0f;
   int previewDims = 2;
   int clipFrames = 96;
   float clipT0 = 0.0f;
   float clipT1 = 1.0f;
+  bool cinema = false;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "-h" || arg == "--help") {
@@ -436,6 +467,9 @@ int main(int argc, char** argv) {
           "board every variant starts from, 1 the shape it becomes.\n"
           "--clip DIR renders a sequence of numbered PPM frames instead of one shot,\n"
           "sweeping t from --t0 to --t1 over --frames frames (default 0..1, 96).\n"
+          "--cinema drops the interface and fills the frame with the board.\n"
+          "--follow off|piece|route and --move-t 0..1 show the move camera in a "
+          "capture.\n"
           "--dims 2..4 is how many dimensions the designer's move preview shows.\n");
       return 0;
     }
@@ -455,6 +489,12 @@ int main(int argc, char** argv) {
       clipT1 = std::strtof(argv[++i], nullptr);
     else if (arg == "--frames" && i + 1 < argc)
       clipFrames = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
+    else if (arg == "--cinema")
+      cinema = true;
+    else if (arg == "--follow" && i + 1 < argc)
+      followMode = argv[++i];
+    else if (arg == "--move-t" && i + 1 < argc)
+      moveT = std::strtof(argv[++i], nullptr);
     else if (arg == "--dims" && i + 1 < argc)
       previewDims = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
     else if (!arg.starts_with("-"))
@@ -464,7 +504,7 @@ int main(int argc, char** argv) {
   if (!targetPath.empty()) {
     return captureFrame(variantName.empty() ? "standard" : variantName, targetPath,
                         script, screen, overtureT, previewDims, !clipDir.empty(),
-                        clipFrames, clipT0, clipT1);
+                        clipFrames, clipT0, clipT1, cinema, followMode, moveT);
   }
 
   auto shell = makeShell();

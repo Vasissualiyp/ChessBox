@@ -52,6 +52,9 @@ nix flake check                  # THE gate: both compilers, sanitizers, coverag
 ./build/dev/src/gui/chessbox_gui torus --shot o.ppm --screen newgame --t 0.6  # an overture
 ./build/dev/src/gui/chessbox_gui torus --clip frames/ --screen newgame       # a frame sequence
                                  # (--frames N --t0 a --t1 b; mux with ffmpeg externally)
+./build/dev/src/gui/chessbox_gui standard --script $'click e2\nclick e4' \
+                                 --follow route --move-t 0.5 --cinema --shot m.ppm
+                                 # a gameplay shot: the move camera, no interface
 ./build/dev/src/gui/chessbox_gui standard --shot o.ppm --screen body   # the designer tabs
 ./build/dev/src/gui/chessbox_gui standard --shot o.ppm --screen designer --dims 4
 ```

@@ -110,8 +110,7 @@ MovePath tracePath(const VariantSpec& v, const Position& pos, PieceTypeId type,
           // the square landed on is empty. Reading `to` made the capture atom look
           // illegal, left the move unexplained, and handed the animation a route with no
           // steps in it.
-          const CellId taken =
-              m.captureCell != kInvalidCell ? m.captureCell : m.to;
+          const CellId taken = m.captureCell != kInvalidCell ? m.captureCell : m.to;
           const bool occupied = !pos.at(taken).empty();
           const bool allowed = atom.capture == CapturePolicy::May ||
                                (atom.capture == CapturePolicy::Must && occupied) ||
@@ -412,6 +411,12 @@ void MoveAnimation::advance(float dt) {
   if (!active_) return;
   elapsed_ += dt;
   if (elapsed_ >= duration_) clear();
+}
+
+void MoveAnimation::setProgress(float t) noexcept {
+  if (!active_) return;
+  const float clamped = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+  elapsed_ = clamped * duration_;
 }
 
 MoveAnimation::Sample MoveAnimation::sample() const {
