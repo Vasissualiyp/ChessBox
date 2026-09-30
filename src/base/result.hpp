@@ -14,8 +14,9 @@ enum class ErrorCode : std::uint8_t {
   ValidationError,  // well-formed but semantically invalid
   OutOfRange,
   Unsupported,
-  BudgetExceeded,  // variant exceeds a configured resource budget
-  Internal,        // a broken invariant; should never reach a user
+  InvalidArgument,  // a supplied argument is not usable
+  BudgetExceeded,   // variant exceeds a configured resource budget
+  Internal,         // a broken invariant; should never reach a user
 };
 
 std::string_view toString(ErrorCode c) noexcept;

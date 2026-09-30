@@ -13,6 +13,8 @@ std::string_view toString(ErrorCode c) noexcept {
       return "out of range";
     case ErrorCode::Unsupported:
       return "unsupported";
+    case ErrorCode::InvalidArgument:
+      return "invalid argument";
     case ErrorCode::BudgetExceeded:
       return "budget exceeded";
     case ErrorCode::Internal:
