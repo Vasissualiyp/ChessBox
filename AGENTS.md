@@ -291,3 +291,14 @@ These are the ones that have actually cost time here, not hypotheticals.
 - `ImDrawList::AddCircle` with `num_segments = 0` divides by a tessellation table that is
   zero-filled until `NewFrame` has run - so it is an integer divide by zero in a headless
   draw list. Always state the segment count.
+- **The move camera reads the trace, never the topology.** `view::moveCamera`
+  (`src/view/move_camera.cpp`) is a pure function of `MovePath`/`Placement`/`ViewConfig`/
+  `CameraPolicy`/`t` - no `Coord`, no dimension count. `Session::camera()` folds it in as
+  an offset so the board, the labels and the pick ray agree; picking is locked while a
+  shot is in flight, and `clickPixel` uses the *effective* camera, not the raw member, or
+  the pause pull-back desyncs it. A camera choice is `CameraPolicy` data, never a branch
+  on `dims`. See `docs/camera.md`.
+- A capture's `--clip`/`--shot` path is settled by **two thrown-away frames** before the
+  real ones: the first lets a screen change reset the pane transition (after the tick),
+  the second advances it to done. With one, the library draws at alpha zero; with the
+  pane left unsettled the frames come out blank.

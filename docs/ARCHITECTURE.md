@@ -336,6 +336,14 @@ Cross-board check is ordinary attack generation over the full lattice.
   animation. The projection config is data, so new view styles are data too.
 - Geometry seams are visualised (ghosted wrap previews, seam highlighting) —
   non-orientable boards are unplayable without this.
+- **The move camera** (`view::moveCamera`) is a part of the projection pipeline, not
+  a renderer feature: it is a pure function of `(MovePath, Placement, ViewConfig,
+  CameraPolicy, t)` living in `view`, so framing and picking are testable with no GPU.
+  It reads the route as `PathStep` tags and world positions only - never a `Coord`
+  and never a dimension count - so it generalises with the games. `app::Session` folds
+  its output into `camera()` as an offset, so every consumer agrees by construction.
+  Decisions are `CameraPolicy` data, keyed by geometry and view style (ADR-0016/0017).
+  See [`docs/camera.md`](camera.md).
 - Renderer reads an immutable `PositionView` snapshot; the engine never blocks
   on the GPU and the renderer never mutates game state. **[INVARIANT]**
 
