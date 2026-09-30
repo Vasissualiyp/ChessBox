@@ -1084,6 +1084,37 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     }
   }
 
+  // A move waiting for confirmation: a yes or a no, and nothing else. The board is frozen
+  // behind it until it is answered.
+  const auto& waiting = session.pendingMove();
+  if (waiting.active) {
+    ImGui::OpenPopup("confirmmove");
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f,
+                                   vp->WorkPos.y + vp->WorkSize.y * 0.5f),
+                            ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal(
+            "confirmmove", nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+      ImGui::PushFont(display);
+      ImGui::PushStyleColor(ImGuiCol_Text, col(t.ember));
+      ImGui::Text("PLAY %s - %s?", cellName(v.dims, waiting.from).c_str(),
+                  cellName(v.dims, waiting.to).c_str());
+      ImGui::PopStyleColor();
+      ImGui::PopFont();
+      ImGui::Dummy(ImVec2(0, px(4)));
+      if (button("PLAY", t, px(104), true, false, true, display)) {
+        (void)session.confirmMove();
+        ImGui::CloseCurrentPopup();
+      }
+      ImGui::SameLine();
+      if (button("CANCEL", t, px(104), false, false, true, display)) {
+        session.cancelMove();
+        ImGui::CloseCurrentPopup();
+      }
+      ImGui::EndPopup();
+    }
+  }
+
   // A flat board's pieces are drawn here rather than by the renderer: a circle token and
   // the piece's own icon, in screen space, which is also what lets the token follow the
   // move animation exactly. The background draw list puts them over the board but under

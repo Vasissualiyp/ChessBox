@@ -296,3 +296,26 @@ TEST_CASE("a malformed action script is rejected with its line number", "[unit][
   REQUIRE(r.error().line == 2);
   REQUIRE(r.error().message.find("waggle") != std::string::npos);
 }
+
+TEST_CASE("confirm before moving holds the move until it is confirmed", "[unit][app]") {
+  auto s = open("standard");
+  s->setConfirmMoves(true);
+  REQUIRE(s->applyScript("click e2\nclick e4").has_value());
+  CHECK(s->game().plyCount() == 0);  // not played yet
+  REQUIRE(s->pendingMove().active);
+  CHECK(s->pendingMove().from != kInvalidCell);
+
+  REQUIRE(s->confirmMove().has_value());
+  CHECK_FALSE(s->pendingMove().active);
+  CHECK(s->game().plyCount() == 1);
+}
+
+TEST_CASE("a move waiting for confirmation can be cancelled", "[unit][app]") {
+  auto s = open("standard");
+  s->setConfirmMoves(true);
+  REQUIRE(s->applyScript("click e2\nclick e4").has_value());
+  REQUIRE(s->pendingMove().active);
+  s->cancelMove();
+  CHECK_FALSE(s->pendingMove().active);
+  CHECK(s->game().plyCount() == 0);
+}

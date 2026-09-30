@@ -25,6 +25,8 @@ enum class ActionKind : std::uint8_t {
   Zoom,           ///< dx as a multiplier
   SetScreenAxes,  ///< text is a comma-separated axis name list
   SetPromotion,   ///< text is a piece name
+  Confirm,        ///< play the move that is waiting for confirmation
+  Cancel,         ///< discard it
 };
 
 struct Action {
@@ -136,6 +138,20 @@ class Session {
   Result<void> choosePromotion(PieceTypeId piece);
   void cancelPromotion();
 
+  /// A move the player has chosen but not yet played, when "confirm before moving" is on.
+  /// The board is frozen while it waits, exactly as it is for a promotion: the player has
+  /// committed to the move and owes only a yes or a no.
+  struct PendingMove {
+    bool active{false};
+    CellId from{kInvalidCell};
+    CellId to{kInvalidCell};
+  };
+  [[nodiscard]] const PendingMove& pendingMove() const noexcept { return pendingMove_; }
+  Result<void> confirmMove();
+  void cancelMove();
+  void setConfirmMoves(bool on) noexcept { confirmMoves_ = on; }
+  [[nodiscard]] bool confirmMoves() const noexcept { return confirmMoves_; }
+
   /// Replace the current position from FEN-N, discarding history. Used for setting up a
   /// study or a test position, and by the front end's position entry.
   Result<void> loadFen(std::string_view fen);
@@ -184,6 +200,8 @@ class Session {
   float pullBack_{0.0f};
   bool framedOnce_{false};
   PendingPromotion pending_;
+  PendingMove pendingMove_;
+  bool confirmMoves_{false};
   std::string promotionPreference_;
   std::string message_;
 };

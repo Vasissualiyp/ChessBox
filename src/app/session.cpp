@@ -33,6 +33,14 @@ Result<Action> parseAction(const VariantSpec& v, std::string_view line) {
     a.kind = ActionKind::Reset;
     return a;
   }
+  if (verb == "confirm") {
+    a.kind = ActionKind::Confirm;
+    return a;
+  }
+  if (verb == "cancel") {
+    a.kind = ActionKind::Cancel;
+    return a;
+  }
   if (verb == "orbit") {
     a.kind = ActionKind::Orbit;
     in >> a.dx >> a.dy;
@@ -319,6 +327,30 @@ void Session::cancelPromotion() {
   refreshSnapshot();
 }
 
+Result<void> Session::confirmMove() {
+  if (!pendingMove_.active) {
+    return fail(ErrorCode::Internal, "no move is waiting for confirmation");
+  }
+  const CellId from = pendingMove_.from;
+  const CellId to = pendingMove_.to;
+  pendingMove_ = PendingMove{};
+  const Move* m = findMove(from, to);
+  if (m == nullptr) {
+    message_ = "that move is no longer legal";
+    selected_ = kInvalidCell;
+    refreshSnapshot();
+    return fail(ErrorCode::ValidationError, "that move is no longer legal");
+  }
+  return playChecked(*m);
+}
+
+void Session::cancelMove() {
+  if (!pendingMove_.active) return;
+  pendingMove_ = PendingMove{};
+  message_ = "cancelled";
+  refreshSnapshot();
+}
+
 void Session::refreshSnapshot() {
   snapshot_ = view::PositionView::capture(game_->position());
   snapshot_.setSelected(selected_);
@@ -345,7 +377,7 @@ Result<void> Session::apply(const Action& a) {
       }
       // While a promotion is pending the board is frozen: the player has already
       // committed to the move and owes only the choice of piece.
-      if (pending_.active) return {};
+      if (pending_.active || pendingMove_.active) return {};
       const Piece piece = game_->position().at(a.cell);
       const bool ownPiece =
           !piece.empty() && piece.colorOf() == game_->position().sideToMove();
@@ -358,6 +390,12 @@ Result<void> Session::apply(const Action& a) {
             // ask, rather than picking for the player.
             pending_ = PendingPromotion{true, selected_, a.cell, std::move(choices)};
             message_ = "choose a piece";
+            refreshSnapshot();
+            return {};
+          }
+          if (confirmMoves_) {
+            pendingMove_ = PendingMove{true, selected_, a.cell};
+            message_ = "confirm the move?";
             refreshSnapshot();
             return {};
           }
@@ -384,8 +422,16 @@ Result<void> Session::apply(const Action& a) {
       return {};
     }
 
+    case ActionKind::Confirm:
+      return confirmMove();
+
+    case ActionKind::Cancel:
+      cancelMove();
+      return {};
+
     case ActionKind::Undo:
       pending_ = PendingPromotion{};
+      pendingMove_ = PendingMove{};
       if (!game_->undo()) {
         message_ = "nothing to undo";
         return {};
@@ -399,6 +445,7 @@ Result<void> Session::apply(const Action& a) {
     case ActionKind::Reset:
       game_->reset();
       pending_ = PendingPromotion{};
+      pendingMove_ = PendingMove{};
       selected_ = kInvalidCell;
       message_ = "reset";
       refreshSnapshot();
