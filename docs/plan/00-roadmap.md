@@ -40,6 +40,7 @@ directory. Read `docs/ARCHITECTURE.md` first.
 | M14 | Onboarding, tutorial and first-run polish | a stranger is playing something interesting within ten minutes and understands why it is different | not started | [M14](M14-onboarding.md) |
 | M15 | Campaign: the geometry ladder | a designed progression with a concept boss per leg, ending on a `t6` puzzle finale | not started | [M15](M15-campaign.md) |
 | M16 | Steam publishing: store, demo and release | Coming Soon page, build pipeline, demo/Next Fest, ratings, launch | in progress: M16.2 packaging + SteamPipe scaffolding done; M16.1 store page is process | [M16](M16-publishing.md) |
+| M17 | Play on the shape: the geometry view | a button turns the play board into its own topology - the torus is a donut, the Klein bottle a bottle - and a move is played on it | not started, first in the release sequence's Wave 1 tail | [M17](M17-geometry-view.md) |
 
 Each completed milestone's plan file ends with a **Status** section recording what was
 built, what was deferred, and why - including the places where the plan turned out to
@@ -76,10 +77,16 @@ first and can ship on their own.
 3. **M13 — generic overtures.** The library screen already animates for the shipped
    variants; this makes it animate for *any* variant - polish, and the prerequisite for
    Wave 4's user content.
-4. **M16.1 — the Coming Soon page.** It needs nothing but the clips M11/M12/M13 produce,
-   and **wishlists accrue from the day it is live**, so it starts here, in parallel with
-   the visuals, not at release. The Steam review is 7 business days; the app, fee, assets,
-   trailer and content survey are the gate.
+4. **M17 — play on the shape.** The button that turns the play board into its own topology
+   and keeps the game playable on it. It comes **before** the store page on purpose: it is
+   the single strongest trailer the game has - chess played *on a donut* is the store
+   page's argument in one shot - and it needs no opponent, campaign or editor. It reuses
+   the M13 warps, so it is a small step on top of work already done, and it is the one
+   feature in this list a viewer will not have seen in any other chess game.
+5. **M16.1 — the Coming Soon page.** It needs nothing but the clips M11/M12/M13/M17
+   produce, and **wishlists accrue from the day it is live**, so it starts here, in
+   parallel with the visuals, not at release. The Steam review is 7 business days; the
+   app, fee, assets, trailer and content survey are the gate.
 
 **Wave 2 — polish and demo (convert, and make Next Fest).**
 5. **M14 — onboarding and first-run polish.** A stranger's first ten minutes: a tutorial,

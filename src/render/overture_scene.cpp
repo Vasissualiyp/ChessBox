@@ -23,6 +23,7 @@
 #include "render/quintic.hpp"
 #include "render/ui_widgets.hpp"
 #include "variant/variant.hpp"
+#include "view/layout.hpp"
 #include "view/move_anim.hpp"
 #include "view/seams.hpp"
 
@@ -2424,6 +2425,78 @@ std::optional<DemoMove> demoMoveFor(const VariantSpec& v, const Position& pos) {
   return fallback;
 }
 
+/// The derived overture for a board of three or more dimensions: the board's own grid, laid
+/// out by `view::layout` and extruded from stacked to spaced as the cycle forms it. Above
+/// 2-D there is no faithful embedding to warp into - the hand-authored `cube5`/`hyper4`/`t6`
+/// are stylised for the same reason - so the honest generalisation is to animate into the
+/// very lattice the game will draw (M13.4).
+OvertureScene derivedGridOverture(const VariantSpec& v, float t, const view::Theme& th) {
+  (void)th;  // tones are `Light`/`Dark`; the draw layer colours them from the theme
+  OvertureScene s;
+  const float form = ease(t);
+  const float settle = ease(seg(t, 0.0f, 0.12f));
+  s.cam = {lerpf(kOpenCam.yaw, 0.66f, ease(t)), lerpf(kOpenCam.elev, 0.62f, ease(t)),
+           lerpf(kOpenCam.reach, 9.5f, ease(t)), kOpenCam.persp};
+
+  view::ViewConfig cfg = view::ViewConfig::forBoard(v.dims);
+  // The depth axis is squeezed at t = 0 and the grid axes close up, so the whole lattice
+  // grows out of one board rather than arriving as a block.
+  cfg.depthSpacing = lerpf(0.35f, 2.6f, form);
+  cfg.gridGap = lerpf(0.35f, 2.2f, form);
+  const std::vector<view::Placement> places = view::layout(v.dims, cfg);
+
+  // `layout` numbers cells from zero; centre each axis so the lattice sits in the middle of
+  // the pane. The overture world is Y-up with the board in X-Z; layout is X-Y with depth in
+  // Z, so the level axis becomes height.
+  const float midX = (fi(v.dims.extent(0)) - 1.0f) * 0.5f;
+  const float midZ = (fi(v.dims.extent(1)) - 1.0f) * 0.5f;
+  const float midY = (fi(v.dims.extent(2)) - 1.0f) * cfg.depthSpacing * 0.5f;
+  const auto toWorld = [&](const view::Placement& p) {
+    return OvVec3{p.x - midX, p.z - midY, p.y - midZ};
+  };
+
+  const Pos dummy = flatBoard();  // unused: every token below carries its own placement
+  for (const view::Placement& p : places) {
+    const OvVec3 c = toWorld(p);
+    constexpr float kHalf = 0.42f;
+    OvQuad q;
+    q.p[0] = {c.x - kHalf, c.y, c.z - kHalf};
+    q.p[1] = {c.x + kHalf, c.y, c.z - kHalf};
+    q.p[2] = {c.x + kHalf, c.y, c.z + kHalf};
+    q.p[3] = {c.x - kHalf, c.y, c.z + kHalf};
+    q.tone = (p.cell % 2) != 0 ? OvTone::Dark : OvTone::Light;
+    q.fade = 1.0f;
+    s.quads.push_back(q);
+  }
+  for (const StartPiece& sp : v.start) {
+    if (sp.type == kNoPiece || sp.type >= v.pieces.size()) continue;
+    const CellId cell = v.dims.toCell(sp.at);
+    for (const view::Placement& p : places) {
+      if (p.cell != cell) continue;
+      TokenOpt o;
+      o.at = true;
+      o.where = toWorld(p);
+      o.hasNormal = true;
+      o.normal = {0.0f, 1.0f, 0.0f};
+      o.fade = 1.0f;
+      addToken(s, dummy, 0, 0, v.pieces[sp.type].symbol, sp.color == Color::White, o);
+      break;
+    }
+  }
+
+  for (OvTrail& tr : s.trails) tr.fade *= settle;
+  for (OvBurst& b : s.bursts) b.fade *= settle;
+  s.cam.yaw = lerpf(kOpenCam.yaw, s.cam.yaw, settle);
+  s.cam.elev = lerpf(kOpenCam.elev, s.cam.elev, settle);
+  s.cam.reach = lerpf(kOpenCam.reach, s.cam.reach, settle);
+  s.cam.persp = lerpf(kOpenCam.persp, s.cam.persp, settle);
+
+  s.caption = t < 0.12f  ? "the board every overture starts on"
+              : t < 0.6f ? "laid out into its own lattice"
+                         : "the shape this variant plays on";
+  return s;
+}
+
 }  // namespace
 
 OvVec3 overtureSurfaceAt(app::Overture which, float u, float v) {
@@ -2484,6 +2557,12 @@ OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v) {
 OvertureScene derivedOvertureScene(const VariantSpec& variant, float t,
                                    const view::Theme& th) {
   const app::OvertureSignature sig = app::overtureSignature(variant);
+  // Above 2-D the surface catalogue does not apply - nothing embeds faithfully - so the
+  // overture is the board's own lattice, extruded (M13.4). A temporal board keeps the flat
+  // path: its unfilled boards are not a surface either way.
+  if (sig.dims >= 3 && !sig.temporal) {
+    return derivedGridOverture(variant, t, th);
+  }
   OvertureScene s;
   const float form = ease(t);
   const float settle = ease(seg(t, 0.0f, 0.12f));

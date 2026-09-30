@@ -270,6 +270,30 @@ work.
   `src/render/overture_scene.cpp`); `deco.cpp` is the same. The GPU rasterises it, but
   the vertices come from the CPU, which is where the animation cost lives - see M4.9.
 
+### M4.8 as built (2026-09-30)
+
+- **MSAA, 4x.** The offscreen target grew a 4-sample colour attachment and a 4-sample
+  depth; the board and backdrop pipelines render into it and the pass resolves into the
+  one-sample image the blur and `readPixels` use. The interface keeps rendering
+  single-sample into the resolved image. Validation-clean across every `gui-*` capture.
+- **A frame-time benchmark.** `chessbox_gui --bench-frame N` times N headless frames of the
+  chosen screen and prints ms/frame and fps - a number rather than an opinion.
+- **A frame cap.** `Settings::frameCap` (0 = uncapped) sleeps out the target period when
+  vsync is off, so the ever-animating menus do not spin a core.
+- **No redundant full-queue wait.** `Window::present` waits a fence for its own submission
+  instead of `vkQueueWaitIdle`; the present semaphore already orders acquire and present.
+
+**Deferred: two frames in flight, and rendering straight into the swapchain image.**
+Both are one change: the interactive path deliberately renders into an offscreen target and
+blits to the swapchain, which is ADR-0011 ("Headless-first renderer; the window is a
+blit"), so removing the blit supersedes an accepted ADR and needs its own. The gain is
+input-to-photon latency only - under the default FIFO vsync it does not raise the frame
+rate (the plan says so) - while the interactive `present` path has **no headless test**:
+`--shot` and every `gui-*` test exercise the offscreen render, not the swapchain present,
+so a regression there is caught only by a human opening the game. Doing it blind is the
+risk the rest of M4 exists to avoid. It is the one Wave-1 item left, and it wants an ADR
+and a run on a real display.
+
 ## M4.9 - The animation budget (follow-up to M4.5)
 
 The hand-authored overtures are the heaviest CPU work in the frame. The worst case is

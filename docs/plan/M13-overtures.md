@@ -265,5 +265,9 @@ The derived scene opens on the variant's own start position and plays a real tra
 (M13.3) for a 2-D 8×8 board. Tests: a signature table over every shipped variant, the
 differential surface, and a data-only TOML torus. Docs: `docs/overtures.md`.
 
-**Deferred:** the D ≥ 3 extruded-`layout` overture, and rule-flavoured scenes (M13.6, a
-stated partial). `--shot` of a derived variant forces the library picker to it.
+**Also built:** the D ≥ 3 extruded-`layout` overture (`derivedGridOverture`), so a data-only
+3-D/4-D variant animates into its own lattice; it compiles and the render/view tests pass but
+has not been eyeballed on a machine with a display.
+
+**Deferred:** rule-flavoured scenes (M13.6, a stated partial). `--shot` of a derived variant
+forces the library picker to it.
