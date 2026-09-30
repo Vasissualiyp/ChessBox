@@ -26,6 +26,25 @@ Vec3 mix(const Vec3& a, const Vec3& b, float t) {
   return {a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t};
 }
 
+/// A lattice direction read as a world vector, through the same screen-axis mapping the
+/// animation uses (`MoveAnimation::start`). A direction with no screen-axis support -
+/// a move along a grid axis - projects to nothing and the caller falls back to the run's
+/// world delta.
+Vec3 worldDir(const ViewConfig& cfg, const Direction& d) {
+  float out[3]{0.0f, 0.0f, 0.0f};
+  for (std::size_t i = 0; i < cfg.screenAxes.size() && i < 3; ++i) {
+    const float scale = i == 2 ? cfg.depthSpacing : 1.0f;
+    out[i] = static_cast<float>(d.v[cfg.screenAxes[i]]) * scale;
+  }
+  const float len = std::sqrt(out[0] * out[0] + out[1] * out[1] + out[2] * out[2]);
+  if (len > 1e-6f) {
+    out[0] /= len;
+    out[1] /= len;
+    out[2] /= len;
+  }
+  return {out[0], out[1], out[2]};
+}
+
 /// A point at normalised arc length `s` along a run's polyline.
 Vec3 pointAlong(const RouteRun& run, float s) {
   if (run.points.empty()) return {};
@@ -74,19 +93,26 @@ std::vector<RouteRun> routeRuns(const MovePath& path,
   }
 
   RouteRun run;
+  run.dir = path.startDir;
   run.points.push_back(at[0]);
   for (std::size_t i = 0; i < path.steps.size(); ++i) {
     const PathStep& s = path.steps[i];
-    run.points.push_back(at[i + 1]);
-    if (s.kind != StepKind::Interior) {
-      // A seam or a wall ends the run; the next starts where the piece arrives.
-      run.endedWith = s.kind;
-      run.faceAxis = s.faceAxis;
-      run.faceSide = s.faceSide;
-      runs.push_back(std::move(run));
-      run = RouteRun{};
+    if (s.kind == StepKind::Interior) {
       run.points.push_back(at[i + 1]);
+      run.dir = s.dir;  // the direction this run is actually travelling
+      continue;
     }
+    // A seam or a wall ends the run *at the cell it was entered from* - the far side of a
+    // portal is not part of this run, or the camera would follow a chord straight across
+    // the board. The next run begins on the far side, already travelling in the
+    // post-transport direction the step recorded.
+    run.endedWith = s.kind;
+    run.faceAxis = s.faceAxis;
+    run.faceSide = s.faceSide;
+    runs.push_back(std::move(run));
+    run = RouteRun{};
+    run.dir = s.dir;
+    run.points.push_back(at[i + 1]);
   }
   runs.push_back(std::move(run));
 
@@ -101,11 +127,6 @@ std::vector<RouteRun> routeRuns(const MovePath& path,
 CameraPose moveCamera(const MovePath& path, const std::vector<Placement>& placements,
                       const ViewConfig& cfg, const Bounds& scene,
                       const CameraPolicy& policy, float t) {
-  // The world positions are already dimension-general, so the camera needs no `cfg` for
-  // them; it is in the signature for the shot planner's grid-axis policy (M11.4), which
-  // is not built yet.
-  (void)cfg;
-
   const OrbitCamera settled = OrbitCamera::frame(scene);
   const CameraPose base{settled.target, settled.distance, settled.yaw, settled.pitch,
                         0.0f};
@@ -131,15 +152,20 @@ CameraPose moveCamera(const MovePath& path, const std::vector<Placement>& placem
   const Vec3 first = run->points.front();
   const Vec3 last = run->points.back();
   const float travel = length(last - first);
-  if (travel > 1e-4f) {
-    const Vec3 dir = normalize(last - first);
+  // Orient by the run's **transported** direction, not by the delta between its two world
+  // ends: on a glued board that delta can be a long chord across the board while the
+  // piece actually travelled a short way, and on a non-orientable seam the transport
+  // flips a component the chord would hide. Fall back to the chord only for a direction
+  // with no screen-axis support (a grid-axis move, whose camera story is M11.4).
+  Vec3 dir = worldDir(cfg, run->dir);
+  if (length(dir) < 1e-4f && travel > 1e-4f) dir = normalize(last - first);
+  if (length(dir) > 1e-4f) {
     // Lead the piece along the run, so a fast slide is seen from where it is going
     // rather than where it has been.
     pose.target = pose.target + dir * policy.lead;
     // Look along the travel. The eye sits behind the piece, so yaw points opposite the
     // travel in the board plane (the eye offset is (sin yaw, -cos yaw, sin pitch)); any
-    // depth component raises the pitch. This is the transported direction the engine
-    // already worked out, read as a vector - never a re-derived topology branch.
+    // depth component raises the pitch.
     pose.yaw = std::atan2(-dir.x, dir.y);
     const float flat = std::hypot(dir.x, dir.y);
     pose.pitch = std::clamp(0.9f + std::atan2(dir.z, flat) * 0.6f, 0.2f, 1.45f);

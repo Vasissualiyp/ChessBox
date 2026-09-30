@@ -4,10 +4,13 @@
 // `Placement` generalises to every geometry and dimension with no dimension branch; these
 // tests pin the pure function, its route decomposition, and the oracle the smoothing is
 // measured against.
+#include <cmath>
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "io/fen.hpp"
+#include "movegen/movegen.hpp"
 #include "support/variants.hpp"
 #include "view/move_camera.hpp"
 
@@ -180,6 +183,103 @@ TEST_CASE("following keeps the piece inside the board, with lead and pull",
     CHECK(p.target.y <= scene.maxY + margin);
     CHECK(p.distance >= policy.minDistance);
   }
+}
+
+TEST_CASE("the camera reads the direction the piece arrived with, not the one it left by",
+          "[unit][view]") {
+  // M11.3's claim, made structural: a run carries its last step's post-transport
+  // `Direction`, and the camera's yaw is that direction read as a world vector. If the
+  // transport turns the direction - which on a non-orientable seam it does - the camera
+  // turns with the piece, with no topology branch anywhere. Checked over every legal move
+  // of the glued 2-D variants, so it cannot depend on one hand-picked geometry.
+  const auto worldDirOf = [](const ViewConfig& cfg, const Direction& d) {
+    float out[3]{0.0f, 0.0f, 0.0f};
+    for (std::size_t i = 0; i < cfg.screenAxes.size() && i < 3; ++i) {
+      out[i] =
+          static_cast<float>(d.v[cfg.screenAxes[i]]) * (i == 2 ? cfg.depthSpacing : 1.0f);
+    }
+    const float len = std::sqrt(out[0] * out[0] + out[1] * out[1] + out[2] * out[2]);
+    if (len > 1e-6f) {
+      out[0] /= len;
+      out[1] /= len;
+      out[2] /= len;
+    }
+    return Vec3{out[0], out[1], out[2]};
+  };
+
+  for (const char* name : {"cylinder", "torus", "mobius", "klein"}) {
+    CAPTURE(name);
+    const VariantSpec v = test::loadVariant(name);
+    const ViewConfig cfg = ViewConfig::forBoard(v.dims);
+    const std::vector<Placement> placements = layout(v.dims, cfg);
+    const Bounds scene = boundsOf(placements);
+    Position pos = Position::startPosition(v);
+    MoveGen gen(v);
+    MoveList legal(v.moveUpperBound());
+    gen.generateLegal(pos, legal);
+    const CameraPolicy policy;
+    for (const Move& m : legal) {
+      const Piece mover = pos.at(m.from);
+      if (mover.empty()) continue;
+      const MovePath path = tracePath(v, pos, mover.type, mover.colorOf(), m);
+      if (path.unexplained || path.steps.empty()) continue;
+      const std::vector<RouteRun> runs = routeRuns(path, placements);
+      for (const RouteRun& r : runs) {
+        const Vec3 w = worldDirOf(cfg, r.dir);
+        if (length(w) < 1e-4f) continue;  // a grid-axis direction has no screen support
+        const float mid = (r.t0 + r.t1) * 0.5f;
+        const CameraPose p = moveCamera(path, placements, cfg, scene, policy, mid);
+        CHECK_THAT(std::sin(p.yaw - std::atan2(-w.x, w.y)), WithinAbs(0.0f, 1e-3f));
+        CHECK_THAT(std::cos(p.yaw - std::atan2(-w.x, w.y)), WithinAbs(1.0f, 1e-3f));
+      }
+    }
+  }
+}
+
+TEST_CASE("a crossing that transports the direction turns the camera", "[unit][view]") {
+  // M11.3's claim stated exactly, on a synthetic route so it does not depend on which
+  // shipped board happens to offer such a move from its opening square: the second run
+  // arrives travelling a direction the seam reversed, and the camera turns with it.
+  const VariantSpec v = test::loadVariant("standard");
+  const ViewConfig cfg = ViewConfig::forBoard(v.dims);
+  const std::vector<Placement> placements = layout(v.dims, cfg);
+  const Bounds scene = boundsOf(placements);
+
+  Direction d0;  // (1, 1): up the file and the rank together
+  d0.v[0] = 1;
+  d0.v[1] = 1;
+  d0.n = 2;
+  d0.nsup = 2;
+  d0.sup[0] = 0;
+  d0.sup[1] = 1;
+  Direction d1 = d0;
+  d1.v[1] = -1;  // the seam reversed the rank component
+
+  MovePath path;
+  path.from = v.dims.toCell(Coord::of({0, 0}));
+  path.to = v.dims.toCell(Coord::of({2, 2}));
+  path.startDir = d0;
+  PathStep a;
+  a.from = path.from;
+  a.to = v.dims.toCell(Coord::of({1, 1}));
+  a.kind = StepKind::Interior;
+  a.dir = d0;
+  PathStep b;
+  b.from = a.to;
+  b.to = path.to;
+  b.kind = StepKind::Portal;
+  b.dir = d1;
+  path.steps = {a, b};
+
+  const std::vector<RouteRun> runs = routeRuns(path, placements);
+  REQUIRE(runs.size() == 2);
+  CHECK(runs[0].dir == d0);
+  CHECK(runs[1].dir == d1);
+
+  const CameraPolicy policy;
+  const CameraPose before = moveCamera(path, placements, cfg, scene, policy, 0.25f);
+  const CameraPose after = moveCamera(path, placements, cfg, scene, policy, 0.75f);
+  CHECK(std::abs(std::sin(before.yaw - after.yaw)) > 1e-3f);  // the camera turned
 }
 
 TEST_CASE("a pose applies to the orbit camera by assignment", "[unit][view]") {

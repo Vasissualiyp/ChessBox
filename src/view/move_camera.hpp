@@ -79,6 +79,11 @@ struct RouteRun {
   StepKind endedWith{StepKind::Interior};
   std::uint8_t faceAxis{0};
   Side faceSide{Side::Max};
+  /// The direction the run travels, **after** any transport - the last step's
+  /// `PathStep::dir`. On a non-orientable seam this is not the direction the piece set
+  /// off in, which is exactly why the camera reads it instead of guessing from the
+  /// points.
+  Direction dir{};
 };
 
 /// Decompose a traced route into its straight runs. The animation and the camera share
