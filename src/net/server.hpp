@@ -3,6 +3,8 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "base/result.hpp"
 #include "game/game.hpp"
@@ -15,34 +17,47 @@ namespace cb::net {
 ///
 /// It owns the `Game` and is the only thing that ever advances it: an intent is checked
 /// against the engine's own legal moves and, if it is one of them, played; whatever
-/// happens, the resulting position is sent back by ply, side and hash. A client may
-/// predict for responsiveness, but the server's word is final - there is no second rules
-/// implementation anywhere, and no client ever advances the state on its own.
+/// happens, the resulting position is sent back by ply, side and hash.
+///
+/// Any number of clients share it. Each announces itself with a hello and is told the
+/// current position, so a client that joins - or reconnects after a drop - is resynced
+/// the same way, with no separate path. A client may predict for responsiveness, but the
+/// server's word is final: there is no second rules implementation anywhere.
 class Server {
  public:
-  /// Takes the variant by value and keeps it at a stable address: the Game holds a
-  /// pointer into it, so the Server must never move once built - hence the unique_ptr.
+  /// A server with no clients yet; add them with addClient.
+  [[nodiscard]] static Result<std::unique_ptr<Server>> create(VariantSpec variant);
+  /// The common case: a server and its first client.
   [[nodiscard]] static Result<std::unique_ptr<Server>> create(VariantSpec variant,
                                                               Transport& transport);
 
-  /// Read and answer everything waiting on the transport. Returns false when the peer
-  /// has been turned away (a bad hello).
+  /// Add a link. It must say hello before any intent is accepted.
+  void addClient(Transport& transport);
+
+  /// Read and answer everything waiting on every link. Returns false when no live link
+  /// remains - every peer has been turned away.
   bool poll();
 
   [[nodiscard]] const Game& game() const noexcept { return game_; }
   [[nodiscard]] std::uint64_t positionHash() const { return game_.position().hash(); }
+  [[nodiscard]] std::size_t clientCount() const noexcept { return links_.size(); }
 
  private:
-  Server(VariantSpec variant, Transport& transport)
-      : variant_(std::move(variant)), game_(variant_), transport_(&transport) {}
+  explicit Server(VariantSpec variant) : variant_(std::move(variant)), game_(variant_) {}
 
-  void sendState();
-  void sendRefusal(const std::string& reason);
+  struct Link {
+    Transport* transport;
+    bool helloed{false};
+  };
+
+  [[nodiscard]] const Move* findLegal(std::uint32_t from, std::uint32_t to) const;
+  void sendState(Transport& to) const;
+  void broadcastState() const;
+  static void sendRefusal(Transport& to, const std::string& reason);
 
   VariantSpec variant_;
   Game game_;
-  Transport* transport_;
-  bool helloed_{false};
+  std::vector<Link> links_;
 };
 
 }  // namespace cb::net

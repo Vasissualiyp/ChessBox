@@ -65,3 +65,62 @@ TEST_CASE("the server turns away a client that named a different variant",
   REQUIRE(client.has_value());
   CHECK_FALSE((*server)->poll());  // the bad hello closes the link
 }
+
+TEST_CASE("a move is broadcast to every client", "[unit][net]") {
+  const VariantSpec v = test::loadVariant("standard");
+  Loopback a = makeLoopback();
+  Loopback b = makeLoopback();
+  auto server = Server::create(test::loadVariant("standard"));
+  REQUIRE(server.has_value());
+  (*server)->addClient(*a.b);
+  (*server)->addClient(*b.b);
+
+  auto ca = Client::create(*a.a, v.variantId());
+  auto cb = Client::create(*b.a, v.variantId());
+  REQUIRE(ca.has_value());
+  REQUIRE(cb.has_value());
+
+  REQUIRE((*server)->poll());
+  REQUIRE((*ca)->poll());
+  REQUIRE((*cb)->poll());
+  CHECK((*ca)->synced());
+  CHECK((*cb)->synced());
+  CHECK((*server)->clientCount() == 2);
+
+  (*ca)->sendIntent(coord(v, 4, 1), coord(v, 4, 3));  // e2-e4
+  REQUIRE((*server)->poll());
+  REQUIRE((*ca)->poll());
+  REQUIRE((*cb)->poll());
+  CHECK((*ca)->ply() == 1);
+  CHECK((*cb)->ply() == 1);  // the other client saw it too
+  CHECK((*ca)->positionHash() == (*cb)->positionHash());
+  CHECK((*ca)->positionHash() == (*server)->positionHash());
+}
+
+TEST_CASE("a client joining mid-game is resynced to the current position",
+          "[unit][net]") {
+  const VariantSpec v = test::loadVariant("standard");
+  Loopback a = makeLoopback();
+  auto server = Server::create(test::loadVariant("standard"), *a.b);
+  REQUIRE(server.has_value());
+  auto ca = Client::create(*a.a, v.variantId());
+  REQUIRE(ca.has_value());
+
+  REQUIRE((*server)->poll());
+  REQUIRE((*ca)->poll());
+  (*ca)->sendIntent(coord(v, 4, 1), coord(v, 4, 3));
+  REQUIRE((*server)->poll());
+  REQUIRE((*ca)->poll());
+  REQUIRE((*ca)->ply() == 1);
+
+  // A late client's hello is answered with where the game *is*, not the opening.
+  Loopback late = makeLoopback();
+  (*server)->addClient(*late.b);
+  auto cl = Client::create(*late.a, v.variantId());
+  REQUIRE(cl.has_value());
+  REQUIRE((*server)->poll());
+  REQUIRE((*cl)->poll());
+  CHECK((*cl)->synced());
+  CHECK((*cl)->ply() == 1);
+  CHECK((*cl)->positionHash() == (*server)->positionHash());
+}
