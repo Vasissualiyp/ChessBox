@@ -800,6 +800,10 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::Checkbox("Fullscreen", &s.fullscreen);
   if (ImGui::IsItemDeactivatedAfterEdit()) request.toggleFullscreen = true;
   ImGui::Checkbox("Wait for vertical sync", &s.vsync);
+  // A cap matters when vsync is off: the menus and the drifting field animate forever, so
+  // an uncapped loop would spin a core on a static screen.
+  ImGui::SliderInt("Frame cap", &s.frameCap, 0, 240,
+                   s.frameCap == 0 ? "uncapped" : "%d fps");
   ImGui::Checkbox("Flat 2D view", &s.flatView);
   ImGui::PushFont(small);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
@@ -981,7 +985,8 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   // fields that a control can actually change.
   const bool moved =
       before.guiScale != s.guiScale || before.fullscreen != s.fullscreen ||
-      before.vsync != s.vsync || before.showLegalMoves != s.showLegalMoves ||
+      before.vsync != s.vsync || before.frameCap != s.frameCap ||
+      before.showLegalMoves != s.showLegalMoves ||
       before.showLastMove != s.showLastMove || before.showCheck != s.showCheck ||
       before.showSeams != s.showSeams || before.showCoordinates != s.showCoordinates ||
       before.pieceHeightScale != s.pieceHeightScale || before.flatView != s.flatView ||

@@ -280,6 +280,7 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
     shell->settings().overtureSpeed = 1.75f;
     shell->settings().cameraMode = "route";
     shell->settings().followStrength = 0.4f;
+    shell->settings().frameCap = 60;
     REQUIRE(shell->startGame("klein").has_value());  // also records the last variant
     shell->applySettings();
   }
@@ -296,6 +297,7 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
     REQUIRE(shell->overtures().speed() == 1.75f);
     REQUIRE(shell->settings().cameraMode == "route");
     REQUIRE(shell->settings().followStrength == 0.4f);
+    REQUIRE(shell->settings().frameCap == 60);
   }
 }
 

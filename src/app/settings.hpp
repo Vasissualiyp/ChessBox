@@ -21,6 +21,10 @@ struct Settings {
   bool fullscreen{false};
   /// Frame pacing. The game redraws on input, so this only bounds the idle loop.
   bool vsync{true};
+  /// Cap the redraw rate, in frames per second. 0 means "as fast as vsync allows". A cap
+  /// matters when vsync is off and the screen is otherwise static: the field and the
+  /// overtures animate forever, so without one the loop would spin a core.
+  int frameCap{0};
 
   // ---- board --------------------------------------------------------------
   bool showLegalMoves{true};

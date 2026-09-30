@@ -6,8 +6,8 @@ namespace {
 
 Result<void> makeImage(const VulkanContext& ctx, std::uint32_t w, std::uint32_t h,
                        VkFormat format, VkImageUsageFlags usage,
-                       VkImageAspectFlags aspect, VkImage& image, VkDeviceMemory& memory,
-                       VkImageView& viewOut) {
+                       VkImageAspectFlags aspect, VkSampleCountFlagBits samples,
+                       VkImage& image, VkDeviceMemory& memory, VkImageView& viewOut) {
   VkImageCreateInfo ici{};
   ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   ici.imageType = VK_IMAGE_TYPE_2D;
@@ -15,7 +15,7 @@ Result<void> makeImage(const VulkanContext& ctx, std::uint32_t w, std::uint32_t 
   ici.extent = {w, h, 1};
   ici.mipLevels = 1;
   ici.arrayLayers = 1;
-  ici.samples = VK_SAMPLE_COUNT_1_BIT;
+  ici.samples = samples;
   ici.tiling = VK_IMAGE_TILING_OPTIMAL;
   ici.usage = usage;
   ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -72,24 +72,35 @@ Result<OffscreenTarget> OffscreenTarget::create(const VulkanContext& ctx,
 }
 
 Result<void> OffscreenTarget::allocate(const VulkanContext& ctx) {
+  // The resolved colour: one sample, read by the blur and copied out by readPixels.
   if (auto r = makeImage(ctx, width_, height_, kColorFormat,
                          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                             VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                             VK_IMAGE_USAGE_SAMPLED_BIT,
-                         VK_IMAGE_ASPECT_COLOR_BIT, color_, colorMem_, colorView_);
+                             VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                         VK_IMAGE_ASPECT_COLOR_BIT, VK_SAMPLE_COUNT_1_BIT, color_,
+                         colorMem_, colorView_);
       !r.has_value()) {
     return r;
   }
-  if (auto r = makeImage(
-          ctx, width_, height_, kColorFormat,
-          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-          VK_IMAGE_ASPECT_COLOR_BIT, scratch_, scratchMem_, scratchView_);
+  if (msaaEnabled()) {
+    // The multisampled attachment the board draws into, resolved into `color_`.
+    if (auto r = makeImage(ctx, width_, height_, kColorFormat,
+                           VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_IMAGE_ASPECT_COLOR_BIT,
+                           kSampleCount, msaaColor_, msaaColorMem_, msaaColorView_);
+        !r.has_value()) {
+      return r;
+    }
+  }
+  if (auto r = makeImage(ctx, width_, height_, kColorFormat,
+                         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                         VK_IMAGE_ASPECT_COLOR_BIT, VK_SAMPLE_COUNT_1_BIT, scratch_,
+                         scratchMem_, scratchView_);
       !r.has_value()) {
     return r;
   }
+  // Depth matches the colour sample count: every attachment in a render pass must.
   return makeImage(ctx, width_, height_, kDepthFormat,
                    VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_ASPECT_DEPTH_BIT,
-                   depth_, depthMem_, depthView_);
+                   kSampleCount, depth_, depthMem_, depthView_);
 }
 
 OffscreenTarget& OffscreenTarget::operator=(OffscreenTarget&& o) noexcept {
@@ -100,6 +111,9 @@ OffscreenTarget& OffscreenTarget::operator=(OffscreenTarget&& o) noexcept {
   std::swap(color_, o.color_);
   std::swap(colorMem_, o.colorMem_);
   std::swap(colorView_, o.colorView_);
+  std::swap(msaaColor_, o.msaaColor_);
+  std::swap(msaaColorMem_, o.msaaColorMem_);
+  std::swap(msaaColorView_, o.msaaColorView_);
   std::swap(scratch_, o.scratch_);
   std::swap(scratchMem_, o.scratchMem_);
   std::swap(scratchView_, o.scratchView_);
@@ -115,6 +129,9 @@ OffscreenTarget::~OffscreenTarget() {
   if (colorView_ != VK_NULL_HANDLE) vkDestroyImageView(d, colorView_, nullptr);
   if (color_ != VK_NULL_HANDLE) vkDestroyImage(d, color_, nullptr);
   if (colorMem_ != VK_NULL_HANDLE) vkFreeMemory(d, colorMem_, nullptr);
+  if (msaaColorView_ != VK_NULL_HANDLE) vkDestroyImageView(d, msaaColorView_, nullptr);
+  if (msaaColor_ != VK_NULL_HANDLE) vkDestroyImage(d, msaaColor_, nullptr);
+  if (msaaColorMem_ != VK_NULL_HANDLE) vkFreeMemory(d, msaaColorMem_, nullptr);
   if (scratchView_ != VK_NULL_HANDLE) vkDestroyImageView(d, scratchView_, nullptr);
   if (scratch_ != VK_NULL_HANDLE) vkDestroyImage(d, scratch_, nullptr);
   if (scratchMem_ != VK_NULL_HANDLE) vkFreeMemory(d, scratchMem_, nullptr);

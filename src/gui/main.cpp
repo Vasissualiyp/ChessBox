@@ -195,7 +195,8 @@ void syncMarks(render::BoardRenderer& renderer, const app::Session& session) {
 int captureFrame(const std::string& variantName, const std::string& path,
                  const std::string& script, const std::string& screen, float overtureT,
                  int previewDims, bool clip, int clipFrames, float clipT0, float clipT1,
-                 bool cinema, const std::string& followMode, float moveT) {
+                 bool cinema, const std::string& followMode, float moveT,
+                 int benchFrames) {
   // Captures use default settings, never the person's own. A screenshot that changes
   // because whoever ran it likes a larger interface is not a screenshot of the game -
   // and `ctest -R gui-` would then pass or fail by whose machine it ran on.
@@ -379,6 +380,23 @@ int captureFrame(const std::string& variantName, const std::string& path,
   if (!renderFrame(0.0f).has_value()) return 1;
   if (!renderFrame(1.0f).has_value()) return 1;
 
+  if (benchFrames > 0) {
+    // A frame-time benchmark with no display: the same offscreen path `--shot` uses, run
+    // N times. It measures the CPU recording plus the GPU wait, which is the per-frame
+    // cost a player pays - a number for a regression, not an opinion (M4.8).
+    const auto t0 = std::chrono::steady_clock::now();
+    for (int i = 0; i < benchFrames; ++i) {
+      if (!renderFrame(0.0f).has_value()) return 1;
+    }
+    const double us =
+        std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0)
+            .count();
+    const double ms = us / 1000.0 / static_cast<double>(benchFrames);
+    std::printf("frame time: %.3f ms  (%.1f fps)  over %d frames\n", ms, 1000.0 / ms,
+                benchFrames);
+    return 0;
+  }
+
   if (!clip) {
     const std::optional<render::Image> img = renderFrame(0.0f);
     if (!img.has_value() || !writeFrame(*img, path)) return 1;
@@ -454,6 +472,7 @@ int main(int argc, char** argv) {
   float clipT0 = 0.0f;
   float clipT1 = 1.0f;
   bool cinema = false;
+  int benchFrames = 0;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "-h" || arg == "--help") {
@@ -473,6 +492,8 @@ int main(int argc, char** argv) {
           "--cinema drops the interface and fills the frame with the board.\n"
           "--follow off|piece|route and --move-t 0..1 show the move camera in a "
           "capture.\n"
+          "--bench-frame N times N headless frames of the chosen screen and prints "
+          "ms/frame.\n"
           "--dims 2..4 is how many dimensions the designer's move preview shows.\n");
       return 0;
     }
@@ -498,16 +519,19 @@ int main(int argc, char** argv) {
       followMode = argv[++i];
     else if (arg == "--move-t" && i + 1 < argc)
       moveT = std::strtof(argv[++i], nullptr);
+    else if (arg == "--bench-frame" && i + 1 < argc)
+      benchFrames = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
     else if (arg == "--dims" && i + 1 < argc)
       previewDims = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
     else if (!arg.starts_with("-"))
       variantName = arg;
   }
   const std::string& targetPath = !clipDir.empty() ? clipDir : shotPath;
-  if (!targetPath.empty()) {
+  if (!targetPath.empty() || benchFrames > 0) {
     return captureFrame(variantName.empty() ? "standard" : variantName, targetPath,
                         script, screen, overtureT, previewDims, !clipDir.empty(),
-                        clipFrames, clipT0, clipT1, cinema, followMode, moveT);
+                        clipFrames, clipT0, clipT1, cinema, followMode, moveT,
+                        benchFrames);
   }
 
   auto shell = makeShell();
@@ -816,6 +840,18 @@ int main(int argc, char** argv) {
     // Rescaling rebuilds the font atlas, so it happens between frames, never inside one.
     if (request.applyScale) (void)(*ui)->setScale(shell->settings().guiScale);
 #endif
+
+    // Frame cap (M4.8): with vsync off the loop would redraw as fast as the CPU allows,
+    // and every menu animates forever, so a static screen would still spin a core. Sleep
+    // out the rest of the target period.
+    if (const int cap = shell->settings().frameCap; cap > 0) {
+      const float period = 1.0f / static_cast<float>(cap);
+      const float spent =
+          std::chrono::duration<float>(std::chrono::steady_clock::now() - now).count();
+      if (spent < period) {
+        SDL_Delay(static_cast<Uint32>((period - spent) * 1000.0f));
+      }
+    }
   }
   return 0;
 }

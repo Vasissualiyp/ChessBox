@@ -165,7 +165,8 @@ Result<void> BoardRenderer::buildPipeline() {
 
   VkPipelineMultisampleStateCreateInfo ms{};
   ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-  ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+  // Matches the target's multisampled attachment (M4.8, MSAA); the blur stays single.
+  ms.rasterizationSamples = OffscreenTarget::kSampleCount;
 
   VkPipelineDepthStencilStateCreateInfo ds{};
   ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
@@ -437,7 +438,8 @@ Result<void> BoardRenderer::buildBackdropPipeline() {
   rs.lineWidth = 1.0f;
   VkPipelineMultisampleStateCreateInfo ms{};
   ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-  ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+  // The backdrop fills the same multisampled attachment the board does.
+  ms.rasterizationSamples = OffscreenTarget::kSampleCount;
   // It is behind everything, so it neither tests nor writes depth.
   VkPipelineDepthStencilStateCreateInfo ds{};
   ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
@@ -1053,10 +1055,19 @@ Result<void> BoardRenderer::render(const OffscreenTarget& target, const Instance
       vkCmdPipelineBarrier2(cmd, &dep);
     };
 
+    // The resolved colour is an attachment too - the multisample resolve writes it - so
+    // it needs the layout transition whether or not MSAA is on.
     barrier(target.colorImage(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
             0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
             VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    if (OffscreenTarget::msaaEnabled()) {
+      barrier(target.msaaColorImage(), VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
+              VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+              VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    }
     barrier(target.depthImage(), VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
             VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
             0, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
@@ -1064,11 +1075,18 @@ Result<void> BoardRenderer::render(const OffscreenTarget& target, const Instance
 
     VkRenderingAttachmentInfo color{};
     color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    color.imageView = target.colorView();
+    color.imageView = target.msaaColorView();
     color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     color.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     color.clearValue.color = {{theme_.ink.r, theme_.ink.g, theme_.ink.b, 1.0f}};
+    if (OffscreenTarget::msaaEnabled()) {
+      // Resolve the multisampled attachment into the one-sample image the blur and
+      // readPixels expect, at the end of this pass.
+      color.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
+      color.resolveImageView = target.colorView();
+      color.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    }
 
     VkRenderingAttachmentInfo depth{};
     depth.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;

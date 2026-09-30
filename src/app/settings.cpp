@@ -30,6 +30,14 @@ float asFloat(const std::string& v, float fallback) {
   }
 }
 
+int asInt(const std::string& v, int fallback) {
+  try {
+    return std::stoi(v);
+  } catch (...) {
+    return fallback;
+  }
+}
+
 const char* boolText(bool b) {
   return b ? "true" : "false";
 }
@@ -67,6 +75,8 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.fullscreen = asBool(value);
     else if (key == "vsync")
       s.vsync = asBool(value);
+    else if (key == "frame_cap")
+      s.frameCap = asInt(value, s.frameCap);
     else if (key == "show_legal_moves")
       s.showLegalMoves = asBool(value);
     else if (key == "show_last_move")
@@ -132,6 +142,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "gui_scale = " << guiScale << '\n';
   out << "fullscreen = " << boolText(fullscreen) << '\n';
   out << "vsync = " << boolText(vsync) << '\n';
+  out << "frame_cap = " << frameCap << '\n';
   out << "show_legal_moves = " << boolText(showLegalMoves) << '\n';
   out << "show_last_move = " << boolText(showLastMove) << '\n';
   out << "show_check = " << boolText(showCheck) << '\n';
@@ -162,6 +173,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
 
 void Settings::sanitize() {
   guiScale = std::clamp(guiScale, 0.6f, 3.0f);
+  frameCap = std::clamp(frameCap, 0, 360);
   pieceHeightScale = std::clamp(pieceHeightScale, 0.0f, 2.0f);
   animationSpeed = std::clamp(animationSpeed, 0.25f, 4.0f);
   overtureSpeed = std::clamp(overtureSpeed, 0.25f, 4.0f);

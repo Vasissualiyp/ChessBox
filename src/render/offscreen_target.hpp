@@ -29,10 +29,29 @@ class OffscreenTarget {
   [[nodiscard]] std::uint32_t width() const noexcept { return width_; }
   [[nodiscard]] std::uint32_t height() const noexcept { return height_; }
   [[nodiscard]] VkFormat colorFormat() const noexcept { return kColorFormat; }
+  /// The resolved, one-sample colour image: the render target's depth/colour pass
+  /// resolves into this, the blur reads it, and readPixels copies it out.
   [[nodiscard]] VkImageView colorView() const noexcept { return colorView_; }
+  /// The multisampled colour attachment the board and the backdrop actually draw into; it
+  /// resolves into `colorView` at the end of the pass. `VK_SAMPLE_COUNT_1_BIT` when MSAA
+  /// is off, in which case it is never a separate image (see `msaaEnabled`).
+  [[nodiscard]] VkImageView msaaColorView() const noexcept {
+    return msaaEnabled() ? msaaColorView_ : colorView_;
+  }
   [[nodiscard]] VkImageView depthView() const noexcept { return depthView_; }
   [[nodiscard]] VkImage colorImage() const noexcept { return color_; }
+  [[nodiscard]] VkImage msaaColorImage() const noexcept {
+    return msaaEnabled() ? msaaColor_ : color_;
+  }
   [[nodiscard]] VkImage depthImage() const noexcept { return depth_; }
+
+  /// The sample count the board's pipelines must be built with. Four: the GPU is idle
+  /// (a handful of instanced draws and a blit), so the headroom buys clean board and seam
+  /// edges, and every desktop Vulkan device supports 4x colour and depth.
+  static constexpr VkSampleCountFlagBits kSampleCount = VK_SAMPLE_COUNT_4_BIT;
+  [[nodiscard]] static constexpr bool msaaEnabled() noexcept {
+    return kSampleCount != VK_SAMPLE_COUNT_1_BIT;
+  }
 
   /// A second colour image the same size as the first.
   ///
@@ -58,6 +77,10 @@ class OffscreenTarget {
   VkImage color_{VK_NULL_HANDLE};
   VkDeviceMemory colorMem_{VK_NULL_HANDLE};
   VkImageView colorView_{VK_NULL_HANDLE};
+  /// The 4-sample attachment, present only when MSAA is on; null otherwise.
+  VkImage msaaColor_{VK_NULL_HANDLE};
+  VkDeviceMemory msaaColorMem_{VK_NULL_HANDLE};
+  VkImageView msaaColorView_{VK_NULL_HANDLE};
   VkImage scratch_{VK_NULL_HANDLE};
   VkDeviceMemory scratchMem_{VK_NULL_HANDLE};
   VkImageView scratchView_{VK_NULL_HANDLE};
