@@ -823,6 +823,29 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   request.boardRect[2] = vp->Size.x;
   request.boardRect[3] = vp->Size.y;
 
+  // File and rank labels on a flat board's near edges, when the setting asks. Projected
+  // through the same camera the board is drawn with, so a label sits on its cell.
+  if (shell.settings().showCoordinates && v.dims.dims() == 2) {
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    const view::OrbitCamera cam = session.camera();
+    const float w = vp->Size.x;
+    const float h = vp->Size.y;
+    for (const view::Placement& pl : session.placements()) {
+      const Coord co = v.dims.toCoord(pl.cell);
+      const view::OrbitCamera::ScreenPoint sp =
+          cam.project(view::Vec3{pl.x, pl.y, pl.z}, w / h, w, h);
+      if (!sp.visible) continue;
+      if (co.c[1] == 0) {
+        const std::string file(1, static_cast<char>('a' + co.c[0]));
+        dl->AddText(ImVec2(sp.x - px(4), sp.y + px(9)), u32(t.boneFaint), file.c_str());
+      }
+      if (co.c[0] == 0) {
+        const std::string rank = std::to_string(co.c[1] + 1);
+        dl->AddText(ImVec2(sp.x - px(12), sp.y - px(5)), u32(t.boneFaint), rank.c_str());
+      }
+    }
+  }
+
   const ImGuiWindowFlags overlayFlags =
       ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
       ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoBackground |
@@ -855,6 +878,22 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
                        : (v.geom.isOrientable() ? "glued board" : "glued with a twist"));
     ImGui::PopStyleColor();
     ImGui::PopFont();
+    // Name the screen axes, so a 3-D or 4-D board says which axis runs which way: a 4-D
+    // board otherwise raises "which of these four is up?" as its first question.
+    if (shell.settings().showCoordinates) {
+      const auto& axes = session.viewConfig().screenAxes;
+      std::string legend;
+      for (std::size_t i = 0; i < axes.size(); ++i) {
+        if (i != 0) legend += "   ";
+        legend += v.dims.name(axes[i]);
+        legend += i == 0 ? " ->" : " ^";
+      }
+      ImGui::PushFont(small);
+      ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+      ImGui::TextUnformatted(legend.c_str());
+      ImGui::PopStyleColor();
+      ImGui::PopFont();
+    }
   }
   ImGui::End();
   ImGui::PopStyleVar();
@@ -1145,14 +1184,16 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       const view::OrbitCamera::ScreenPoint sp = cam.project(world, w / h, w, h);
       if (!sp.visible) return;
       const bool white = piece.colorOf() == Color::White;
-      const view::Rgba token = white ? t.whitePiece : t.blackPiece;
       const ImVec2 centre(sp.x, sp.y);
       if (focus <= 0.01f) return;
-      dl->AddCircleFilled(centre, radius, u32(token, focus), 24);
+      // One token colour for both sides, with the figure in its own. The disc is
+      // furniture - it lifts the piece off the square and gives the outline something
+      // to sit on - and the thing being read is the figure.
+      dl->AddCircleFilled(centre, radius, u32(t.pieceToken, focus), 24);
       dl->AddCircle(centre, radius, u32(t.boardRim, focus), 24, px(1.5f));
-      drawPieceGlyph(dl, centre, radius * 0.82f,
-                     u32(white ? t.blackPiece : t.whitePiece, focus), u32(token, focus),
-                     archetypeFor(v.pieces[piece.type]), iconStyle_);
+      drawPieceGlyph(
+          dl, centre, radius * 0.82f, u32(white ? t.whitePiece : t.blackPiece, focus),
+          u32(t.pieceToken, focus), archetypeFor(v.pieces[piece.type]), iconStyle_);
     };
 
     const view::MoveAnimation& anim = session.animation();
