@@ -153,8 +153,11 @@ void drawManifold(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& the
   std::sort(tiles.begin(), tiles.end(),
             [](const Tile& a, const Tile& b) { return a.depth < b.depth; });
 
-  const view::Rgba dark = theme.light ? theme.bone : theme.ink;
-  const view::Rgba pale = theme.light ? theme.panel : theme.bone;
+  // Drawn from the theme, so the cross-section follows the palette: a light page gets
+  // ink and paper, and the candlelit page gets a muted tan over a near-black ground
+  // rather than a bright cream that fights it.
+  const view::Rgba dark = theme.light ? theme.bone : theme.soot;
+  const view::Rgba pale = theme.light ? theme.panel : theme.boneDim;
   for (const Tile& tile : tiles) {
     const float near = std::clamp((tile.depth + 1.1f) / 2.2f, 0.0f, 1.0f);
     const float alpha = 0.13f + 0.26f * near;
@@ -415,12 +418,21 @@ void drawAtom(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
        u32(theme.light ? theme.panel : theme.ink));
 }
 
-/// The pastel set the field drifts through. Deliberately not from the theme: these are
-/// the only colours in the shell that mean nothing at all, and giving them names in the
-/// palette would invite something to start using them for state.
+/// The pastel set the field drifts through on the light page. Deliberately not from the
+/// theme: these are the only colours in the shell that mean nothing at all, and giving
+/// them names in the palette would invite something to start using them for state.
 constexpr view::Rgba kPastels[]{
     view::Rgba::hex(0xC8D6F7), view::Rgba::hex(0xE2D3F7), view::Rgba::hex(0xC9EDE3),
     view::Rgba::hex(0xFAE2CD), view::Rgba::hex(0xF6D2DF), view::Rgba::hex(0xCDEBF7),
+};
+/// The same field on the candlelit page: the same shapes, muted and dark, so it sits
+/// *under* the interface instead of glowing through it. Still named here rather than in
+/// the palette - a colour that means nothing should keep meaning nothing in both themes -
+/// but it is chosen for the dark ground, so it is a second set and not the first one
+/// faded by a constant.
+constexpr view::Rgba kPastelsDark[]{
+    view::Rgba::hex(0x333C55), view::Rgba::hex(0x3B3352), view::Rgba::hex(0x2E4438),
+    view::Rgba::hex(0x453627), view::Rgba::hex(0x452F39), view::Rgba::hex(0x2C3F49),
 };
 constexpr int kPastelCount = 6;
 constexpr float kZNear = 0.34f;
@@ -514,7 +526,7 @@ void DepthField::advance(float dt) {
 
 void DepthField::draw(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
                       IconStyle iconStyle, bool withPieces, bool withPolygons) const {
-  (void)theme;
+  const view::Rgba* palette = theme.light ? kPastels : kPastelsDark;
   const ImVec2 centre((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
   const float rx = (max.x - min.x) * 0.46f;
   const float ry = (max.y - min.y) * 0.52f;
@@ -538,8 +550,8 @@ void DepthField::draw(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme&
                        std::clamp((b.z - kZNear) / 0.5f, 0.0f, 1.0f);
     if (fade <= 0.0f) continue;
 
-    const view::Rgba a = kPastels[b.colorA];
-    const view::Rgba c = kPastels[b.colorB];
+    const view::Rgba a = palette[b.colorA];
+    const view::Rgba c = palette[b.colorB];
     const float mixT = std::sin(clock_ * b.hueV + b.huePhase) * 0.5f + 0.5f;
     view::Rgba tint{a.r + (c.r - a.r) * mixT, a.g + (c.g - a.g) * mixT,
                     a.b + (c.b - a.b) * mixT, 1.0f};

@@ -62,6 +62,36 @@ TEST_CASE("a decoration at alpha zero emits nothing", "[render]") {
   CHECK(g.dl.VtxBuffer.Size > 0);
 }
 
+TEST_CASE("the candlelit theme's drifting field is muted and dark", "[render]") {
+  // The drifting polygons are the only colours in the shell that mean nothing, but they
+  // still have to follow the page: on the light theme they are pastel, and on the
+  // candlelit theme they must sit under the interface rather than glow through it. Pinned
+  // as "the console field is darker than the manifold field" rather than as exact
+  // colours, so the palettes can be tuned without rewriting the test.
+  DepthField field;
+  field.advance(1.0f);
+  const auto meanLuminance = [&](const view::Theme& th) {
+    DecoFrame f;
+    field.draw(&f.dl, ImVec2(0, 0), ImVec2(400, 300), th, IconStyle::Faceted, true, true);
+    float sum = 0.0f;
+    int n = 0;
+    for (int i = 0; i < f.dl.VtxBuffer.Size; ++i) {
+      const ImU32 c = f.dl.VtxBuffer[i].col;
+      const float r = static_cast<float>(c & 0xFF) / 255.0f;
+      const float g = static_cast<float>((c >> 8) & 0xFF) / 255.0f;
+      const float b = static_cast<float>((c >> 16) & 0xFF) / 255.0f;
+      sum += 0.2126f * r + 0.7152f * g + 0.0722f * b;
+      ++n;
+    }
+    return n == 0 ? 0.0f : sum / static_cast<float>(n);
+  };
+  const float light = meanLuminance(view::Theme::manifold());
+  const float dark = meanLuminance(view::Theme::console());
+  REQUIRE(light > 0.0f);
+  CHECK(dark < light);
+  CHECK(dark < 0.35f);  // muted, not merely a little darker
+}
+
 TEST_CASE("a decoration answers a turn", "[render]") {
   // The menu objects can be dragged. The failure this guards against is the quiet one:
   // a turn parameter that is threaded through the call but never reaches the camera,
