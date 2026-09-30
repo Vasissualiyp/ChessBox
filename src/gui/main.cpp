@@ -53,6 +53,82 @@ std::vector<std::string> variantLibrary() {
   return names;
 }
 
+/// The unshifted character a key produces, for the two-player keyboard; '\0' for a key
+/// that is not part of either half. It is the key's identity, so the halves are the same
+/// on any layout that has the keys.
+char keyChar(SDL_Keycode key) {
+  switch (key) {
+    case SDLK_Q:
+      return 'q';
+    case SDLK_W:
+      return 'w';
+    case SDLK_E:
+      return 'e';
+    case SDLK_R:
+      return 'r';
+    case SDLK_T:
+      return 't';
+    case SDLK_A:
+      return 'a';
+    case SDLK_S:
+      return 's';
+    case SDLK_D:
+      return 'd';
+    case SDLK_F:
+      return 'f';
+    case SDLK_G:
+      return 'g';
+    case SDLK_Z:
+      return 'z';
+    case SDLK_X:
+      return 'x';
+    case SDLK_C:
+      return 'c';
+    case SDLK_V:
+      return 'v';
+    case SDLK_B:
+      return 'b';
+    case SDLK_Y:
+      return 'y';
+    case SDLK_U:
+      return 'u';
+    case SDLK_I:
+      return 'i';
+    case SDLK_O:
+      return 'o';
+    case SDLK_P:
+      return 'p';
+    case SDLK_H:
+      return 'h';
+    case SDLK_J:
+      return 'j';
+    case SDLK_K:
+      return 'k';
+    case SDLK_L:
+      return 'l';
+    case SDLK_N:
+      return 'n';
+    case SDLK_M:
+      return 'm';
+    case SDLK_COMMA:
+      return ',';
+    case SDLK_PERIOD:
+      return '.';
+    case SDLK_SEMICOLON:
+      return ';';
+    case SDLK_APOSTROPHE:
+      return '\'';
+    case SDLK_SLASH:
+      return '/';
+    case SDLK_BACKSLASH:
+      return '\\';
+    case SDLK_TAB:
+      return '\t';
+    default:
+      return '\0';
+  }
+}
+
 std::unique_ptr<app::Shell> makeShell(const std::filesystem::path& settings = {}) {
   auto shell = app::Shell::create(variantLibrary(), settings);
   shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
@@ -417,6 +493,9 @@ int main(int argc, char** argv) {
         }
         case SDL_EVENT_KEY_DOWN: {
           if (consumed) break;
+          // In two-player mode each half of the keyboard enters its own moves; a key
+          // that a player owns is consumed here so it cannot also trigger a shortcut.
+          if (inGame && shell->session()->feedHotSeat(keyChar(e.key.key))) break;
           app::Action a;
           switch (e.key.key) {
             case SDLK_ESCAPE:

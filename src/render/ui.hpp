@@ -100,6 +100,9 @@ class Ui {
   /// the cells it can reach marked quiet or capture. Reads the editor's atoms and walks
   /// them, so it shows the real movement rather than a picture of it.
   void drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& max);
+  /// A red glow at the screen's edges while the side to move is in check, on every
+  /// screen: the position is in trouble whether or not the board is the thing showing.
+  void drawCheckEdges(app::Shell& shell);
 
   /// Where a pane sits in the shell's transition, as the scale and fade the pane is
   /// drawn with. The arriving pane and the departing ghost ask for their own.

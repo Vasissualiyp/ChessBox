@@ -587,6 +587,26 @@ void Ui::pauseFrame(UiRequest& request, ImVec2& menuMin, ImVec2& menuMax) {
   request.boardRect[3] = vmax.y - vmin.y;
 }
 
+void Ui::drawCheckEdges(app::Shell& shell) {
+  const app::Session* session = shell.session();
+  if (session == nullptr || !session->game().inCheck()) return;
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  const ImVec2 min = vp->WorkPos;
+  const ImVec2 max(vp->WorkPos.x + vp->WorkSize.x, vp->WorkPos.y + vp->WorkSize.y);
+  ImDrawList* dl = ImGui::GetBackgroundDrawList();
+  // A soft red vignette at the frame's edge: a few nested outlines, strongest at the
+  // very edge and fading inward, so the whole screen reads as "in check" without a panel.
+  constexpr int kRings = 7;
+  const float band = px(9.0f);
+  for (int i = 0; i < kRings; ++i) {
+    const float inset = static_cast<float>(i) * band;
+    const float alpha = 0.30f * (1.0f - static_cast<float>(i) / kRings);
+    dl->AddRect(ImVec2(min.x + inset, min.y + inset),
+                ImVec2(max.x - inset, max.y - inset), u32(theme_.blood, alpha), 0.0f, 0,
+                band);
+  }
+}
+
 float Ui::outEase() const noexcept {
   return smoothstep(enter_ / kOutEnd);
 }
@@ -685,29 +705,41 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
   // The departing menu first, so the arriving one is drawn over it.
   drawGhost(shell);
 
+  UiRequest request;
   switch (shell.screen()) {
     case app::Screen::MainMenu:
-      return buildMainMenu(shell);
+      request = buildMainMenu(shell);
+      break;
     case app::Screen::NewGame:
-      return buildNewGame(shell);
+      request = buildNewGame(shell);
+      break;
     case app::Screen::Editor:
-      return buildEditor(shell);
+      request = buildEditor(shell);
+      break;
     case app::Screen::QuitConfirm:
-      return buildQuitConfirm(shell);
+      request = buildQuitConfirm(shell);
+      break;
     case app::Screen::PauseQuitConfirm:
-      return buildPauseQuitConfirm(shell);
+      request = buildPauseQuitConfirm(shell);
+      break;
     case app::Screen::Settings:
-      return buildSettings(shell);
+      request = buildSettings(shell);
+      break;
     case app::Screen::GameInfo:
-      return buildGameInfo(shell);
+      request = buildGameInfo(shell);
+      break;
     case app::Screen::PieceMoves:
-      return buildPieceMoves(shell);
+      request = buildPieceMoves(shell);
+      break;
     case app::Screen::Paused:
-      return buildPause(shell);
+      request = buildPause(shell);
+      break;
     case app::Screen::Game:
+      request = buildGameHud(shell, fps);
       break;
   }
-  return buildGameHud(shell, fps);
+  drawCheckEdges(shell);
+  return request;
 }
 
 UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
@@ -912,7 +944,20 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
 
     ImGui::PushFont(small);
     ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
-    if (game.plyCount() == 0) {
+    if (session.hotSeat()) {
+      // Whose turn, and the coordinates entered so far, so a player can see the square
+      // they are spelling out before it completes.
+      const Color mover = game.position().sideToMove();
+      const auto partial = session.hotSeatKeys().partial(mover);
+      std::string line = mover == Color::White ? "p1 (white): " : "p2 (black): ";
+      if (partial.empty()) {
+        line += mover == Color::White ? "qwertasdfgzxcvb" : "yuiophjkl;nm,./";
+        line += "   -   one key per axis, then the next square";
+      } else {
+        for (std::int16_t c : partial) line += std::to_string(c) + " ";
+      }
+      ImGui::TextUnformatted(line.c_str());
+    } else if (game.plyCount() == 0) {
       // Only while it is still useful; a permanent instruction line is clutter.
       ImGui::TextUnformatted(
           v.geom.isBox()

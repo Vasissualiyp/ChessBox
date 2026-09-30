@@ -251,6 +251,7 @@ void Shell::applySettings() {
   settings_.sanitize();
   if (session_ != nullptr) {
     session_->setFlatView(settings_.flatView);
+    session_->setHotSeat(settings_.hotSeat);
     // Seconds per cell travelled. Nought-point-nought-eight-five at speed 1 is about
     // as fast as a move can be read; switching animation off means zero, not "instant",
     // so the session has one rule for "do not animate" rather than two.

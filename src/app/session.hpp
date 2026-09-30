@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "app/hotseat.hpp"
 #include "game/game.hpp"
 #include "view/camera.hpp"
 #include "view/layout.hpp"
@@ -100,6 +101,16 @@ class Session {
   void setFlatView(bool flat);
   [[nodiscard]] bool flatView() const noexcept { return flat_; }
 
+  /// Two players, one keyboard. When on, the front end routes key presses through
+  /// feedHotSeat so each half enters its own moves.
+  void setHotSeat(bool on) noexcept { hotSeatEnabled_ = on; }
+  [[nodiscard]] bool hotSeat() const noexcept { return hotSeatEnabled_; }
+  /// Feed one key, as the unshifted character it produces. True when it belonged to a
+  /// player and was consumed - so the front end can skip its own shortcuts. A completed
+  /// square is applied as a click.
+  bool feedHotSeat(char key);
+  [[nodiscard]] const HotSeat& hotSeatKeys() const noexcept { return hotSeatKeys_; }
+
   /// Whether this cell's board exists yet (always true for a non-temporal variant). The
   /// temporal lattice is mostly unfilled space, so the view draws only live boards.
   [[nodiscard]] bool boardVisible(CellId c) const;
@@ -166,6 +177,8 @@ class Session {
   view::MoveAnimation anim_;
   float animSeconds_{0.085f};
   bool flat_{false};
+  bool hotSeatEnabled_{false};
+  HotSeat hotSeatKeys_;
   CellId selected_{kInvalidCell};
   float boardAspect_{1.3f};
   float pullBack_{0.0f};

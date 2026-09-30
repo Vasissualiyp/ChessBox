@@ -53,6 +53,9 @@ struct Settings {
   // ---- gameplay -----------------------------------------------------------
   /// Ask before playing a move rather than playing it on the second click.
   bool confirmMoves{false};
+  /// Two players share one keyboard, one half each: player one types squares with
+  /// qwertasdfgzxcvb, player two with the other half.
+  bool hotSeat{false};
   /// Piece name to promote to without asking; empty means always ask.
   std::string autoPromoteTo;
   std::string lastVariant{"standard"};

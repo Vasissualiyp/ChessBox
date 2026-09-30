@@ -854,6 +854,13 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
 
   heading("GAMEPLAY", t, small);
   ImGui::Checkbox("Confirm before moving", &s.confirmMoves);
+  ImGui::Checkbox("Two players, one keyboard", &s.hotSeat);
+  ImGui::PushFont(small);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::TextUnformatted(
+      "p1 types qwertasdfgzxcvb, p2 the other half; a square is one key per axis");
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
   {
     // The promotion list belongs to the variant, so the choices are read from it rather
     // than hardcoded; with no game loaded there is nothing to promote to yet.

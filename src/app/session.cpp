@@ -181,6 +181,22 @@ void Session::setFlatView(bool flat) {
   refreshView();
 }
 
+bool Session::feedHotSeat(char key) {
+  if (!hotSeatEnabled_ || game_ == nullptr) return false;
+  const bool cancel = key == HotSeat::whiteCancel() || key == HotSeat::blackCancel();
+  if (!cancel && !HotSeat::ownerOf(key).has_value()) return false;
+
+  const std::optional<CellId> square =
+      hotSeatKeys_.feed(key, variant_->dims, game_->position().sideToMove());
+  if (square.has_value()) {
+    Action a;
+    a.kind = ActionKind::ClickCell;
+    a.cell = *square;
+    (void)apply(a);
+  }
+  return true;
+}
+
 void Session::applyViewMode() {
   camera_.orthographic = flat_;
   if (flat_) {
