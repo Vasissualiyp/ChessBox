@@ -14,6 +14,7 @@
 #include <cmath>
 #include <functional>
 
+#include "render/quintic.hpp"
 #include "render/ui_widgets.hpp"
 #include "view/seams.hpp"
 
@@ -196,6 +197,39 @@ OvVec3 kleinSurf(float u, float v, float th, float pinch, float ph, float tau,
   return {cr, ca, zl};
 }
 
+/// `tube`, for a 4x4 board and with a thickness: one extra parameter, `shell`, which is
+/// a level's HEIGHT above the board while the board is flat and its RADIUS once the board
+/// is rolled. One function, therefore, for the whole of TORUS3D - no blending between two
+/// embeddings, and the flat box falls out of it as th = ph = 0.
+///
+/// T^3 does not embed in three dimensions, and this is exactly how far it gets: two of
+/// the three gluings give T^2, the level axis becomes the radial direction, and the four
+/// levels come out as four *nested* shells about one core circle. The third gluing would
+/// have to join the outermost shell to the innermost, which is not a thing space can do -
+/// and that failure is the point of the beat.
+OvVec3 shellTube(float u, float v, float th, float ph, float d, float open) {
+  constexpr float kE = 4.0f;  // a 4 x 4 board
+  const float xl = (u - 0.5f) * kE;
+  const float zl = (v - 0.5f) * kE;
+  float a = xl;
+  float b = d;  // unrolled, `shell` is just a height
+  if (th > 1e-4f) {
+    const float R = kE / th;
+    const float q = xl / R;
+    a = (R + d) * std::sin(q);
+    b = (R + d) * std::cos(q) - R * sinc(th * 0.5f);
+  }
+  if (ph > 1e-4f) {
+    const float base = kE / ph;
+    const float rr = base * open;
+    const float p = zl / base;
+    const float ringMid = rr * (1.0f - sinc(ph * 0.5f));
+    return {rr * (1.0f - std::cos(p)) + a * std::cos(p) - ringMid, b,
+            rr * std::sin(p) - a * std::sin(p)};
+  }
+  return {a, b, zl};
+}
+
 Pos flatBoard() {
   return [](float u, float v) -> OvVec3 { return {u * kW - 4.0f, 0.0f, v * kH - 4.0f}; };
 }
@@ -343,6 +377,121 @@ void addRim(OvertureScene& s, const Pos& pos, view::Rgba colour, float width,
   tr.pts = {pos(0.0f, 0.0f), pos(1.0f, 0.0f), pos(1.0f, 1.0f), pos(0.0f, 1.0f),
             pos(0.0f, 0.0f)};
   s.trails.push_back(tr);
+}
+
+/// A wire box as SIX polylines rather than twelve loose segments: two closed face loops
+/// and four risers. At T6's tangle, where sixty-odd boxes interpenetrate, loose segments
+/// read as a haze of parallel lines - and the one thing that picture has to say is that
+/// these are boxes landing inside one another.
+///
+/// `lo` and `hi` are the fundamental domain's opposite corners; `c` is one translate
+/// away. `full` adds the top loop and the risers, while a faint edge- or corner-neighbour
+/// copy gets the bottom loop alone, which places it while keeping the draw count down.
+void addWireBox(OvertureScene& s, const OvVec3& lo, const OvVec3& hi, const OvVec3& c,
+                bool full, view::Rgba tone, float width, float fade) {
+  static constexpr float kLoopLo[5][3]{
+      {0, 0, 0}, {1, 0, 0}, {1, 0, 1}, {0, 0, 1}, {0, 0, 0}};
+  static constexpr float kLoopHi[5][3]{
+      {0, 1, 0}, {1, 1, 0}, {1, 1, 1}, {0, 1, 1}, {0, 1, 0}};
+  static constexpr int kRisers[4][2]{{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+  const auto corner = [&](float x, float y, float z) {
+    return OvVec3{x * hi.x + (1.0f - x) * lo.x, y * hi.y + (1.0f - y) * lo.y,
+                  z * hi.z + (1.0f - z) * lo.z};
+  };
+  const auto loop = [&](const float (&pts)[5][3]) {
+    OvTrail tr;
+    tr.colour = tone;
+    tr.width = width;
+    tr.fade = fade;
+    for (const auto& pt : pts) {
+      tr.pts.push_back(add(corner(pt[0], pt[1], pt[2]), c));
+    }
+    s.trails.push_back(tr);
+  };
+  loop(kLoopLo);
+  if (!full) return;
+  loop(kLoopHi);
+  for (const auto& rz : kRisers) {
+    OvTrail tr;
+    tr.colour = tone;
+    tr.width = width;
+    tr.fade = fade;
+    tr.pts = {add(corner(fi(rz[0]), 0.0f, fi(rz[1])), c),
+              add(corner(fi(rz[0]), 1.0f, fi(rz[1])), c)};
+    s.trails.push_back(tr);
+  }
+}
+
+view::Rgba seamColour(const view::Theme& th, int k, int n);
+
+/// The six faces of the fundamental domain, as unit-cube corners: each pair, both ends of
+/// one identification. Drawn, they are exactly what the geometry layer stores for a glued
+/// box - three periodic identifications over a flat lattice - rather than a shape.
+struct PortalFace {
+  int k;
+  float c[4][3];
+};
+constexpr PortalFace kPortalFaces[6]{
+    {0, {{0, 0, 0}, {0, 0, 1}, {0, 1, 1}, {0, 1, 0}}},
+    {0, {{1, 0, 0}, {1, 0, 1}, {1, 1, 1}, {1, 1, 0}}},
+    {1, {{0, 0, 0}, {1, 0, 0}, {1, 0, 1}, {0, 0, 1}}},
+    {1, {{0, 1, 0}, {1, 1, 0}, {1, 1, 1}, {0, 1, 1}}},
+    {2, {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}}},
+    {2, {{0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}}},
+};
+
+/// Each glued pair of faces takes one hue off the seam ramp: file, rank, level. `n` is
+/// how many axes the board has, so the hue is the portal's own and not a fixed one.
+void addPortalFaces(OvertureScene& s, const view::Theme& th, const OvVec3& lo,
+                    const OvVec3& hi, int n, float fillFade, float edgeFade) {
+  if (fillFade <= 0.02f && edgeFade <= 0.02f) return;
+  for (const PortalFace& fc : kPortalFaces) {
+    const view::Rgba c = seamColour(th, fc.k, n);
+    OvQuad q;
+    for (int j = 0; j < 4; ++j) {
+      q.p[j] = {fc.c[j][0] > 0.5f ? hi.x : lo.x, fc.c[j][1] > 0.5f ? hi.y : lo.y,
+                fc.c[j][2] > 0.5f ? hi.z : lo.z};
+    }
+    q.tone = OvTone::Light;
+    q.hasColour = true;
+    q.colour = c;
+    q.fade = fillFade;
+    s.quads.push_back(q);
+    OvTrail tr;
+    tr.colour = c;
+    tr.width = 2.0f;
+    tr.fade = edgeFade;
+    tr.pts = {q.p[0], q.p[1], q.p[2], q.p[3], q.p[0]};
+    s.trails.push_back(tr);
+  }
+}
+
+/// A deterministic pseudo-random in [0,1). A still at a given `t` has to be the same
+/// still every time it is taken, so the drifting figures on the quintic cannot use a
+/// clock or a running seed - the same rule `deco.cpp` keeps with `nextFloat`.
+float rndFloat(int i) {
+  const float x = std::sin(fi(i) * 127.1f + 311.7f) * 43758.5453f;
+  return x - std::floor(x);
+}
+
+/// One surface blended into another, for the T6 tangle's collapse onto the quintic: each
+/// copy's own cell lattice is lerped onto the sheet it becomes, so the sheet is not a new
+/// object arriving but the copy flattening.
+Pos blendPos(const Pos& a, const Pos& b, float m) {
+  return [a, b, m](float u, float v) -> OvVec3 { return mix(a(u, v), b(u, v), m); };
+}
+
+/// Patch (k1, k2) of the Calabi-Yau quintic as a surface in the overture's world units.
+/// The mixed imaginary part is the vertical, which is the orientation the standard
+/// picture is always shown in. Same formula as the main menu - `render/quintic.hpp` - so
+/// the T6 overture lands on the object the player has been looking at since the game
+/// started.
+constexpr float kQuinticScale = 5.2f;
+Pos quinPatch(int k1, int k2) {
+  return [k1, k2](float u, float v) -> OvVec3 {
+    const std::array<float, 3> q = quinticPoint(k1, k2, u * kPi * 0.5f, -1.0f + 2.0f * v);
+    return {q[0] * kQuinticScale, q[2] * kQuinticScale, q[1] * kQuinticScale};
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1533,6 +1682,513 @@ OvertureScene sceneMultiverse(const view::Theme& th, float t) {
   return s;
 }
 
+OvertureScene sceneTorus3d(const view::Theme& th, float t) {
+  OvertureScene s;
+  constexpr int N = 4;
+  const float cut = ease(seg(t, 0.0f, 0.10f));
+  const float shift = ease(seg(t, 0.10f, 0.15f));
+  const float ext = ease(seg(t, 0.15f, 0.26f));
+  const float rollF = ease(seg(t, 0.26f, 0.38f));  // files close
+  const float rollR = ease(seg(t, 0.38f, 0.52f));  // ranks close
+  const float undo = ease(seg(t, 0.62f, 0.72f));   // and both open again
+  const float cop = seg(t, 0.78f, 0.90f);
+  const float show = seg(t, 0.90f, 1.0f);
+  const float off = (4.0f - fi(N) * 0.5f) * shift;
+  // Level spacing. It opens so the extrusion reads, closes to exactly one cell so the
+  // lattice of copies has the same period on all three axes - it must, the manifold is a
+  // cube - and opens again at the end so the 26 destinations are not buried in a block.
+  const float gap = lerpf(lerpf(0.0f, 1.6f, ext), 1.0f, ease(seg(t, 0.68f, 0.78f))) +
+                    lerpf(0.0f, 0.7f, ease(seg(t, 0.90f, 1.0f)));
+  // `theta` rather than `th`, which is the theme.
+  const float theta = rollF * (1.0f - undo) * kTau;
+  const float ph = rollR * (1.0f - undo) * kTau;
+  const float curl = std::max(rollF, rollR) * (1.0f - undo);
+  // A level is a height above the board when the box is flat, and a shell radius when it
+  // is rolled. Both are the same parameter to `shellTube`, which is why the whole
+  // overture is one surface function rather than a blend between two.
+  const auto shellOf = [&](int L) {
+    return lerpf((fi(L) - 1.5f) * gap, 0.62f + fi(L) * 0.82f, curl);
+  };
+  const float open = lerpf(1.0f, 10.5f, rollR * (1.0f - undo));
+  const auto posOf = [&](int L) -> Pos {
+    const float d = shellOf(L);
+    return [theta, ph, d, open, off](float u, float v) -> OvVec3 {
+      const OvVec3 p = shellTube(u, v, theta, ph, d, open);
+      return {p.x + off - 2.0f, p.y, p.z + off - 2.0f};
+    };
+  };
+  // Back up again for the box: a cube seen from too low reads as a tower, and the one
+  // thing this shape may not look like is taller on one axis than another.
+  const float dist = lerpf(22.0f, 30.0f, ease(seg(t, 0.15f, 0.55f))) -
+                     lerpf(0.0f, 5.0f, ease(seg(t, 0.62f, 0.78f))) +
+                     lerpf(0.0f, 10.0f, ease(seg(t, 0.78f, 0.90f))) -
+                     lerpf(0.0f, 17.0f, ease(seg(t, 0.90f, 1.0f)));
+  s.cam = {lerpf(0.05f, 0.92f, ease(t)),
+           lerpf(1.45f, 0.50f, ease(t)) + lerpf(0.0f, 0.30f, ease(seg(t, 0.72f, 1.0f))),
+           dist * 0.36f, 0.11f};
+
+  addCutGrid(s, N, cut);
+  constexpr float kShell[N]{1.0f, 0.70f, 0.52f, 0.40f};
+  for (int L = 0; L < N; ++L) {
+    const float alive =
+        L == 0 ? 1.0f : clampf(ext * 1.7f - (fi(L) - 1.0f) * 0.20f, 0.0f, 1.0f);
+    if (alive <= 0.01f) continue;
+    GridOpt g;
+    g.nx = N;
+    g.nz = N;
+    g.inset = 0.04f;
+    g.sub = curl > 0.02f ? 3 : 1;
+    g.fade = alive * lerpf(1.0f, kShell[L], curl);
+    g.tone = [L](int f, int r) {
+      return ((f + r + L) % 2 != 0) ? OvTone::Dark : OvTone::Light;
+    };
+    addGrid(s, posOf(L), g);
+  }
+  // The 8 x 8 army goes with its cells, then leaves with the extrusion.
+  if (ext < 0.6f) {
+    addCutArmy(s, N, cut, posOf(0), 1.0f - ease(clampf(ext * 1.8f, 0.0f, 1.0f)));
+  }
+  // Name the pair that is going to fail before it fails: the level axis glues the
+  // outermost shell to the innermost, so both get its hue while the ring closes.
+  const float named = ease(seg(t, 0.38f, 0.50f)) * (1.0f - ease(seg(t, 0.60f, 0.70f)));
+  if (named > 0.02f) {
+    for (const int L : {0, 3}) {
+      OvTrail tr;
+      tr.colour = seamColour(th, 2, 3);
+      tr.width = 2.6f;
+      tr.fade = named;
+      for (int i = 0; i <= 40; ++i) tr.pts.push_back(posOf(L)(0.75f, fi(i) / 40.0f));
+      s.trails.push_back(tr);
+    }
+  }
+  // The refusal: outermost shell to innermost, which is not a step space can take.
+  const float bad = seg(t, 0.52f, 0.62f) * (1.0f - ease(seg(t, 0.62f, 0.70f)));
+  if (bad > 0.02f) {
+    for (int i = 0; i < 6; ++i) {
+      const float v = (fi(i) + 0.5f) / 6.0f;
+      const OvVec3 a = posOf(3)(0.75f, v);
+      OvTrail tr;
+      tr.colour = th.blood;
+      tr.width = 2.6f;
+      tr.fade = bad * 0.9f;
+      tr.dashed = true;
+      tr.pts = {a, posOf(0)(0.75f, v)};
+      s.trails.push_back(tr);
+      s.bursts.push_back({a, 0.55f, bad, th.blood, true});
+    }
+  }
+  // The box. Its cells span [-4 + off, off] on file and rank - the cut block's own
+  // coordinates, slid by `off` - and 4 x gap on level.
+  const OvVec3 lo{-4.0f + off, -2.0f * gap, -4.0f + off};
+  const OvVec3 hi{off, 2.0f * gap, off};
+  const auto cellAt = [&](int f, int r, int L) -> OvVec3 {
+    return {fi(f) + 0.5f - 4.0f + off, (fi(L) - 1.5f) * gap, fi(r) + 0.5f - 4.0f + off};
+  };
+  const float faces = ease(seg(t, 0.68f, 0.78f));
+  addPortalFaces(s, th, lo, hi, 3, faces * 0.14f * (1.0f - 0.7f * ease(show)),
+                 faces * 0.9f * (1.0f - 0.45f * ease(show)));
+  // The 26 translates. A face-neighbour gets the whole wire box in its axis hue; an edge
+  // or corner neighbour gets one face loop, which places it and keeps the draw count near
+  // 60 polylines rather than over 300 segments.
+  const float ghost = ease(clampf(cop * 1.3f, 0.0f, 1.0f)) *
+                      (1.0f - ease(clampf(show * 1.7f, 0.0f, 1.0f)));
+  if (ghost > 0.02f) {
+    const OvVec3 per{4.0f, 4.0f * gap, 4.0f};
+    for (int dx = -1; dx <= 1; ++dx) {
+      for (int dy = -1; dy <= 1; ++dy) {
+        for (int dz = -1; dz <= 1; ++dz) {
+          const int man = std::abs(dx) + std::abs(dy) + std::abs(dz);
+          if (man == 0) continue;
+          const float bornG = clampf(cop * 2.8f - fi(man - 1) * 0.26f, 0.0f, 1.0f);
+          if (bornG <= 0.02f) continue;
+          const OvVec3 d{fi(dx) * per.x, fi(dy) * per.y, fi(dz) * per.z};
+          const int axis = man == 1 ? (dx != 0 ? 0 : (dy != 0 ? 1 : 2)) : -1;
+          const view::Rgba tone = axis < 0 ? th.boneFaint : seamColour(th, axis, 3);
+          const float fade = ghost * bornG * (axis < 0 ? 0.24f : 0.60f);
+          addWireBox(s, lo, hi, d, axis >= 0, tone, axis < 0 ? 0.8f : 1.3f, fade);
+        }
+      }
+    }
+  }
+  // A rook off one face and back in at the other: one straight line, cut in two.
+  if (cop > 0.24f && show < 0.85f) {
+    const float q = ease(clampf((cop - 0.24f) / 0.66f, 0.0f, 1.0f));
+    const OvVec3 home = cellAt(0, 1, 3);
+    const float run = q * 7.6f;
+    constexpr float kPeriod = 4.0f;
+    const auto wrap = [&](float x) {
+      return std::fmod(std::fmod(x - lo.x, kPeriod) + kPeriod, kPeriod) + lo.x;
+    };
+    {
+      OvTrail tr;
+      tr.colour = seamColour(th, 0, 3);
+      tr.width = 1.5f;
+      tr.fade = 0.6f * ghost;
+      tr.dashed = true;
+      tr.pts = {{home.x, home.y + 0.32f, home.z}, {home.x + run, home.y + 0.32f, home.z}};
+      s.trails.push_back(tr);
+    }
+    // The same line inside the box, cut wherever it leaves a face.
+    std::vector<OvVec3> part;
+    float prev = 0.0f;
+    bool first = true;
+    for (int i = 0; i <= 48; ++i) {
+      const float x = wrap(home.x + run * fi(i) / 48.0f);
+      if (!first && x < prev - 1e-3f) {
+        if (part.size() > 1) {
+          OvTrail tr;
+          tr.colour = th.ember;
+          tr.width = 2.6f;
+          tr.fade = 1.0f - ease(show);
+          tr.pts = part;
+          s.trails.push_back(tr);
+        }
+        part.clear();
+      }
+      part.push_back({x, home.y + 0.32f, home.z});
+      prev = x;
+      first = false;
+    }
+    if (part.size() > 1) {
+      OvTrail tr;
+      tr.colour = th.ember;
+      tr.width = 2.6f;
+      tr.fade = 1.0f - ease(show);
+      tr.pts = part;
+      s.trails.push_back(tr);
+    }
+    TokenOpt tk;
+    tk.nx = N;
+    tk.nz = N;
+    tk.at = true;
+    tk.where = {wrap(home.x + run), home.y, home.z};
+    tk.hasNormal = true;
+    tk.normal = {0.0f, 1.0f, 0.0f};
+    tk.fade = 1.0f - ease(clampf(show * 2.2f, 0.0f, 1.0f));
+    addToken(s, posOf(3), 0, 0, 'R', true, tk);
+  }
+  // Twenty-six, and not one of them clipped.
+  if (show > 0.0f) {
+    const float q = ease(show);
+    TokenOpt kt;
+    kt.nx = N;
+    kt.nz = N;
+    kt.at = true;
+    kt.where = cellAt(1, 1, 1);
+    kt.hasNormal = true;
+    kt.normal = {0.0f, 1.0f, 0.0f};
+    addToken(s, posOf(1), 0, 0, 'K', true, kt);
+    int k = 0;
+    for (int df = -1; df <= 1; ++df) {
+      for (int dr = -1; dr <= 1; ++dr) {
+        for (int dl = -1; dl <= 1; ++dl) {
+          const int used = (df != 0 ? 1 : 0) + (dr != 0 ? 1 : 0) + (dl != 0 ? 1 : 0);
+          if (used == 0) continue;
+          ++k;
+          s.bursts.push_back(
+              {cellAt((1 + df + 4) % 4, (1 + dr + 4) % 4, (1 + dl + 4) % 4), 0.34f,
+               clampf(q * 2.0f - fi(k) / 44.0f, 0.0f, 1.0f) * 0.95f,
+               seamColour(th, used - 1, 3), false});
+        }
+      }
+    }
+  }
+  s.caption = t < 0.10f   ? "four files and four ranks go"
+              : t < 0.15f ? "and what is left moves in"
+              : t < 0.26f ? "a third axis, four levels deep"
+              : t < 0.38f ? "the files close, as ever"
+              : t < 0.52f ? "the ranks close, and the levels nest"
+              : t < 0.62f ? "the third has nowhere to go"
+              : t < 0.78f ? "so the box keeps the gluing as colour"
+              : t < 0.90f ? "leave a face, arrive at the opposite one"
+                          : "twenty-six neighbours, and no cell without them";
+  return s;
+}
+
+OvertureScene sceneT6(const view::Theme& th, float t) {
+  OvertureScene s;
+  constexpr int N = 4;
+  const float cut = ease(seg(t, 0.0f, 0.08f));
+  const float shift = ease(seg(t, 0.08f, 0.13f));
+  const float ext = ease(seg(t, 0.13f, 0.24f));
+  const float lat = seg(t, 0.24f, 0.36f);
+  const float skew = seg(t, 0.36f, 0.58f);
+  const float gather = seg(t, 0.58f, 0.76f);
+  const float settle = ease(seg(t, 0.68f, 0.80f));
+  const float walk = seg(t, 0.76f, 0.88f);
+  const float fan = seg(t, 0.88f, 1.0f);
+  const float off = (4.0f - fi(N) * 0.5f) * shift;
+  const float gap = ext;  // a true cube the moment it exists
+  const float dist = lerpf(22.0f, 34.0f, ease(seg(t, 0.20f, 0.36f))) +
+                     lerpf(0.0f, 9.0f, ease(seg(t, 0.36f, 0.56f))) -
+                     lerpf(0.0f, 15.0f, ease(seg(t, 0.58f, 0.76f)));
+  s.cam = {lerpf(-0.05f, 1.32f, ease(t)), lerpf(1.45f, 0.60f, ease(t)), dist * 0.34f,
+           0.10f};
+
+  const auto boxAt = [=](int L, const OvVec3& o) -> Pos {
+    return [=](float u, float v) -> OvVec3 {
+      return {u * fi(N) - 4.0f + off + o.x, (fi(L) - 1.5f) * gap + o.y,
+              v * fi(N) - 4.0f + off + o.z};
+    };
+  };
+  const OvVec3 origin{0.0f, 0.0f, 0.0f};
+  const OvVec3 lo{-4.0f + off, -2.0f * gap, -4.0f + off};
+  const OvVec3 hi{off, 2.0f * gap, off};
+
+  // The three axes that get a direction, and the three that do not. E_SKEW is
+  // incommensurate with the cubic lattice on purpose: a copy offset by one of these lands
+  // PART-WAY THROUGH its neighbours instead of beside them, which is the whole visual
+  // argument. Nothing here is noise - every box is a real translate of the domain.
+  static constexpr float kSkew[3][3]{
+      {2.7f, 2.3f, -1.5f}, {-1.9f, 2.7f, 2.5f}, {2.3f, -2.5f, 2.1f}};
+  struct Copy {
+    OvVec3 p;
+    int man;
+    int axis;
+    bool skew;
+  };
+  std::vector<Copy> copies;
+  for (int a = -1; a <= 1; ++a) {
+    for (int b = -1; b <= 1; ++b) {
+      for (int c = -1; c <= 1; ++c) {
+        if (a == 0 && b == 0 && c == 0) continue;
+        const int man = std::abs(a) + std::abs(b) + std::abs(c);
+        const int axis = man == 1 ? (a != 0 ? 0 : (b != 0 ? 1 : 2)) : -1;
+        copies.push_back(
+            {{fi(a) * 4.0f, fi(b) * 4.0f * gap, fi(c) * 4.0f}, man, axis, false});
+      }
+    }
+  }
+  static constexpr int kSeeds[7][3]{{0, 0, 0},  {1, 0, 0}, {-1, 0, 0}, {0, 1, 0},
+                                    {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+  for (int j = 0; j < 3; ++j) {
+    for (const int sg : {-1, 1}) {
+      for (int q = 0; q < 7; ++q) {
+        const int* sd = kSeeds[q];
+        copies.push_back({{fi(sd[0]) * 4.0f + fi(sg) * kSkew[j][0],
+                           fi(sd[1]) * 4.0f * gap + fi(sg) * kSkew[j][1],
+                           fi(sd[2]) * 4.0f + fi(sg) * kSkew[j][2]},
+                          1 + q,
+                          3 + j,
+                          true});
+      }
+    }
+  }
+  const auto srcOf = [&](int k1, int k2) -> OvVec3 {
+    const int idx = ((k1 * kQuinticN + k2) * 11) % static_cast<int>(copies.size());
+    return copies[static_cast<std::size_t>(idx)].p;
+  };
+  const auto born = [&](int k1, int k2) {
+    return ease(clampf((gather - fi(k1 + k2) / 8.0f * 0.5f) / 0.5f, 0.0f, 1.0f));
+  };
+
+  addCutGrid(s, N, cut);
+  // The fundamental domain's own cells, until the sheets take over.
+  const float boxFade = 1.0f - ease(clampf(gather * 1.6f, 0.0f, 1.0f));
+  if (boxFade > 0.02f) {
+    for (int L = 0; L < N; ++L) {
+      const float alive =
+          L == 0 ? 1.0f : clampf(ext * 1.7f - (fi(L) - 1.0f) * 0.20f, 0.0f, 1.0f);
+      if (alive <= 0.01f) continue;
+      GridOpt g;
+      g.nx = N;
+      g.nz = N;
+      g.inset = 0.04f;
+      g.fade = alive * boxFade;
+      g.tone = [L](int f, int r) {
+        return ((f + r + L) % 2 != 0) ? OvTone::Dark : OvTone::Light;
+      };
+      addGrid(s, boxAt(L, origin), g);
+    }
+  }
+  if (ext < 0.6f) {
+    addCutArmy(s, N, cut, boxAt(0, origin), 1.0f - ease(clampf(ext * 1.8f, 0.0f, 1.0f)));
+  }
+  // Three axes, three pairs of faces - torus3d's vocabulary, quoted outright and without
+  // its nested-tori detour. That beat belongs to that overture; repeating it here would
+  // make the two hardest entries in the library the same animation.
+  const float faces =
+      ease(seg(t, 0.18f, 0.26f)) * (1.0f - ease(clampf(gather * 1.6f, 0.0f, 1.0f)));
+  addPortalFaces(s, th, lo, hi, 6, faces * 0.14f, faces * 0.9f);
+  // The lattice, and then the tangle. Every skew copy is drawn as a whole wire box,
+  // because a box landing part-way through another box is the entire argument and a few
+  // loose rails would read as haze.
+  const float shown = ease(clampf(lat * 1.3f, 0.0f, 1.0f));
+  const float messy = ease(clampf(skew * 1.2f, 0.0f, 1.0f));
+  const float fadeOut = 1.0f - ease(clampf(gather * 1.5f, 0.0f, 1.0f));
+  if (shown > 0.02f && fadeOut > 0.02f) {
+    for (const Copy& cp : copies) {
+      const float arrive =
+          cp.skew
+              ? clampf(messy * 2.4f - fi(cp.man - 1) * 0.22f - fi(cp.axis - 3) * 0.20f,
+                       0.0f, 1.0f)
+              : clampf(shown * 2.6f - fi(cp.man - 1) * 0.26f, 0.0f, 1.0f);
+      if (arrive <= 0.02f) continue;
+      const view::Rgba tone = cp.axis < 0 ? th.boneFaint : seamColour(th, cp.axis, 6);
+      const float w = cp.axis < 0 ? 0.8f : (cp.skew ? 1.0f : 1.3f);
+      const float fade =
+          arrive * fadeOut * (cp.axis < 0 ? 0.22f : (cp.skew ? 0.40f : 0.58f));
+      addWireBox(s, lo, hi, cp.p, cp.skew || cp.axis >= 0, tone, w, fade);
+    }
+  }
+  // Where a skew copy lands inside one already there.
+  const float clash = ease(clampf((skew - 0.30f) / 0.45f, 0.0f, 1.0f)) * fadeOut;
+  if (clash > 0.02f) {
+    const OvVec3 mid{(lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f, (lo.z + hi.z) * 0.5f};
+    int n = 0;
+    for (int j = 0; j < 3; ++j) {
+      for (const int sg : {-1, 1}) {
+        for (const float g : {0.5f, 1.0f}) {
+          ++n;
+          s.bursts.push_back(
+              {{mid.x + fi(sg) * kSkew[j][0] * g, mid.y + fi(sg) * kSkew[j][1] * g,
+                mid.z + fi(sg) * kSkew[j][2] * g},
+               0.95f,
+               clampf(clash * 1.8f - fi(n) / 14.0f, 0.0f, 1.0f) * 0.9f,
+               th.blood,
+               true});
+        }
+      }
+    }
+  }
+  // Resolved: every surviving copy collapses to one sheet and flies to its patch.
+  for (int k1 = 0; k1 < kQuinticN; ++k1) {
+    for (int k2 = 0; k2 < kQuinticN; ++k2) {
+      const float m = born(k1, k2);
+      if (m <= 0.005f) continue;
+      const Pos src = boxAt(1, srcOf(k1, k2));
+      GridOpt g;
+      g.nx = N;
+      g.nz = N;
+      g.inset = lerpf(0.04f, 0.015f, m);
+      g.sub = m > 0.02f ? 2 : 1;
+      // Opaque almost at once: the sheet is not arriving, it IS the copy that was already
+      // on screen, now flattened. Fading it in would read as a new object.
+      g.fade = clampf(m * 5.0f, 0.0f, 1.0f) * lerpf(1.0f, 0.55f, m);
+      g.tone = [k1, k2](int f, int r) {
+        return ((f + r + k1 + k2) % 2 != 0) ? OvTone::Dark : OvTone::Light;
+      };
+      addGrid(s, blendPos(src, quinPatch(k1, k2), m), g);
+    }
+  }
+  // Fourteen figures, walking the surface's own parameter lines, both colours. `t` is the
+  // clock, so they drift forwards on the way out and backwards on the way home, for free.
+  if (settle > 0.02f) {
+    static constexpr char kGlyphs[6]{'R', 'N', 'B', 'Q', 'K', 'P'};
+    for (int i = 0; i < 14; ++i) {
+      const int k1 = i % kQuinticN;
+      const int k2 = (i * 2 + 1) % kQuinticN;
+      if (born(k1, k2) < 0.9f) continue;
+      const float du = (rndFloat(i * 5 + 1) - 0.5f) * 1.1f;
+      const float dv = (rndFloat(i * 5 + 2) - 0.5f) * 1.1f;
+      float u = rndFloat(i * 5 + 3) + t * du;
+      u = std::fmod(std::fmod(u, 1.0f) + 1.0f, 1.0f);
+      const float v = 0.5f + 0.44f * std::sin((rndFloat(i * 5 + 4) + t * dv) * kTau);
+      const Pos p = quinPatch(k1, k2);
+      TokenOpt tk;
+      tk.at = true;
+      tk.where = p(u, v);
+      tk.hasNormal = true;
+      tk.normal = normalAt(p, u, v);
+      tk.fade = settle;
+      addToken(s, p, 0, 0, kGlyphs[i % 6], i % 2 == 0, tk);
+    }
+  }
+  // The rook's line of four: three steps drawn on the sheet, the fourth as a link - on a
+  // 4-cell periodic axis a rook's line is a closed loop, and the quintic is not this
+  // board's own space, so the return is called out rather than merged.
+  if (walk > 0.0f) {
+    const float q = ease(walk);
+    const Pos p = quinPatch(1, 2);
+    const float v0 = 1.5f / fi(N);
+    const float u0 = 0.5f / fi(N);
+    const float span = std::min(q * 4.0f, 3.0f) / fi(N);
+    {
+      OvTrail tr = trailOn(p, u0, v0, u0 + span, v0, 28, th.ember, 0.22f);
+      tr.width = 2.6f;
+      s.trails.push_back(tr);
+    }
+    const float close = clampf(q * 4.0f - 3.0f, 0.0f, 1.0f);
+    if (close > 0.0f) {
+      const OvVec3 a = p(u0 + 3.0f / fi(N), v0);
+      const OvVec3 b = p(u0, v0);
+      OvTrail tr;
+      tr.colour = seamColour(th, 0, 6);
+      tr.width = 2.2f;
+      tr.dashed = true;
+      for (int i = 0; i <= 18; ++i) {
+        const float q2 = fi(i) / 18.0f * close;
+        const float lift = std::sin(q2 * kPi) * 2.0f;
+        tr.pts.push_back(
+            {lerpf(a.x, b.x, q2), lerpf(a.y, b.y, q2) + lift, lerpf(a.z, b.z, q2)});
+      }
+      s.trails.push_back(tr);
+    }
+    const float uNow = close > 0.99f ? u0 : u0 + span;
+    TokenOpt tk;
+    tk.at = true;
+    tk.where = p(uNow, v0);
+    tk.hasNormal = true;
+    tk.normal = normalAt(p, uNow, v0);
+    addToken(s, p, 0, 0, 'R', true, tk);
+  }
+  // The knight's atom: {1,2} on every ordered pair of six axes, both signs. 120 vectors;
+  // 60 cells, because +2 and -2 coincide on an axis of extent 4. The animation draws 60
+  // pips, and it is a real fact about this variant that the two signs of the magnitude-2
+  // leg land on the same cell.
+  if (fan > 0.0f) {
+    const float q = ease(fan);
+    // The address: the four axes with no sheet of their own, read as a base-4 number and
+    // spread over the 25 patches by a multiplier coprime to 25. A labelling for the eye -
+    // distinct cells get distinct places - and emphatically not a projection. The tangle
+    // is what a projection would have cost.
+    const auto addr = [&](const int c[6]) -> OvVec3 {
+      const int k =
+          ((c[2] + 4 * c[3] + 16 * c[4] + 64 * c[5]) * 7) % (kQuinticN * kQuinticN);
+      return quinPatch(k % kQuinticN, k / kQuinticN)((fi(c[0]) + 0.5f) / fi(N),
+                                                     (fi(c[1]) + 0.5f) / fi(N));
+    };
+    const int base[6]{1, 1, 1, 1, 1, 1};
+    std::vector<std::array<int, 6>> seen;
+    int drawn = 0;
+    for (int i = 0; i < 6; ++i) {
+      for (int j = 0; j < 6; ++j) {
+        if (i == j) continue;
+        for (const int si : {-1, 1}) {
+          for (const int sj : {-1, 1}) {
+            std::array<int, 6> c{base[0], base[1], base[2], base[3], base[4], base[5]};
+            const auto ui = static_cast<std::size_t>(i);
+            const auto uj = static_cast<std::size_t>(j);
+            c[ui] = (c[ui] + si + 4) % 4;
+            c[uj] = (c[uj] + sj * 2 + 4) % 4;
+            if (std::find(seen.begin(), seen.end(), c) != seen.end()) continue;
+            seen.push_back(c);
+            ++drawn;
+            s.bursts.push_back({addr(c.data()), 0.26f,
+                                clampf(q * 2.0f - fi(drawn) / 100.0f, 0.0f, 1.0f) * 0.9f,
+                                seamColour(th, std::min(i, j), 6), false});
+          }
+        }
+      }
+    }
+    TokenOpt tk;
+    tk.nx = N;
+    tk.nz = N;
+    tk.at = true;
+    tk.where = addr(base);
+    addToken(s, quinPatch(0, 0), 0, 0, 'N', true, tk);
+  }
+  s.caption = t < 0.08f   ? "four files and four ranks go"
+              : t < 0.13f ? "and what is left moves in"
+              : t < 0.24f ? "three axes, three pairs of faces"
+              : t < 0.36f ? "a glued box is already a Calabi-Yau: the flat one"
+              : t < 0.58f ? "three more axes, and space has no directions left"
+              : t < 0.76f ? "what a lattice could not hold, a manifold can"
+              : t < 0.88f ? "a rook's line of four is a closed loop"
+                          : "one knight, a hundred and twenty directions";
+  return s;
+}
+
 }  // namespace
 
 OvVec3 overtureSurfaceAt(app::Overture which, float u, float v) {
@@ -1601,6 +2257,12 @@ OvertureScene overtureScene(app::Overture which, float t, bool intro,
       break;
     case app::Overture::Multiverse:
       out = sceneMultiverse(th, p);
+      break;
+    case app::Overture::Torus3d:
+      out = sceneTorus3d(th, p);
+      break;
+    case app::Overture::T6:
+      out = sceneT6(th, p);
       break;
   }
   // Settle the camera onto the shared opening pose as t reaches 0. Applied here rather
@@ -1879,8 +2541,9 @@ void drawOverture(ImDrawList* dl, const OvertureScene& scene, ImVec2 min, ImVec2
     switch (it.kind) {
       case Kind::Quad: {
         const OvQuad& q = scene.quads[i];
-        const bool flatFill = q.tone == OvTone::Scrim || q.tone == OvTone::Mirror;
-        const view::Rgba base = toneColour(theme, q.tone);
+        const bool flatFill =
+            q.tone == OvTone::Scrim || q.tone == OvTone::Mirror || q.hasColour;
+        const view::Rgba base = q.hasColour ? q.colour : toneColour(theme, q.tone);
         const view::Rgba col = flatFill ? base : shadeBy(base, faceShade(q.p));
         const ImVec2* p = &quadPts[i * 4];
         // Cells are drawn through. A closed surface hides half of itself, and the half

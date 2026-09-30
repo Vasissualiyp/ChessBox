@@ -26,14 +26,15 @@ enum class Overture : std::uint8_t {
   AtomicTorus,  ///< the same blast, on a surface where the nine cells are four corners
   MustCapture,  ///< the refusal: a quiet move that is not a move
   Multiverse,   ///< boards appending along time, and a timeline branching
+  Torus3d,      ///< a cube whose third gluing has nowhere in space to go
+  T6,           ///< three axes too many, resolved onto the quintic
 };
 
 /// The overture a variant's name asks for.
 ///
-/// `torus3d` and `t6` borrow the torus, and `charged` borrows the standard board: they
-/// have no bespoke overture, and the nearest family is a better answer than a blank
-/// pane. An unknown name - a Workshop package - gets the standard board for the same
-/// reason. A library entry always animates.
+/// `charged` borrows the standard board: it has no bespoke overture, and the nearest
+/// family is a better answer than a blank pane. An unknown name - a Workshop package -
+/// gets the standard board for the same reason. A library entry always animates.
 [[nodiscard]] Overture overtureFor(std::string_view variantName) noexcept;
 
 /// The overture's own name, for a caption and for a test's failure message.

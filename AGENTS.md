@@ -7,8 +7,13 @@ Read this first. It is the map. Design rationale is in
 
 **Status: M0-M6 complete.** A playable, perft-exact engine with N-dimensional boards,
 non-trivial boundary topology, a Vulkan interface, a rule VM, and 5D-chess-style time
-travel. Next: M7 (the GUI editors), M8 (multiplayer), M9 (Workshop), M10 (AI), M11 (the
-move camera), M12 (spectator/replay/clip). M11 only needs M4/M6 and may be pulled forward.
+travel. Next, in **release order** (visuals and clippable things first — see the roadmap's
+release sequence): Wave 1 M11 (move camera), M12 (clip export/cinema), M13 (generic
+overtures) and M16.1 (Coming Soon page); Wave 2 M14 (onboarding), M16.2-3 (build pipeline +
+demo) and M7 (editors); Wave 3 M10 (AI), M15 (campaign) and M8 (multiplayer); Wave 4 M9
+(Workshop); Wave 5 M16.4-5 (release). The fixed schedule anchor is **Steam Next Fest,
+February 2027**. Milestone numbers are stable IDs, not a schedule; M11 only needs M4/M6 and
+M13 lets data-only variants animate.
 See [`docs/plan/00-roadmap.md`](docs/plan/00-roadmap.md); each milestone plan ends with a
 status section recording what was built, what was deferred, and why.
 

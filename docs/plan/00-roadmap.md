@@ -30,18 +30,91 @@ directory. Read `docs/ARCHITECTURE.md` first.
 | M4 | Vulkan renderer + interaction | playable 2D/3D/4D+ board on screen | **done**, three deviations recorded | [M4](M4-renderer.md) |
 | M5 | Variant VM + custom fields | explosive, checkers, regional variants; quantum design | **done**, variant catalogue partial | [M5](M5-variant-vm.md) |
 | M6 | Temporal / multiverse (5D chess) | faithful 5D chess, generalized extra axes | **done**; two axis generalizations planned, not required | [M6](M6-temporal.md) |
-| M7 | GUI authoring: piece editor, then game editor | author pieces and whole variants in the GUI: vector moves, fields, rules, 3-D and 2-D models | next | [M7](M7-editors.md) |
+| M7 | GUI authoring: piece editor, then game editor | author pieces and whole variants in the GUI: vector moves, fields, rules, 3-D and 2-D models | in progress | [M7](M7-editors.md) |
 | M8 | Client–server multiplayer | authoritative server, lockstep-verified replay | not started | [M8](M8-net.md) |
 | M9 | Steam Workshop + packaging | variant packages, validation, signing, distribution | not started | [M9](M9-workshop.md) |
 | M10 | Trainable per-variant AI | search + learned eval, self-play harness | not started | [M10](M10-ai.md) |
 | M11 | The move camera | follow a move through any geometry: seams, mirrors, grid axes, 4-D+ | not started | [M11](M11-move-camera.md) |
 | M12 | Spectator, replay and the clip | cinema view, deterministic clip export, shared camera presets, live spectating | not started, optional | [M12](M12-broadcast.md) |
+| M13 | Generic variant overtures | a data-only variant animates on the library screen: derived surface, derived move, no scene code | not started | [M13](M13-overtures.md) |
+| M14 | Onboarding, tutorial and first-run polish | a stranger is playing something interesting within ten minutes and understands why it is different | not started | [M14](M14-onboarding.md) |
+| M15 | Campaign: the geometry ladder | a designed progression with a concept boss per leg, ending on a `t6` puzzle finale | not started | [M15](M15-campaign.md) |
+| M16 | Steam publishing: store, demo and release | Coming Soon page, build pipeline, demo/Next Fest, ratings, launch | not started | [M16](M16-publishing.md) |
 
 Each completed milestone's plan file ends with a **Status** section recording what was
 built, what was deferred, and why - including the places where the plan turned out to
 be wrong. Read those before trusting the plan text above them.
 
-### Why this order
+## Release sequence — visuals first
+
+**Milestone numbers are stable identifiers, not a schedule.** M0-M6 shipped in numbered
+order; from M7 on, the order the milestones are *built* is the priority order below, and a
+milestone keeps its number even when it is built out of sequence. M7 is already in
+progress, so renumbering it would invalidate every commit message and cross-reference that
+names it; the release sequence is the single ordering truth instead. The table above is
+sorted by number because a number is an ID; this section is sorted by *when*.
+
+The order is chosen so the game is **showable before it is complete**: the things that
+make a clip, then the things that make the clip convert, then the things that make it a
+game.
+
+**Wave 1 — clippable (the marketing hook).**
+1. **M11 — the move camera.** Depends only on M4/M6, both done. This is the single most
+   clippable feature and the pitch itself: a piece wrapping a Möbius seam, a Klein turn, a
+   6-D move. Nothing else adds as much store-page value, and nothing blocks it.
+2. **M12 — the clip (export half).** The deterministic frame-sequence exporter and cinema
+   mode, which turn M11 into a shareable file. The live-spectator and shared-preset halves
+   stay in Wave 4, because they need M8 and M9.
+3. **M13 — generic overtures.** The library screen already animates for the shipped
+   variants; this makes it animate for *any* variant - polish, and the prerequisite for
+   Wave 4's user content.
+4. **M16.1 — the Coming Soon page.** It needs nothing but the clips M11/M12/M13 produce,
+   and **wishlists accrue from the day it is live**, so it starts here, in parallel with
+   the visuals, not at release. The Steam review is 7 business days; the app, fee, assets,
+   trailer and content survey are the gate.
+
+**Wave 2 — polish and demo (convert, and make Next Fest).**
+5. **M14 — onboarding and first-run polish.** A stranger's first ten minutes: a tutorial,
+   curated start-here modes, legible defaults, and an in-game answer to "what does a rook
+   do on *this* board". A powerful store page that converts badly is the failure mode this
+   wave exists to prevent.
+6. **M16.2 + M16.3 — the build pipeline and the demo.** The **February 2027** Next Fest is
+   the target (October 2026's deadlines have passed): registration closes roughly 10-12
+   weeks prior and the demo build must pass review ~3 weeks prior, so the pipeline and the
+   demo must exist in **early January 2027**. Build the automated upload before it is under
+   deadline, not during.
+7. **M7 — the editors.** Already in progress. Finish piece and game authoring and the
+   package output; it produces demo content, delivers the "make your own" promise, and
+   feeds M9.
+
+**Wave 3 — the game (someone to play against, and a reason to finish).**
+8. **M10 — the AI.** A sandbox with no opponent is the gap that shows up in reviews. The
+   derived baseline evaluator gives every shipped variant a legal opponent with no training
+   - enough to launch on.
+9. **M15 — the campaign.** Needs M10 for its bosses and M14 for its on-ramp: the ladder
+   from `standard` to the `t6` puzzle finale that gives the sandbox a shape and an ending.
+10. **M8 — multiplayer.** Authoritative server and verified replay. Independent of M10;
+    either can lead the wave, but if only one can precede the marketing peak, AI matters
+    more to a single-player store audience.
+
+**Wave 4 — content at scale.**
+11. **M9 — Workshop.** Needs M7 (packages) and M13 (overtures), so it is last by
+    construction - the content pipeline that gives the game its tail.
+12. **M12 remainder — shared camera presets and live spectating.** Presets ride M9;
+    live spectating rides M8.
+
+**Wave 5 — release.**
+13. **M16.4 + M16.5 — the release checklist and launch.** After the game wave, so the
+    marketing peak lands with an opponent (M10), a campaign (M15) and a content pipeline
+    (M9) already in place - the reviews punish the gap otherwise.
+
+Waves 1-2 are what the marketing timeline cares about: days-to-weeks of work on top of an
+already-done M0-M6, every step independently shippable, and the February 2027 Next Fest is
+the fixed point they point at. A milestone may be moved between waves only if its
+dependencies allow it; the dependencies are recorded at the end of each plan file and must
+not be quietly broken.
+
+### Why the foundation is ordered this way (M0-M6)
 
 - **Headless before pixels (M1 before M4).** The engine's design will move a
   lot during M1–M3; renderer code written against an unsettled core is thrown
@@ -61,13 +134,10 @@ be wrong. Read those before trusting the plan text above them.
   someone can make a game without touching C++; the Workshop (M9) exists to move
   that authored content, so the editors have to exist first. Multiplayer (M8) is
   independent and could swap with M7 without loss.
-- **The camera is appended, not sequenced (M11-M12).** Making a move *watchable*
-  depends only on M4 and M6, both done, and on nothing in M7-M10. It is numbered last
-  because the plan is append-only, not because it is late: M11 can be pulled forward to
-  immediately after M6 with no loss. It is listed after M10 so the numbered promises
-  already made keep their numbers, and because a camera that shows off a variant is
-  worth more once there are good variants (M7/M9) and an opponent (M8/M10) to show.
-  M12 is optional and sits on top of M11.
+- **M7 onward is scheduled by the release sequence, not by number.** M11-M14 are numbered
+  after M10 only because the sequence is append-only and M7 was already in progress; the
+  build order is the Release sequence section above. That is where "visuals and clippable
+  things before multiplayer, AI and Workshop" is stated and defended.
 - **Escape hatch:** if visible progress is needed sooner than M4, M2 ends with a
   terminal (TUI) multi-slice viewer — cheap, testable, and enough to play 3D/4D
   boards by hand. The Vulkan work stays where it is.
@@ -106,6 +176,13 @@ checked by `nix flake check`, which is the single source of truth. **[INVARIANT]
 | Camera-induced motion sickness / unreadable high-D view | M11 | safe-zone oracle, lead/pull bounds, shot deadline, cut on grid axes; watchable wins over faithful |
 | Picking desynchronises from an animating camera | M11 | interaction is locked while a shot is in flight; picking resumes from the settled pose; explicit test |
 | Clip export drags a codec into the deterministic core | M12 | guaranteed output is a frame sequence; muxing is external and best-effort |
+| A derived overture surface is subtly wrong (invisible in a still, wrong in motion) | M13 | differential test: the derived surface must equal the hand-authored one where both exist; closure arithmetic shared |
+| A powerful store page converts badly (first-run friction, unexplained terms, empty board) | M14 | onboarding is a milestone, not a task; the tutorial is played, not read; curated start-here modes; the marketing peak is gated on it |
+| The marketing clock starts before the visuals exist, so there is nothing to promote | M11/M12 | Wave 1 is the hook and is first in the release sequence; until it lands the hand-authored overtures are the teaser |
+| A campaign boss is an unfair strength gate (players lose to search, not the board) | M15 | bosses are scoped objectives, not Elo walls; handicaps are declared in the UI; the finale is a puzzle with a unique engine-proved line |
+| Campaign content rots when geometry or rules change | M15 | every scenario is validated against the live engine in CI; a rule change that breaks a scenario fails a test |
+| A Steam Next Fest deadline is missed (registration or demo build review) | M16 | build pipeline exists before the demo is due; target February 2027; submit demo and page ~3-5 weeks early; a title gets only one Next Fest |
+| AI-content disclosure omitted or misanswered on the store page | M16 | content survey completed honestly in M16.1 (pre-generated vs live-generated) before review |
 
 ## Definition of "generalizable" used throughout
 

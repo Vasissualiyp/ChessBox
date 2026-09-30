@@ -751,8 +751,7 @@ void Ui::pauseFrame(UiRequest& request, ImVec2& menuMin, ImVec2& menuMax) {
 }
 
 void Ui::drawCheckEdges(app::Shell& shell) {
-  const app::Session* session = shell.session();
-  if (session == nullptr || !session->game().inCheck()) return;
+  if (!shell.showsCheckWarning()) return;
   const ImGuiViewport* vp = ImGui::GetMainViewport();
   const ImVec2 min = vp->WorkPos;
   const ImVec2 max(vp->WorkPos.x + vp->WorkSize.x, vp->WorkPos.y + vp->WorkSize.y);

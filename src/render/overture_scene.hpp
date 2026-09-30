@@ -36,6 +36,11 @@ struct OvQuad {
   OvVec3 p[4];
   OvTone tone{OvTone::Light};
   float fade{1.0f};
+  /// An explicit colour, for a face that is a portal rather than a board cell. A tone
+  /// cannot name one: the seam ramp is computed from the theme, not stored in it. When
+  /// set, `tone` is ignored and the face is drawn flat in this colour.
+  bool hasColour{false};
+  view::Rgba colour{};
 };
 
 /// A piece, standing along its surface's normal - which is what lets one stand on the

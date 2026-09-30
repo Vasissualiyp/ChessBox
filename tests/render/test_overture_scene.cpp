@@ -32,7 +32,8 @@ const std::vector<app::Overture> kAll{
     app::Overture::Standard,    app::Overture::Cylinder,    app::Overture::Torus,
     app::Overture::Mobius,      app::Overture::Klein,       app::Overture::Mirrorbox,
     app::Overture::Cube5,       app::Overture::Hyper4,      app::Overture::Atomic,
-    app::Overture::AtomicTorus, app::Overture::MustCapture, app::Overture::Multiverse};
+    app::Overture::AtomicTorus, app::Overture::MustCapture, app::Overture::Multiverse,
+    app::Overture::Torus3d,     app::Overture::T6};
 
 float dist(const OvVec3& a, const OvVec3& b) {
   return std::hypot(std::hypot(a.x - b.x, a.y - b.y), a.z - b.z);
@@ -570,6 +571,33 @@ TEST_CASE("zooming an overture scales it about the centre", "[render]") {
   const float one = extent(1.0f);
   REQUIRE(one > 0.0f);
   CHECK(extent(2.0f) > one * 1.8f);
+}
+
+TEST_CASE("torus3d lights a king's twenty-six neighbours", "[render]") {
+  // The one number the variant exists for: on a fully glued 4x4x4 no direction is ever
+  // clipped, so the king's neighbourhood is the whole 26-cell block about it. The
+  // overture is the only place that count is stated, so it is pinned here.
+  const view::Theme th = view::Theme::manifold();
+  const OvertureScene s = overtureScene(app::Overture::Torus3d, 1.0f, false, th);
+  int lit = 0;
+  for (const OvBurst& b : s.bursts) {
+    if (b.fade > 0.02f) ++lit;
+  }
+  CHECK(lit == 26);
+}
+
+TEST_CASE("t6 lights sixty cells for a hundred and twenty directions", "[render]") {
+  // The knight's atom at six axes is P(6,2)*4 = 120 directions, but on an axis of extent
+  // 4 the two signs of the magnitude-2 leg coincide, so 120 vectors land on 60 cells. The
+  // overture draws the 60; the caption speaks the 120; and the two agreeing is the point.
+  const view::Theme th = view::Theme::manifold();
+  const OvertureScene s = overtureScene(app::Overture::T6, 1.0f, false, th);
+  int lit = 0;
+  for (const OvBurst& b : s.bursts) {
+    if (b.fade > 0.02f) ++lit;
+  }
+  CHECK(lit == 60);
+  CHECK(s.caption.find("hundred and twenty") != std::string::npos);
 }
 
 TEST_CASE("a detonation spends no geometry colour", "[render]") {

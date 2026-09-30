@@ -177,6 +177,32 @@ TEST_CASE("pausing keeps the game and the board", "[unit][app]") {
   REQUIRE(shell->session()->game().plyCount() == 1);  // the position survived
 }
 
+TEST_CASE("the check warning follows the board, and leaves with it", "[unit][app]") {
+  // The red vignette warns about the position in front of you. A game abandoned to the
+  // main menu - still checked, its session kept for a later resume - must not keep the
+  // screen red: the warning has to follow the board, not the loaded game.
+  auto shell = makeShell(tempSettings("checkwarn.conf"));
+  REQUIRE(shell->startGame("standard").has_value());
+  REQUIRE_FALSE(shell->showsCheckWarning());  // the board is up, the king is safe
+
+  // Fool's mate: the side to move is left in check.
+  REQUIRE(shell->session()
+              ->applyScript("click f2\nclick f3\nclick e7\nclick e5\n"
+                            "click g2\nclick g4\nclick d8\nclick h4")
+              .has_value());
+  REQUIRE(shell->session()->game().inCheck());
+  REQUIRE(shell->showsCheckWarning());
+
+  // The pause screen sits over the board, so the warning is still its business.
+  shell->pause();
+  REQUIRE(shell->showsCheckWarning());
+
+  // Leaving for the menu abandons the game; the board, and its warning, stay behind.
+  shell->go(Screen::MainMenu);
+  REQUIRE(shell->hasGame());  // the session is kept, for a later Continue
+  REQUIRE_FALSE(shell->showsCheckWarning());
+}
+
 TEST_CASE("the board recedes a step at each pause level", "[unit][app]") {
   // The main loop animates the camera toward this: 0 on the board, 1 at pause, 2 one
   // step further in at a pause panel.

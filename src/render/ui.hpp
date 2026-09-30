@@ -123,8 +123,9 @@ class Ui {
   /// a manifold someone has taken hold of keeps turning under their hand instead of
   /// freezing. Kept across screens, because it reads as one camera on one object.
   void updateObjectDrag(app::Shell& shell, const ImVec2& min, const ImVec2& max);
-  /// A red glow at the screen's edges while the side to move is in check, on every
-  /// screen: the position is in trouble whether or not the board is the thing showing.
+  /// A red glow at the screen's edges while the side to move is in check and the board
+  /// is on screen: the position is in trouble, but only while it is the thing being
+  /// looked at. Returns with the game, not with the screen.
   void drawCheckEdges(app::Shell& shell);
 
   /// Where a pane sits in the shell's transition, as the scale and fade the pane is

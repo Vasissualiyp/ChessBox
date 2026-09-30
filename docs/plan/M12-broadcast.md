@@ -11,10 +11,13 @@ live one) through the move camera with no interface furniture, replay the last m
 export a short deterministic clip of a chosen move to a file, on any geometry, with the
 same frame every time it is exported.
 
-**A note on placement.** M12 is deliberately last and deliberately optional: it depends
-on M11 (the camera) and, for the sharing half, on M9 (packages) and M8 (the net). M11
-does not depend on M12, so M11 ships value on its own and M12 can slip without holding
-the camera back.
+**A note on placement.** M12 splits across two release waves (see the roadmap). The
+**export half** — cinema mode and deterministic clip export (M12.1, M12.2) — is Wave 1,
+immediately after M11, because the clip is the thing that gets promoted and it needs
+nothing but the camera. The **sharing half** — authored presets (M12.4) and live
+spectating (M12.5) — is Wave 4, because it needs M9 (packages) and M8 (the net). M11 does
+not depend on M12, so the camera ships value on its own; M12.4/M12.5 can slip without
+holding anything back.
 
 ---
 

@@ -65,11 +65,11 @@ in every geometry and every dimension.
 ## M11.0 Preconditions and placement
 
 Depends only on M4 (renderer + `MoveAnimation`) and M6 (temporal axes and the multiverse
-view), both done. It does **not** depend on M7/M8/M9/M10. It is placed after M10 only
-because the numbered sequence is append-only; if visible progress is wanted earlier it
-can be pulled forward to immediately after M6 without loss. It must not force M7's
-authoring document to exist, but it should leave a clean seam for M12 and for an
-authored camera preset.
+view), both done. It does **not** depend on M7/M8/M9/M10. It is **first in the roadmap's
+release sequence** (Wave 1, the clippable hook): it is the single most promotable feature
+and nothing blocks it. The number M11 is an append-only ID, not a position. It must not
+force M7's authoring document to exist, but it should leave a clean seam for M12 and for
+an authored camera preset.
 
 ---
 

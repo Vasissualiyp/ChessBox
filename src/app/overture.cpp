@@ -24,11 +24,8 @@ constexpr std::array<std::pair<std::string_view, Overture>, 15> kTable{{
     {"atomic_torus", Overture::AtomicTorus},
     {"mustcapture", Overture::MustCapture},
     {"5d", Overture::Multiverse},
-    // No bespoke overture of their own; they borrow the nearest family. Both are tori,
-    // so the torus overture is true of them as far as it goes - it simply stops short of
-    // their extra axes.
-    {"torus3d", Overture::Torus},
-    {"t6", Overture::Torus},
+    {"torus3d", Overture::Torus3d},
+    {"t6", Overture::T6},
     // Standard chess with a custom per-piece field, which is not a shape at all.
     {"charged", Overture::Standard},
 }};
@@ -70,6 +67,10 @@ std::string_view overtureName(Overture o) noexcept {
       return "mustcapture";
     case Overture::Multiverse:
       return "5d";
+    case Overture::Torus3d:
+      return "torus3d";
+    case Overture::T6:
+      return "t6";
   }
   return "none";
 }

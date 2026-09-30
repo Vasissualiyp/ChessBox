@@ -82,6 +82,12 @@ bool Shell::showsBoard() const noexcept {
   }
 }
 
+bool Shell::showsCheckWarning() const noexcept {
+  // The warning belongs to the board. Every screen that keeps the board behind it gets
+  // it; a game left on the main menu does not, however checked it was when abandoned.
+  return showsBoard() && session_ != nullptr && session_->game().inCheck();
+}
+
 float Shell::boardPullBack() const noexcept {
   if (session_ == nullptr) return 0.0f;
   switch (screen_) {

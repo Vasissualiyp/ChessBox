@@ -63,6 +63,11 @@ class Shell {
   /// and reference screens sit over the game rather than replacing it.
   [[nodiscard]] bool showsBoard() const noexcept;
 
+  /// True while the red "in check" vignette should be drawn: the side to move is in
+  /// check *and* the game is the thing on screen. A position left behind on the main
+  /// menu is not a warning about the screen the player is actually looking at.
+  [[nodiscard]] bool showsCheckWarning() const noexcept;
+
   /// How far the board should be pulled back for the screen it is on: 0 on the board
   /// itself, 1 at pause, 2 one step further in at a pause panel. Stepping away from the
   /// game recedes it; the shell reports the target and the main loop animates towards it.

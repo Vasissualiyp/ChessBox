@@ -49,10 +49,13 @@ TEST_CASE("every shipped variant asks for an overture", "[unit]") {
   // throw away the whole point.
   CHECK(overtureFor("atomic_torus") != overtureFor("atomic"));
 
-  // The three with none of their own borrow the nearest family rather than leaving
-  // the pane blank. A library entry always animates.
-  CHECK(overtureFor("torus3d") == Overture::Torus);
-  CHECK(overtureFor("t6") == Overture::Torus);
+  // The two higher tori no longer borrow the plain torus: the whole point of the T6
+  // overture is that six axes have nowhere to go, which the torus overture cannot say.
+  CHECK(overtureFor("torus3d") == Overture::Torus3d);
+  CHECK(overtureFor("t6") == Overture::T6);
+
+  // The one with none of its own borrows the nearest family rather than leaving the pane
+  // blank. A library entry always animates.
   CHECK(overtureFor("charged") == Overture::Standard);
 
   // And so does a name nobody has seen - a Workshop package, eventually.

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "app/shell.hpp"
+#include "render/quintic.hpp"
 #include "render/ui_widgets.hpp"
 
 namespace cb::render {
@@ -95,37 +96,13 @@ const Archetype kPieceShapes[]{Archetype::Tower, Archetype::Wedge, Archetype::Cr
 // ---------------------------------------------------------------------------
 // The Calabi-Yau quintic cross-section.
 //
-// z1 = e^(2*pi*i*k1/n) (cos a)^(2/n),  z2 = e^(2*pi*i*k2/n) (sin a)^(2/n),  a = x + iy,
-// drawn as (Re z1, Re z2, Im z1 cos alpha + Im z2 sin alpha). That is the standard
-// picture, not an impression of one - which matters, because the whole point of putting
-// it beside the menu is that it is a real object.
+// The formula itself lives in render/quintic.hpp, shared with the T6 overture, so the
+// menu object and the shape that overture settles into cannot drift apart. This adapts
+// its float triple to the local Vec3; the standard-picture comment is with the formula.
 // ---------------------------------------------------------------------------
-constexpr int kQuinticN = 5;
-constexpr float kQuinticAlpha = 0.5f;
-
-void complexPow(float re, float im, float p, float& outRe, float& outIm) {
-  const float r = std::hypot(re, im);
-  const float th = std::atan2(im, re);
-  const float rp = std::pow(r, p);
-  outRe = rp * std::cos(th * p);
-  outIm = rp * std::sin(th * p);
-}
-
 Vec3 quintic(int k1, int k2, float x, float y) {
-  const float cRe = std::cos(x) * std::cosh(y);
-  const float cIm = -std::sin(x) * std::sinh(y);
-  const float sRe = std::sin(x) * std::cosh(y);
-  const float sIm = std::cos(x) * std::sinh(y);
-  float aRe = 0, aIm = 0, bRe = 0, bIm = 0;
-  complexPow(cRe, cIm, 2.0f / kQuinticN, aRe, aIm);
-  complexPow(sRe, sIm, 2.0f / kQuinticN, bRe, bIm);
-  const float p1 = 2.0f * kPi * static_cast<float>(k1) / kQuinticN;
-  const float p2 = 2.0f * kPi * static_cast<float>(k2) / kQuinticN;
-  const float z1r = aRe * std::cos(p1) - aIm * std::sin(p1);
-  const float z1i = aRe * std::sin(p1) + aIm * std::cos(p1);
-  const float z2r = bRe * std::cos(p2) - bIm * std::sin(p2);
-  const float z2i = bRe * std::sin(p2) + bIm * std::cos(p2);
-  return {z1r, z2r, z1i * std::cos(kQuinticAlpha) + z2i * std::sin(kQuinticAlpha)};
+  const std::array<float, 3> p = quinticPoint(k1, k2, x, y);
+  return {p[0], p[1], p[2]};
 }
 
 void drawManifold(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
