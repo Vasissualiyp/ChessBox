@@ -1,0 +1,1948 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// The library screen's twelve overtures.
+//
+// Each is a pure function of progress, which is the one decision the rest of this file
+// follows from: reverse playback is not a second animation but a falling `t`, and a
+// screenshot of a given `t` is the same picture every time. Nothing here reads a clock,
+// keeps state between frames, or asks the engine anything - the pieces are authored
+// coordinates, because a menu that called movegen to draw itself would make choosing a
+// variant depend on the variant being playable.
+#include "render/overture_scene.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <functional>
+
+#include "render/ui_widgets.hpp"
+#include "view/seams.hpp"
+
+namespace cb::render {
+namespace {
+
+constexpr float kPi = 3.14159265358979f;
+constexpr float kTau = 2.0f * kPi;
+/// The board's world extent. A cell is one unit, always - that is what makes a cut a
+/// cut rather than a rescale.
+constexpr float kW = 8.0f;
+constexpr float kH = 8.0f;
+
+float clampf(float v, float a, float b) {
+  return v < a ? a : (v > b ? b : v);
+}
+float lerpf(float a, float b, float t) {
+  return a + (b - a) * t;
+}
+/// Progress of a sub-phase: 0 before `a`, 1 after `b`. Every beat in every overture is
+/// carved out of [0,1] with this, so no scene can accidentally depend on frame order.
+float seg(float t, float a, float b) {
+  return clampf((t - a) / (b - a), 0.0f, 1.0f);
+}
+float ease(float t) {
+  return t * t * (3.0f - 2.0f * t);
+}
+float easeIn(float t) {
+  return t * t;
+}
+float fi(int i) {
+  return static_cast<float>(i);
+}
+
+/// sin(x)/x, with the removable singularity filled in.
+///
+/// Here for one job: the mean of `cos` over a symmetric arc. Bending a board into an arc
+/// of angle `A` and radius `R` leaves the shape's centroid `R * (1 - sinc(A/2))` away
+/// from where the flat board's centre was, so subtracting exactly that keeps the *shape*
+/// in the middle of the pane instead of the point it grew from - the reason a torus
+/// used to form off to one side. It has to be this and not a constant, because the
+/// correction must vanish as the arc flattens, and `R` runs to infinity at exactly the
+/// rate the angle runs to zero.
+float sinc(float x) {
+  return std::abs(x) < 1e-4f ? 1.0f : std::sin(x) / x;
+}
+
+OvVec3 add(OvVec3 a, OvVec3 b) {
+  return {a.x + b.x, a.y + b.y, a.z + b.z};
+}
+OvVec3 sub(OvVec3 a, OvVec3 b) {
+  return {a.x - b.x, a.y - b.y, a.z - b.z};
+}
+OvVec3 mul(OvVec3 a, float s) {
+  return {a.x * s, a.y * s, a.z * s};
+}
+OvVec3 mix(OvVec3 a, OvVec3 b, float t) {
+  return {lerpf(a.x, b.x, t), lerpf(a.y, b.y, t), lerpf(a.z, b.z, t)};
+}
+OvVec3 cross(OvVec3 a, OvVec3 b) {
+  return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+OvVec3 normalise(OvVec3 a) {
+  const float l = std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
+  return l < 1e-6f ? OvVec3{0.0f, 1.0f, 0.0f} : mul(a, 1.0f / l);
+}
+
+/// A surface, as a map from normalised lattice coordinates. `u` runs along the files and
+/// `v` along the ranks, both 0 to 1, so the same builder serves every geometry.
+using Pos = std::function<OvVec3(float, float)>;
+
+// ---------------------------------------------------------------------------
+// The warps.
+// ---------------------------------------------------------------------------
+
+/// Options for `tube`, the workhorse: cylinder, torus and the atomic torus are all this
+/// function with different arguments, which is the same "the next case is data" claim
+/// the engine makes about variants.
+struct TubeOpt {
+  float th{0};    ///< 0..2pi, how far the files have rolled (2pi closes the tube)
+  float ph{0};    ///< 0..2pi, how far the tube has bent into a ring
+  float tau{0};   ///< half-turn of the cross-section around the ring
+  float open{1};  ///< ring-radius multiplier; see the horn-torus note below
+};
+
+/// Roll the files into a tube whose axis runs along the ranks, then optionally bend that
+/// axis into a ring.
+///
+/// A flat 8x8 glued into a torus has equal circumferences, so the honest result is a
+/// *horn* torus with no hole at all. `open` scales the ring radius to pull the hole
+/// open, which is a legibility cheat and is stated rather than hidden: the real ratio is
+/// 1 : 1.
+OvVec3 tube(float u, float v, const TubeOpt& o) {
+  const float xl = (u - 0.5f) * kW;
+  const float zl = (v - 0.5f) * kH;
+  float a = xl;
+  float b = 0.0f;
+  if (o.th > 1e-4f) {
+    const float R = kW / o.th;
+    const float t = xl / R;
+    a = R * std::sin(t);
+    // Centred on the tube rather than on the seam the tube was rolled from.
+    b = R * std::cos(t) - R * sinc(o.th * 0.5f);
+  }
+  if (o.ph > 1e-4f) {
+    const float base = kH / o.ph;
+    const float Rr = base * o.open;
+    const float p = zl / base;
+    const float chi = o.tau * p * 0.5f;
+    const float a2 = a * std::cos(chi) - b * std::sin(chi);
+    const float b2 = a * std::sin(chi) + b * std::cos(chi);
+    // And centred on the ring, not on the point of it the flat board became.
+    const float ringMid = Rr * (1.0f - sinc(o.ph * 0.5f));
+    return {Rr * (1.0f - std::cos(p)) + a2 * std::cos(p) - ringMid, b2,
+            Rr * std::sin(p) - a2 * std::sin(p)};
+  }
+  return {a, b, zl};
+}
+
+/// Bend the files into a loop in the board's own plane, with the rank extent sticking
+/// out as the strip's width, optionally rotating that width as it travels round.
+///
+/// This is the only embedding that can absorb a *rank* flip. A tube's transverse
+/// direction runs parallel to its axis and has no way to reverse itself, which is why
+/// the Moebius overture has to leave the tube to close its seam - and why watching it
+/// fail is the most useful thing in that overture.
+OvVec3 band(float u, float v, float th, float tau) {
+  const float xl = (u - 0.5f) * kW;
+  const float zl = (v - 0.5f) * kH;
+  if (th <= 1e-4f) return {xl, 0.0f, zl};
+  const float R = kW / th;
+  const float t = xl / R;
+  const float psi = tau * t * 0.5f;
+  return {R * std::sin(t) + zl * std::cos(psi) * std::sin(t), zl * std::sin(psi),
+          R * std::cos(t) - R * sinc(th * 0.5f) + zl * std::cos(psi) * std::cos(t)};
+}
+
+/// The Klein bottle, as the figure-eight immersion.
+///
+/// A circular cross-section **cannot** close this gluing. `klein` joins the ranks with
+/// `flip = ["file"]`, so after one trip round the ring the cross-section has to come
+/// back to itself *reflected*; rotating a circle by a half-turn brings it back shifted
+/// by four files instead, which is a different surface and leaves the two rims visibly
+/// failing to meet.
+///
+/// A figure-eight can. Rotating the lemniscate (sin a, sin 2a) by pi gives
+/// (-sin a, -sin 2a) = (sin -a, sin -2a), which is exactly a -> -a: the file reversed.
+/// So the cross-section pinches first, and then both seams close to machine precision.
+OvVec3 kleinSurf(float u, float v, float th, float pinch, float ph, float tau,
+                 float open) {
+  const float xl = (u - 0.5f) * kW;
+  const float zl = (v - 0.5f) * kH;
+  float cr = xl;
+  float ca = 0.0f;
+  if (th > 1e-4f) {
+    const float R = kW / th;
+    const float a = xl / R;
+    cr = R * std::sin(a);
+    ca = R * std::cos(a) - R * sinc(th * 0.5f);
+  }
+  if (pinch > 1e-4f) {
+    // Comfortably smaller than the ring it will travel round, or the bottle closes
+    // into a disc and the self-intersection - the whole point - has nowhere to show.
+    const float rho = (kW / kTau) * 1.05f;
+    const float a = (u - 0.5f) * kTau;
+    cr = lerpf(cr, rho * std::sin(a), pinch);
+    ca = lerpf(ca, rho * std::sin(2.0f * a), pinch);
+  }
+  if (ph > 1e-4f) {
+    const float base = kH / ph;
+    const float Rr = base * open;
+    const float p = zl / base;
+    const float chi = tau * p * 0.5f;
+    const float r2 = cr * std::cos(chi) - ca * std::sin(chi);
+    const float a2 = cr * std::sin(chi) + ca * std::cos(chi);
+    const float ringMid = Rr * (1.0f - sinc(ph * 0.5f));
+    return {Rr * (1.0f - std::cos(p)) + r2 * std::cos(p) - ringMid, a2,
+            Rr * std::sin(p) - r2 * std::sin(p)};
+  }
+  return {cr, ca, zl};
+}
+
+Pos flatBoard() {
+  return [](float u, float v) -> OvVec3 { return {u * kW - 4.0f, 0.0f, v * kH - 4.0f}; };
+}
+
+/// The surface normal, by finite difference. Cheaper to write than to derive for four
+/// warps, and a piece only needs to stand up straight.
+///
+/// The cross product is taken rank-tangent by file-tangent, in that order, and the order
+/// is the whole of it: the other way round gives -Y for the flat board, which puts every
+/// piece underneath the board it is standing on and makes the entire scene read as seen
+/// from below.
+OvVec3 normalAt(const Pos& pos, float u, float v) {
+  constexpr float e = 0.004f;
+  const OvVec3 o = pos(u, v);
+  return normalise(cross(sub(pos(u, std::min(v + e, 1.0f)), o),
+                         sub(pos(std::min(u + e, 1.0f), v), o)));
+}
+
+// ---------------------------------------------------------------------------
+// Builders.
+// ---------------------------------------------------------------------------
+
+struct GridOpt {
+  int nx{8};
+  int nz{8};
+  /// How many sub-quads a cell is broken into per side. One planar quad per cell facets
+  /// a curved surface badly - a torus of 64 flat tiles reads as a polyhedron - so a
+  /// warped geometry asks for 4 and gets a surface that bends. A cell keeps *one*
+  /// colour across its sub-quads: the subdivision carries curvature, not a finer chequer.
+  int sub{1};
+  float fade{1.0f};
+  float inset{0.03f};
+  std::function<float(int, int)> keep;
+  std::function<OvTone(int, int)> tone;
+};
+
+void addGrid(OvertureScene& s, const Pos& pos, const GridOpt& o) {
+  for (int f = 0; f < o.nx; ++f) {
+    for (int r = 0; r < o.nz; ++r) {
+      const float k = o.keep ? o.keep(f, r) : 1.0f;
+      if (k <= 0.001f) continue;
+      const OvTone tn =
+          o.tone ? o.tone(f, r) : (((f + r) % 2 != 0) ? OvTone::Dark : OvTone::Light);
+      const float u0 = (fi(f) + o.inset) / fi(o.nx);
+      const float u1 = (fi(f) + 1.0f - o.inset) / fi(o.nx);
+      const float v0 = (fi(r) + o.inset) / fi(o.nz);
+      const float v1 = (fi(r) + 1.0f - o.inset) / fi(o.nz);
+      const int sd = std::max(1, o.sub);
+      for (int a = 0; a < sd; ++a) {
+        for (int b = 0; b < sd; ++b) {
+          const float ua = lerpf(u0, u1, fi(a) / fi(sd));
+          const float ub = lerpf(u0, u1, fi(a + 1) / fi(sd));
+          const float va = lerpf(v0, v1, fi(b) / fi(sd));
+          const float vb = lerpf(v0, v1, fi(b + 1) / fi(sd));
+          OvQuad q;
+          q.p[0] = pos(ua, va);
+          q.p[1] = pos(ub, va);
+          q.p[2] = pos(ub, vb);
+          q.p[3] = pos(ua, vb);
+          q.tone = tn;
+          q.fade = o.fade * k;
+          s.quads.push_back(q);
+        }
+      }
+    }
+  }
+}
+
+/// Where a cell's centre lands on a surface laid out over `nx` by `nz` cells.
+OvVec3 cellCentre(const Pos& pos, int f, int r, int nx, int nz) {
+  return pos((fi(f) + 0.5f) / fi(nx), (fi(r) + 0.5f) / fi(nz));
+}
+
+struct TokenOpt {
+  int nx{8};
+  int nz{8};
+  float fade{1.0f};
+  float height{1.0f};
+  bool mirrored{false};
+  bool at{false};  ///< true when `where` overrides the cell centre
+  OvVec3 where;
+  /// A piece placed somewhere other than a cell centre needs the normal of *that* place.
+  /// Without this it took cell a1's, so a rook riding round a torus stood up as though
+  /// it had never left the corner it started in.
+  bool hasNormal{false};
+  OvVec3 normal;
+};
+
+void addToken(OvertureScene& s, const Pos& pos, int f, int r, char glyph, bool white,
+              const TokenOpt& o) {
+  if (o.fade <= 0.02f) return;
+  OvToken tk;
+  tk.at = o.at ? o.where : cellCentre(pos, f, r, o.nx, o.nz);
+  tk.normal = o.hasNormal
+                  ? o.normal
+                  : normalAt(pos, (fi(f) + 0.5f) / fi(o.nx), (fi(r) + 0.5f) / fi(o.nz));
+  tk.glyph = glyph;
+  tk.white = white;
+  tk.height = o.height;
+  tk.fade = o.fade;
+  tk.mirrored = o.mirrored;
+  s.tokens.push_back(tk);
+}
+
+constexpr char kBack[8]{'R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R'};
+
+/// The opening array, on any surface - so a pawn morphs with the cell it stands on
+/// rather than being reprojected after the fact.
+void addArmy(OvertureScene& s, const Pos& pos, float fade) {
+  if (fade <= 0.02f) return;
+  TokenOpt o;
+  o.fade = fade;
+  for (int f = 0; f < 8; ++f) {
+    addToken(s, pos, f, 0, kBack[f], true, o);
+    addToken(s, pos, f, 1, 'P', true, o);
+    addToken(s, pos, f, 6, 'P', false, o);
+    addToken(s, pos, f, 7, kBack[f], false, o);
+  }
+}
+
+/// A polyline that follows a surface, lifted clear of it, so a trail crossing a seam
+/// goes round the shape rather than through it.
+OvTrail trailOn(const Pos& pos, float u0, float v0, float u1, float v1, int n,
+                view::Rgba colour, float lift = 0.28f) {
+  OvTrail tr;
+  tr.colour = colour;
+  tr.pts.reserve(static_cast<std::size_t>(n) + 1);
+  for (int i = 0; i <= n; ++i) {
+    const float s = fi(i) / fi(n);
+    const float u = lerpf(u0, u1, s);
+    const float v = lerpf(v0, v1, s);
+    const float uw = u - std::floor(u);
+    const float vw = v - std::floor(v);
+    tr.pts.push_back(add(pos(uw, vw), mul(normalAt(pos, uw, vw), lift)));
+  }
+  return tr;
+}
+
+void addRim(OvertureScene& s, const Pos& pos, view::Rgba colour, float width,
+            float fade) {
+  OvTrail tr;
+  tr.colour = colour;
+  tr.width = width;
+  tr.fade = fade;
+  tr.pts = {pos(0.0f, 0.0f), pos(1.0f, 0.0f), pos(1.0f, 1.0f), pos(0.0f, 1.0f),
+            pos(0.0f, 0.0f)};
+  s.trails.push_back(tr);
+}
+
+// ---------------------------------------------------------------------------
+// The cut.
+//
+// Dropping whole files and ranks, outermost first, alternating so the cuts can be
+// counted. The survivors keep their own cell size and their own place in the lattice:
+// scaling a board down to n units wide reads as someone laying a smaller board on top of
+// the big one, which is not what happens to a board when a variant has fewer files. What
+// is left is therefore the a1 corner block, and it is deliberately off-centre until it
+// slides.
+// ---------------------------------------------------------------------------
+
+float cutFraction(int n, int f, int r, float t) {
+  const int steps = (8 - n) * 2;
+  if (steps <= 0) return 1.0f;
+  int idx = -1;
+  for (int k = 0; k < steps; ++k) {
+    const int ring = 7 - k / 2;
+    if (k % 2 == 0 ? (f == ring) : (r == ring)) {
+      idx = k;
+      break;
+    }
+  }
+  if (idx < 0) return 1.0f;  // a survivor
+  const float per = 1.0f / fi(steps);
+  return 1.0f - clampf((t - fi(idx) * per) / per, 0.0f, 1.0f);
+}
+
+/// The surviving n x n block, in the original lattice's coordinates, slid towards the
+/// centre by `shift` (0 = where the cells actually were, 1 = centred).
+Pos cornerPos(int n, float shift, float y) {
+  const float off = (4.0f - fi(n) * 0.5f) * shift;
+  const float nf = fi(n);
+  return [nf, off, y](float u, float v) -> OvVec3 {
+    return {u * nf - 4.0f + off, y, v * nf - 4.0f + off};
+  };
+}
+
+/// The doomed part of the board: the full 8 x 8 with the survivors suppressed, because
+/// those are drawn by `cornerPos` and are the ones allowed to move.
+void addCutGrid(OvertureScene& s, int n, float t) {
+  GridOpt g;
+  g.keep = [n, t](int f, int r) {
+    return (f < n && r < n) ? 0.0f : cutFraction(n, f, r, t);
+  };
+  addGrid(s, flatBoard(), g);
+}
+
+/// The 8 x 8 army going with the cells it was standing on.
+void addCutArmy(OvertureScene& s, int n, float t, const Pos& survivors, float leave) {
+  const Pos flat = flatBoard();
+  for (int f = 0; f < 8; ++f) {
+    for (const int r : {0, 1, 6, 7}) {
+      const bool doomed = !(f < n && r < n);
+      const float k = doomed ? cutFraction(n, f, r, t) : leave;
+      if (k <= 0.02f) continue;
+      const char g = (r == 1 || r == 6) ? 'P' : kBack[f];
+      const bool white = r <= 1;
+      TokenOpt o;
+      o.fade = k;
+      if (doomed) {
+        addToken(s, flat, f, r, g, white, o);
+      } else {
+        o.nx = n;
+        o.nz = n;
+        addToken(s, survivors, f, r, g, white, o);
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Palette access. Seam hues come from the theme's own ramp, so the overtures cannot
+// drift out of agreement with the board about what a portal looks like.
+// ---------------------------------------------------------------------------
+
+/// The pose every overture opens and closes on.
+///
+/// Not a default - a *guarantee*. Each overture reaches its own camera by t = 0.12 and
+/// comes back to this one, so the flat 8 x 8 that all of them pass through is the same
+/// picture from the same angle. Without it, leaving one overture and arriving at the
+/// next is a cut rather than a hand-over, and the cycle stops reading as a loop.
+constexpr OvCamera kOpenCam{-0.06f, 1.44f, 8.2f, 0.10f};
+
+view::Rgba seamColour(const view::Theme& th, int k, int n) {
+  return view::seamRampColor(th, n <= 1 ? 0.0f : fi(k) / fi(n - 1));
+}
+
+// ===========================================================================
+// The twelve.
+// ===========================================================================
+
+OvertureScene sceneStandard(const view::Theme& th, float t, bool intro) {
+  OvertureScene s;
+  s.cam = {lerpf(-0.12f, 0.34f, ease(t)), lerpf(1.45f, 0.70f, ease(t)),
+           lerpf(8.2f, 9.0f, ease(t)), 0.10f};
+  const Pos pos = flatBoard();
+  // On a later cycle the board is already there and the whole range is the game.
+  const float build = intro ? seg(t, 0.0f, 0.35f) : 1.0f;
+  const float rise = intro ? seg(t, 0.35f, 0.58f) : 1.0f;
+  const float mv = intro ? seg(t, 0.58f, 1.0f) : t;
+
+  if (intro) {
+    GridOpt g;
+    g.keep = [build](int f, int r) {
+      return clampf(build * 2.2f - fi(f + r) / 14.0f, 0.0f, 1.0f);
+    };
+    addGrid(
+        s,
+        [build](float u, float v) -> OvVec3 {
+          const int f = static_cast<int>(u * 8.0f);
+          const int r = static_cast<int>(v * 8.0f);
+          const float d = clampf(build * 2.05f - fi(f + r) / 14.0f, 0.0f, 1.0f);
+          return {u * kW - 4.0f, (1.0f - ease(d)) * 7.0f, v * kH - 4.0f};
+        },
+        g);
+  } else {
+    addGrid(s, pos, GridOpt{});
+  }
+
+  // 1. e4 e5 2. Nf3 - authored coordinates, never generated.
+  struct Glide {
+    float f{0}, r{0}, lift{0};
+  };
+  const auto glide = [mv](float f0, float r0, float f1, float r1, float a, float b,
+                          bool arc) {
+    const float u = ease(seg(mv, a, b));
+    return Glide{lerpf(f0, f1, u), lerpf(r0, r1, u),
+                 arc ? std::sin(u * kPi) * 1.5f : 0.0f};
+  };
+  const Glide e2 = glide(4, 1, 4, 3, 0.05f, 0.32f, false);
+  const Glide e7 = glide(4, 6, 4, 4, 0.36f, 0.63f, false);
+  const Glide g1 = glide(6, 0, 5, 2, 0.67f, 0.95f, true);
+  const float up = clampf(rise * 1.8f, 0.0f, 1.0f);
+
+  TokenOpt o;
+  o.fade = up;
+  for (int f = 0; f < 8; ++f) {
+    if (f != 4) {
+      addToken(s, pos, f, 1, 'P', true, o);
+      addToken(s, pos, f, 6, 'P', false, o);
+    }
+    if (f != 6) addToken(s, pos, f, 0, kBack[f], true, o);
+    addToken(s, pos, f, 7, kBack[f], false, o);
+  }
+  const auto moved = [&](const Glide& g, char glyph, bool white) {
+    TokenOpt m;
+    m.fade = up;
+    m.at = true;
+    m.where = {g.f + 0.5f - 4.0f, g.lift, g.r + 0.5f - 4.0f};
+    addToken(s, pos, 0, 0, glyph, white, m);
+  };
+  moved(e2, 'P', true);
+  moved(e7, 'P', false);
+  moved(g1, 'N', true);
+  (void)th;  // the standard board spends no seam or event colour: it is the reference
+  s.caption = !intro      ? "1. e4 e5 2. Nf3"
+              : t < 0.35f ? "sixty-four cells"
+              : t < 0.58f ? "the army stands"
+                          : "1. e4 e5 2. Nf3";
+  return s;
+}
+
+OvertureScene sceneCylinder(const view::Theme& th, float t) {
+  OvertureScene s;
+  s.cam = {lerpf(-0.10f, 0.62f, ease(t)), lerpf(1.40f, 0.42f, ease(t)),
+           lerpf(8.2f, 6.4f, ease(t)), 0.12f};
+  const float roll = ease(seg(t, 0.16f, 0.74f));
+  TubeOpt o;
+  o.th = roll * kTau;
+  const Pos pos = [o](float u, float v) { return tube(u, v, o); };
+  GridOpt g;
+  g.sub = 4;
+  addGrid(s, pos, g);
+  addArmy(s, pos, 1.0f);
+
+  // The two ends of one identification share a hue: a seam is coloured by the portal it
+  // belongs to, not by being a seam, which is what makes a cylinder read as one gradient
+  // repeated.
+  const float name = seg(t, 0.0f, 0.16f);
+  if (name > 0.01f) {
+    const view::Rgba c = seamColour(th, 0, 1);
+    for (const float u : {0.0005f, 0.9995f}) {
+      OvTrail tr;
+      tr.colour = c;
+      tr.width = 3.2f;
+      tr.fade = name;
+      for (int i = 0; i <= 8; ++i) tr.pts.push_back(pos(u, fi(i) / 8.0f));
+      s.trails.push_back(tr);
+    }
+  }
+  // The rank axis keeps its walls, so the rims stay drawn and unglued - that is the
+  // whole difference between this and the torus.
+  for (const float v : {0.0005f, 0.9995f}) {
+    OvTrail tr;
+    tr.colour = th.boneFaint;
+    tr.width = 1.6f;
+    tr.fade = 0.55f + 0.45f * roll;
+    for (int i = 0; i <= 24; ++i) tr.pts.push_back(pos(fi(i) / 24.0f, v));
+    s.trails.push_back(tr);
+  }
+  const float ride = seg(t, 0.74f, 1.0f);
+  if (ride > 0.0f) {
+    const float u = 0.5f + ease(ride) * 0.999f;
+    OvTrail tr = trailOn(pos, 0.5f, 0.44f, u, 0.44f, 40, seamColour(th, 0, 1));
+    tr.width = 2.6f;
+    s.trails.push_back(tr);
+    const float uw = u - std::floor(u);
+    TokenOpt tk;
+    tk.at = true;
+    tk.where = pos(uw, 0.44f);
+    tk.hasNormal = true;
+    tk.normal = normalAt(pos, uw, 0.44f);
+    addToken(s, pos, 0, 0, 'R', true, tk);
+  }
+  s.caption = t < 0.16f   ? "one portal, two ends"
+              : t < 0.74f ? "the files roll into a loop"
+                          : "off h, onto a, all the way round";
+  return s;
+}
+
+OvertureScene sceneTorus(const view::Theme& th, float t) {
+  OvertureScene s;
+  s.cam = {lerpf(-0.08f, 0.72f, ease(t)), lerpf(1.42f, 0.60f, ease(t)),
+           lerpf(8.2f, 5.6f, ease(seg(t, 0.35f, 1.0f))), 0.12f};
+  const float pr = ease(seg(t, 0.48f, 0.86f));
+  TubeOpt o;
+  o.th = ease(seg(t, 0.12f, 0.48f)) * kTau;
+  o.ph = pr * kTau;
+  o.open = lerpf(1.0f, 2.2f, pr);
+  const Pos pos = [o](float u, float v) { return tube(u, v, o); };
+  GridOpt g;
+  g.sub = 4;
+  addGrid(s, pos, g);
+  addArmy(s, pos, 1.0f);
+
+  const float name = seg(t, 0.0f, 0.12f) * (1.0f - ease(seg(t, 0.5f, 0.86f)));
+  if (name > 0.01f) {
+    for (int axis = 0; axis < 2; ++axis) {
+      const view::Rgba c = seamColour(th, axis, 2);
+      for (const float e : {0.0005f, 0.9995f}) {
+        OvTrail tr;
+        tr.colour = c;
+        tr.width = 3.0f;
+        tr.fade = name;
+        for (int i = 0; i <= 16; ++i) {
+          const float q = fi(i) / 16.0f;
+          tr.pts.push_back(axis == 1 ? pos(q, e) : pos(e, q));
+        }
+        s.trails.push_back(tr);
+      }
+    }
+  }
+  const float ride = seg(t, 0.86f, 1.0f);
+  if (ride > 0.0f) {
+    const float q = ease(ride);
+    OvTrail tr =
+        trailOn(pos, 0.19f, 0.19f, 0.19f + q, 0.19f + q, 60, seamColour(th, 0, 2));
+    tr.width = 2.6f;
+    s.trails.push_back(tr);
+    const float u = std::fmod(0.19f + q, 1.0f);
+    TokenOpt tk;
+    tk.at = true;
+    tk.where = pos(u, u);
+    tk.hasNormal = true;
+    tk.normal = normalAt(pos, u, u);
+    addToken(s, pos, 0, 0, 'Q', true, tk);
+    // The four old corner cells, becoming ordinary interior cells: the plainest
+    // statement of "no corners".
+    for (const auto& c : {std::pair{0.06f, 0.06f}, std::pair{0.94f, 0.06f},
+                          std::pair{0.06f, 0.94f}, std::pair{0.94f, 0.94f}}) {
+      s.bursts.push_back({pos(c.first, c.second), 0.5f + std::sin(q * kPi) * 0.35f,
+                          std::sin(q * kPi) * 0.8f, seamColour(th, 1, 2), false});
+    }
+  }
+  s.caption = t < 0.12f   ? "two portals, four edges"
+              : t < 0.48f ? "the files close"
+              : t < 0.86f ? "the ranks close"
+                          : "a loop home, without turning round";
+  return s;
+}
+
+OvertureScene sceneMobius(const view::Theme& th, float t) {
+  OvertureScene s;
+  s.cam = {lerpf(-0.05f, 0.74f, ease(t)), lerpf(1.42f, 0.55f, ease(t)),
+           lerpf(8.2f, 7.2f, ease(t)), 0.12f};
+  const float roll = ease(seg(t, 0.0f, 0.30f));
+  const float openOut = ease(seg(t, 0.44f, 0.64f));
+  const float tw = ease(seg(t, 0.64f, 0.84f));
+  const float th_ = roll * kTau;
+  const Pos pos = [th_, openOut, tw](float u, float v) {
+    TubeOpt o;
+    o.th = th_;
+    // One positional blend between two embeddings of the same gluing. It is the one
+    // place an overture changes its mind about how to draw a surface, and it does so for
+    // a reason the player can see: the tube has no way to reverse its own axis.
+    return mix(tube(u, v, o), band(u, v, th_, tw), openOut);
+  };
+  GridOpt g;
+  g.sub = 4;
+  addGrid(s, pos, g);
+  addArmy(s, pos, 1.0f);
+
+  // The seam tries to close and does not match: rank 1 has arrived opposite rank 8.
+  const float bad = seg(t, 0.30f, 0.44f) * (1.0f - ease(seg(t, 0.44f, 0.60f)));
+  if (bad > 0.02f) {
+    OvTrail tr;
+    tr.colour = th.blood;
+    tr.width = 3.4f;
+    tr.fade = bad;
+    for (int i = 0; i <= 8; ++i) tr.pts.push_back(pos(0.9995f, fi(i) / 8.0f));
+    s.trails.push_back(tr);
+    for (int i = 0; i < 8; ++i) {
+      s.bursts.push_back(
+          {pos(0.9995f, (fi(i) + 0.5f) / 8.0f), 0.30f, bad * 0.9f, th.blood, true});
+    }
+  }
+  if (tw > 0.05f) {
+    OvTrail tr;
+    tr.colour = seamColour(th, 0, 1);
+    tr.width = 3.0f;
+    tr.fade = tw;
+    for (int i = 0; i <= 8; ++i) tr.pts.push_back(pos(0.9995f, fi(i) / 8.0f));
+    s.trails.push_back(tr);
+  }
+  const float ride = seg(t, 0.84f, 1.0f);
+  if (ride > 0.0f) {
+    const float q = ease(ride);
+    OvTrail tr = trailOn(pos, 0.12f, 0.28f, 0.12f + q, 0.28f, 50, th.ember);
+    tr.width = 2.6f;
+    s.trails.push_back(tr);
+    const float mu = std::fmod(0.12f + q, 1.0f);
+    TokenOpt tk;
+    tk.at = true;
+    tk.where = pos(mu, 0.28f);
+    tk.hasNormal = true;
+    tk.normal = normalAt(pos, mu, 0.28f);
+    tk.mirrored = q > 0.5f;
+    addToken(s, pos, 0, 0, 'B', true, tk);
+  }
+  s.caption = t < 0.30f   ? "the files roll, as ever"
+              : t < 0.44f ? "and the seam does not match"
+              : t < 0.64f ? "so the tube opens out"
+              : t < 0.84f ? "and takes a half-turn"
+                          : "home, and mirrored";
+  return s;
+}
+
+OvertureScene sceneKlein(const view::Theme& th, float t) {
+  OvertureScene s;
+  s.cam = {lerpf(-0.05f, 1.02f, ease(t)), lerpf(1.42f, 0.46f, ease(t)),
+           lerpf(8.2f, 6.0f, ease(seg(t, 0.3f, 1.0f))), 0.12f};
+  const float roll = ease(seg(t, 0.0f, 0.26f));
+  const float bad = seg(t, 0.26f, 0.40f);
+  const float pinch = ease(seg(t, 0.40f, 0.60f));
+  const float pr = ease(seg(t, 0.60f, 0.86f));
+  const float esc = seg(t, 0.86f, 1.0f);
+  const Pos pos = [roll, pinch, pr](float u, float v) {
+    return kleinSurf(u, v, roll * kTau, pinch, pr * kTau, pr, lerpf(1.0f, 3.6f, pr));
+  };
+  GridOpt g;
+  g.sub = 4;
+  // Only the two cells the bishop leaves and arrives on. Lighting every light square on
+  // the surface says "half of these are the same colour", which is true of any board;
+  // lighting two says "it started on one of these and finished on the other", which is
+  // the thing this variant can do and no other can.
+  g.tone = [esc](int f, int r) {
+    const bool from = f == 1 && r == 2;
+    const bool to = f == 1 && r == 5;
+    if (esc > 0.05f && (from || to)) return OvTone::Lit;
+    return ((f + r) % 2 != 0) ? OvTone::Dark : OvTone::Light;
+  };
+  addGrid(s, pos, g);
+  addArmy(s, pos, 1.0f);
+
+  if (pr < 0.98f) {
+    const view::Rgba c = seamColour(th, 1, 2);
+    for (const float e : {0.0005f, 0.9995f}) {
+      OvTrail tr;
+      tr.colour = c;
+      tr.width = 2.6f;
+      tr.fade = 1.0f - pr * 0.55f;
+      for (int i = 0; i <= 24; ++i) tr.pts.push_back(pos(fi(i) / 24.0f, e));
+      s.trails.push_back(tr);
+    }
+  }
+  // The refusal: a circle's half-turn lands file f opposite file f+4, which is a shift
+  // and not the reflection the gluing asked for.
+  const float showBad = bad * (1.0f - ease(seg(t, 0.40f, 0.52f)));
+  if (showBad > 0.02f) {
+    for (int f = 0; f < 8; ++f) {
+      OvTrail tr;
+      tr.colour = th.blood;
+      tr.width = 1.6f;
+      tr.fade = showBad * 0.7f;
+      tr.dashed = true;
+      tr.pts = {pos((fi(f) + 0.5f) / 8.0f, 0.0005f),
+                pos((fi((f + 4) % 8) + 0.5f) / 8.0f, 0.9995f)};
+      s.trails.push_back(tr);
+    }
+    s.bursts.push_back({pos(0.5f, 0.0005f), 0.5f, showBad, th.blood, true});
+  }
+  if (esc > 0.0f) {
+    const float q = ease(esc);
+    OvTrail tr = trailOn(pos, 0.19f, 0.31f, 0.19f, 0.31f + q, 56, th.ember);
+    tr.width = 2.8f;
+    s.trails.push_back(tr);
+    const float kv = std::fmod(0.31f + q, 1.0f);
+    TokenOpt tk;
+    tk.at = true;
+    tk.where = pos(0.19f, kv);
+    tk.hasNormal = true;
+    tk.normal = normalAt(pos, 0.19f, kv);
+    addToken(s, pos, 0, 0, 'B', true, tk);
+  }
+  s.caption = t < 0.26f   ? "the files close, straight"
+              : t < 0.40f ? "a circle comes back shifted, not reflected"
+              : t < 0.60f ? "so the cross-section pinches"
+              : t < 0.86f ? "and now the ring closes exactly"
+                          : "a bishop leaves its colour";
+  return s;
+}
+
+OvertureScene sceneMirrorbox(const view::Theme& th, float t) {
+  OvertureScene s;
+  s.cam = {lerpf(0.0f, 0.30f, ease(t)), lerpf(1.42f, 0.78f, ease(t)), 8.4f, 0.10f};
+  const Pos pos = flatBoard();
+  addGrid(s, pos, GridOpt{});
+  addArmy(s, pos, 1.0f);
+
+  const float rise = ease(seg(t, 0.0f, 0.30f));
+  if (rise > 0.02f) {
+    for (const float side : {-1.0f, 1.0f}) {
+      const float x = side * kW * 0.5f;
+      const float hgt = rise * 2.5f;
+      OvQuad q;
+      q.p[0] = {x, 0.0f, -kH * 0.5f};
+      q.p[1] = {x, 0.0f, kH * 0.5f};
+      q.p[2] = {x, hgt, kH * 0.5f};
+      q.p[3] = {x, hgt, -kH * 0.5f};
+      q.tone = OvTone::Mirror;
+      q.fade = rise;
+      s.quads.push_back(q);
+    }
+  }
+  const float ray = seg(t, 0.30f, 0.84f);
+  if (ray > 0.0f) {
+    const int n = std::max(2, static_cast<int>(26.0f * ease(ray)));
+    float x = -1.5f;
+    float z = -3.5f;
+    float dx = 1.0f;
+    const float dz = 1.0f;
+    OvTrail tr;
+    tr.colour = th.ember;
+    tr.width = 2.8f;
+    tr.pts.push_back({x, 0.3f, z});
+    for (int i = 0; i < n; ++i) {
+      x += dx * 0.5f;
+      z += dz * 0.5f;
+      // A ray reaching a file wall bounces and continues in the mirrored direction,
+      // exactly as light would - and nothing teleports, which is the claim.
+      if (x > 4.0f) {
+        x = 8.0f - x;
+        dx = -dx;
+        s.bursts.push_back({{4.0f, 0.3f, z}, 0.55f, 0.8f, th.mirrorEdge, false});
+      } else if (x < -4.0f) {
+        x = -8.0f - x;
+        dx = -dx;
+        s.bursts.push_back({{-4.0f, 0.3f, z}, 0.55f, 0.8f, th.mirrorEdge, false});
+      }
+      tr.pts.push_back({x, 0.3f, z});
+    }
+    s.trails.push_back(tr);
+    TokenOpt tk;
+    tk.at = true;
+    tk.where = {tr.pts.back().x, 0.02f, tr.pts.back().z};
+    addToken(s, pos, 0, 0, 'B', true, tk);
+
+    // The unfolding: the same path, straight, drawn through the mirrors. Bounce and
+    // straight line are one path, which is what makes the reflection legible.
+    const float unf = seg(t, 0.84f, 1.0f);
+    if (unf > 0.0f) {
+      OvTrail st;
+      st.colour = th.ember;
+      st.width = 1.4f;
+      st.fade = 0.45f * ease(unf);
+      st.dashed = true;
+      float sx = -1.5f;
+      float sz = -3.5f;
+      for (int i = 0; i <= n; ++i) {
+        st.pts.push_back({sx, 0.3f, sz});
+        sx += 0.5f;
+        sz += 0.5f;
+      }
+      s.trails.push_back(st);
+    }
+  }
+  s.caption = t < 0.30f   ? "two walls, silvered"
+              : t < 0.84f ? "the ray bounces and keeps going"
+                          : "bounce and straight line are one path";
+  return s;
+}
+
+OvertureScene sceneCube5(const view::Theme& th, float t) {
+  OvertureScene s;
+  constexpr int N = 5;
+  const float cut = ease(seg(t, 0.0f, 0.34f));
+  const float shift = ease(seg(t, 0.34f, 0.44f));
+  const float ext = ease(seg(t, 0.44f, 0.74f));
+  const float gap = lerpf(0.0f, 1.65f, ext);
+  s.cam = {lerpf(0.05f, 0.66f, ease(t)), lerpf(1.45f, 0.52f, ease(t)),
+           lerpf(8.2f, 6.6f, ease(seg(t, 0.44f, 1.0f))), 0.11f};
+  addCutGrid(s, N, cut);
+
+  const auto lv = [&](int L) { return cornerPos(N, shift, (fi(L) - 2.0f) * gap); };
+  for (int L = 0; L < N; ++L) {
+    const float alive =
+        L == 2 ? 1.0f
+               : clampf(ext * 1.5f - (fi(std::abs(L - 2)) - 1.0f) * 0.28f, 0.0f, 1.0f);
+    if (alive <= 0.01f) continue;
+    GridOpt g;
+    g.nx = N;
+    g.nz = N;
+    g.fade = alive * (L == 2 ? 1.0f : 0.92f);
+    g.tone = [L](int f, int r) {
+      return ((f + r + L) % 2 != 0) ? OvTone::Dark : OvTone::Light;
+    };
+    addGrid(s, lv(L), g);
+  }
+  if (ext < 0.35f) {
+    addCutArmy(s, N, cut, lv(2), 1.0f - ease(clampf(ext * 2.4f, 0.0f, 1.0f)));
+  }
+  if (ext > 0.3f) {
+    const float born = ease(seg(t, 0.56f, 0.72f));
+    constexpr char kRoyal[N]{'R', 'N', 'K', 'N', 'R'};
+    for (const auto& [L, white] : {std::pair{0, true}, std::pair{1, true},
+                                   std::pair{3, false}, std::pair{4, false}}) {
+      const Pos pL = lv(L);
+      for (int f = 0; f < N; ++f) {
+        const int r = white ? (L == 0 ? 0 : 1) : (L == 4 ? 4 : 3);
+        const char g = (L == 0 || L == 4) ? kRoyal[f] : 'P';
+        TokenOpt o;
+        o.nx = N;
+        o.nz = N;
+        o.fade = born;
+        addToken(s, pL, f, r, g, white, o);
+      }
+    }
+  }
+  // The extra axis is cold: an axis you cannot see in a plane is exactly the case the
+  // seam ramp is reserved for. The pieces stay warm.
+  if (ext > 0.05f) {
+    for (int L = 0; L < N; ++L) {
+      addRim(s, lv(L), seamColour(th, L, N), 1.3f, 0.5f * ext);
+    }
+  }
+  const float move = seg(t, 0.74f, 1.0f);
+  if (move > 0.0f) {
+    const float q = ease(clampf(move / 0.62f, 0.0f, 1.0f));
+    const Pos c0 = lv(1);
+    const Pos c3 = lv(4);
+    const OvVec3 a = c0(1.5f / fi(N), 1.5f / fi(N));
+    const OvVec3 b = c3(4.5f / fi(N), 4.5f / fi(N));
+    const OvVec3 now = mix(a, b, q);
+    OvTrail tr;
+    tr.colour = th.ember;
+    tr.width = 2.8f;
+    tr.pts = {a, now};
+    s.trails.push_back(tr);
+    TokenOpt tk;
+    tk.nx = N;
+    tk.nz = N;
+    tk.at = true;
+    tk.where = now;
+    addToken(s, c0, 0, 0, 'U', true, tk);
+
+    const float kn = seg(move, 0.62f, 1.0f);
+    if (kn > 0.0f) {
+      const float ks = ease(kn);
+      const OvVec3 ka = lv(1)(0.5f / fi(N), 2.5f / fi(N));
+      const OvVec3 kb = lv(3)(1.5f / fi(N), 2.5f / fi(N));
+      OvTrail jt;
+      jt.colour = seamColour(th, 2, N);
+      jt.width = 2.2f;
+      for (int i = 0; i <= 14; ++i) {
+        const float p = fi(i) / 14.0f * ks;
+        OvVec3 at = mix(ka, kb, p);
+        at.y += std::sin(p * kPi) * 0.9f;
+        jt.pts.push_back(at);
+      }
+      s.trails.push_back(jt);
+      TokenOpt nt;
+      nt.nx = N;
+      nt.nz = N;
+      nt.at = true;
+      nt.where = jt.pts.back();
+      addToken(s, lv(1), 0, 0, 'N', true, nt);
+    }
+  }
+  s.caption = t < 0.34f   ? "three files and three ranks go"
+              : t < 0.44f ? "what is left moves to the middle"
+              : t < 0.74f ? "and gains a third axis"
+                          : "the unicorn goes through the solid";
+  return s;
+}
+
+OvertureScene sceneHyper4(const view::Theme& th, float t) {
+  OvertureScene s;
+  constexpr int N = 4;
+  const float cut = ease(seg(t, 0.0f, 0.16f));
+  const float shift = ease(seg(t, 0.16f, 0.24f));
+  const float ext = ease(seg(t, 0.24f, 0.40f));
+  const float hyp = ease(seg(t, 0.40f, 0.62f));
+  const float unfold = ease(seg(t, 0.62f, 0.78f));
+  const float gap = lerpf(0.0f, 1.5f, ext);
+  // The four aeon slices unfold into a 2 x 2 arrangement, not a row. A row of four is a
+  // thin strip, and once the fit has to hold the whole strip each cube is too small to
+  // see a move on; two by two says the same thing about the fourth axis at twice the
+  // size. Which cell of the arrangement a slice lands in is (A & 1, A >> 1) - the same
+  // bit-split a 4-cube's own vertices use.
+  const float aeonGap = 7.0f;
+  const float spin = 0.55f + t * 0.9f;
+  // Where the surviving block sits: at the a1 corner the cut left it in, sliding to the
+  // middle as `shift` runs. The 4-cube maths needs the cell's *centred* coordinates to
+  // nest correctly, so the corner offset is a translation applied to all three
+  // placements rather than being folded into the coordinates themselves.
+  const float corner = (fi(N) * 0.5f - 4.0f) * (1.0f - shift);
+  s.cam = {lerpf(0.05f, 0.46f, ease(t)), lerpf(1.45f, 0.60f, ease(t)),
+           lerpf(8.2f, 21.0f, ease(seg(t, 0.55f, 1.0f))), 0.09f};
+  addCutGrid(s, N, cut);
+
+  // Three placements for the same cell, blended by phase: the plain cube with w
+  // ignored, the 4-cube projection, and the unfolded row. The fourth axis arrives the
+  // way a 4-cube is always drawn - nested, scaled by w - and only afterwards pulls
+  // apart into a row a player can read a move on. Same 256 cells throughout; only their
+  // positions interpolate.
+  const auto place = [=](float cx, float cy, float cz, float cw) -> OvVec3 {
+    const OvVec3 cube{cx + corner, cy * gap, cz + corner};
+    const float nx = cx * std::cos(spin) - cw * std::sin(spin);
+    const float nw = cx * std::sin(spin) + cw * std::cos(spin);
+    const float k = 2.35f / (3.5f - nw);
+    const OvVec3 hyper{nx * k * 2.15f + corner, cy * k * 2.15f * 1.05f,
+                       cz * k * 2.15f + corner};
+    const int slice = static_cast<int>(std::lround(cw + 1.5f));
+    const OvVec3 row{(fi(slice & 1) - 0.5f) * aeonGap + cx + corner, cy * gap,
+                     (fi(slice >> 1) - 0.5f) * aeonGap + cz + corner};
+    return mix(mix(cube, hyper, hyp * (1.0f - unfold)), row, unfold);
+  };
+  const auto cellPos = [&](int A, int L) -> Pos {
+    return [=](float u, float v) {
+      return place(u * fi(N) - 2.0f, fi(L) - 1.5f, v * fi(N) - 2.0f, fi(A) - 1.5f);
+    };
+  };
+  const auto sliceAlive = [=](int A) {
+    return A == 1 ? 1.0f : clampf(hyp * 1.7f - fi(std::abs(A - 1)) * 0.16f, 0.0f, 1.0f);
+  };
+  // Before the fourth axis arrives there is one slice, and it is the one the levels
+  // were extruded on - A = 1, the slice `sliceAlive` keeps at full strength. Iterating
+  // from zero drew the block that does not exist yet and left the cut board with nothing
+  // standing on it.
+  const bool fanned = hyp > 0.02f;
+  const int firstSlice = fanned ? 0 : 1;
+  const int lastSlice = fanned ? N - 1 : 1;
+  for (int A = firstSlice; A <= lastSlice; ++A) {
+    const float alive = sliceAlive(A);
+    if (alive <= 0.01f) continue;
+    for (int L = 0; L < N; ++L) {
+      const float lAlive =
+          L == 1 ? 1.0f
+                 : clampf(ext * 1.5f - (fi(std::abs(L - 1)) - 1.0f) * 0.22f, 0.0f, 1.0f);
+      if (lAlive <= 0.01f) continue;
+      GridOpt g;
+      g.nx = N;
+      g.nz = N;
+      // The cells step back while the figure is a hypercube: what has to read there is
+      // the nesting, and 256 chequered tiles at full strength read as noise instead.
+      g.fade = alive * lAlive * (A == 1 ? 1.0f : 0.86f) *
+               lerpf(1.0f, 0.62f, hyp * (1.0f - unfold));
+      g.tone = [L, A](int f, int r) {
+        return ((f + r + L + A) % 2 != 0) ? OvTone::Dark : OvTone::Light;
+      };
+      addGrid(s, cellPos(A, L), g);
+    }
+  }
+  if (ext < 0.4f) {
+    addCutArmy(s, N, cut, cellPos(1, 1), 1.0f - ease(clampf(ext * 2.2f, 0.0f, 1.0f)));
+  }
+  if (ext > 0.08f) {
+    for (int A = firstSlice; A <= lastSlice; ++A) {
+      const float alive = sliceAlive(A);
+      if (alive <= 0.01f) continue;
+      for (int L = 0; L < N; ++L) {
+        // The outer levels carry the shell's silhouette, so they are drawn hardest - it
+        // is those boxes, nested, that make the figure legible as a 4-cube.
+        const bool shell = L == 0 || L == N - 1;
+        addRim(s, cellPos(A, L), seamColour(th, L, N), shell ? 2.0f : 1.0f,
+               (shell ? 0.85f : 0.34f) * ext * alive);
+      }
+    }
+  }
+  // The w-edges: what makes the figure a hypercube rather than four cubes that happen
+  // to be near each other, and what keeps the rook's slide from reading as a teleport.
+  if (hyp > 0.05f) {
+    for (int A = 0; A < N - 1; ++A) {
+      const float alive = clampf(hyp * 1.7f - fi(std::abs(A - 1)) * 0.16f, 0.0f, 1.0f);
+      for (const int L : {0, 3}) {
+        for (const float cu : {0.0f, 1.0f}) {
+          for (const float cv : {0.0f, 1.0f}) {
+            OvTrail tr;
+            tr.colour = seamColour(th, 3, N);
+            tr.width = 1.6f;
+            // The fourth-axis edges are the ones that are not really there, and saying
+            // so is the whole reason a 4-cube is worth drawing - but they still have to
+            // be visible enough to join the shells into one figure.
+            tr.fade = 0.55f * alive;
+            tr.dashed = unfold > 0.5f;
+            tr.pts = {cellPos(A, L)(cu, cv), cellPos(A + 1, L)(cu, cv)};
+            s.trails.push_back(tr);
+          }
+        }
+      }
+    }
+  }
+  if (ext > 0.3f && hyp > 0.2f) {
+    const float born = ease(seg(t, 0.44f, 0.60f));
+    const Pos p = cellPos(1, 0);
+    constexpr char kRoyal[N]{'R', 'N', 'K', 'R'};
+    for (int f = 0; f < N; ++f) {
+      TokenOpt o;
+      o.nx = N;
+      o.nz = N;
+      o.fade = born;
+      o.height = 0.85f;
+      addToken(s, p, f, 0, kRoyal[f], true, o);
+      addToken(s, p, f, N - 1, kRoyal[f], false, o);
+    }
+  }
+  const float show = seg(t, 0.78f, 1.0f);
+  if (show > 0.0f) {
+    const float q = ease(clampf(show / 0.5f, 0.0f, 1.0f));
+    const OvVec3 a0 = place(-0.5f, -0.5f, 0.5f, -1.5f);
+    const OvVec3 now = place(-0.5f, -0.5f, 0.5f, lerpf(0.0f, 3.0f, q) - 1.5f);
+    OvTrail tr;
+    tr.colour = th.ember;
+    tr.width = 2.6f;
+    tr.pts = {a0, now};
+    s.trails.push_back(tr);
+    TokenOpt tk;
+    tk.nx = N;
+    tk.nz = N;
+    tk.at = true;
+    tk.where = now;
+    addToken(s, cellPos(0, 1), 0, 0, 'R', true, tk);
+
+    const float fan = seg(show, 0.5f, 1.0f);
+    if (fan > 0.0f) {
+      // {1,2} on any two of four axes, both orders, both signs: the same expansion the
+      // engine does, which is the claim the variant is making. Forty-eight before the
+      // board's edges clip any.
+      const int base[4]{1, 1, 1, 1};
+      int seen = 0;
+      for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) {
+          if (i == j) continue;
+          for (const int si : {-1, 1}) {
+            for (const int sj : {-1, 1}) {
+              int c[4]{base[0], base[1], base[2], base[3]};
+              c[i] += si;
+              c[j] += sj * 2;
+              ++seen;
+              if (c[0] < 0 || c[0] > 3 || c[1] < 0 || c[1] > 3 || c[2] < 0 || c[2] > 3 ||
+                  c[3] < 0 || c[3] > 3) {
+                continue;
+              }
+              s.bursts.push_back(
+                  {place(fi(c[0]) + 0.5f - 2.0f, fi(c[2]) - 1.5f, fi(c[1]) + 0.5f - 2.0f,
+                         fi(c[3]) - 1.5f),
+                   0.30f, clampf(fan * 2.0f - fi(seen) / 96.0f, 0.0f, 1.0f) * 0.95f,
+                   seamColour(th, 1, N), false});
+            }
+          }
+        }
+      }
+      TokenOpt nt;
+      nt.nx = N;
+      nt.nz = N;
+      nt.at = true;
+      nt.where = place(-0.5f, -0.5f, -0.5f, -0.5f);
+      addToken(s, cellPos(1, 1), 0, 0, 'N', true, nt);
+    }
+  }
+  s.caption = t < 0.16f     ? "four files and four ranks go"
+              : t < 0.24f   ? "and what is left moves in"
+              : t < 0.40f   ? "a third axis"
+              : t < 0.62f   ? "and a fourth, as a hypercube"
+              : t < 0.78f   ? "which unfolds into four cubes"
+              : show > 0.5f ? "one knight, forty-eight destinations"
+                            : "the rook slides through aeon";
+  return s;
+}
+
+OvertureScene sceneAtomic(const view::Theme& th, float t) {
+  OvertureScene s;
+  s.cam = {lerpf(0.22f, 0.46f, ease(t)), lerpf(0.95f, 0.60f, ease(seg(t, 0.4f, 1.0f))),
+           lerpf(8.0f, 8.8f, ease(t)), 0.10f};
+  const Pos pos = flatBoard();
+  const float set = seg(t, 0.0f, 0.22f);
+  const float app = seg(t, 0.22f, 0.44f);
+  const float boom = seg(t, 0.44f, 0.70f);
+  // A triangle of pawns, apex at d5, and a bishop waiting on the long diagonal.
+  constexpr int kTri[9][2]{{3, 4}, {2, 3}, {3, 3}, {4, 3}, {1, 2},
+                           {2, 2}, {3, 2}, {4, 2}, {5, 2}};
+  const auto inBlast = [](int f, int r) {
+    return std::abs(f - 3) <= 1 && std::abs(r - 4) <= 1;
+  };
+  GridOpt g;
+  g.tone = [&, boom](int f, int r) {
+    if (inBlast(f, r) && boom > 0.05f) return OvTone::Scorch;
+    return ((f + r) % 2 != 0) ? OvTone::Dark : OvTone::Light;
+  };
+  addGrid(s, pos, g);
+  addArmy(s, pos, 1.0f - ease(clampf(set * 1.25f, 0.0f, 1.0f)));
+
+  const float here = ease(clampf(set * 1.4f, 0.0f, 1.0f));
+  const float gone = 1.0f - ease(clampf(boom * 1.35f, 0.0f, 1.0f));
+  for (const auto& cell : kTri) {
+    const int f = cell[0];
+    const int r = cell[1];
+    if (inBlast(f, r) && boom > 0.0f) {
+      if (f == 3 && r == 4) continue;  // the captured pawn is simply gone
+      const float dx = fi(f - 3);
+      const float dz = fi(r - 4);
+      const float l = std::max(1e-3f, std::hypot(dx, dz));
+      const float q = ease(boom);
+      TokenOpt o;
+      o.fade = gone;
+      o.at = true;
+      o.where = {fi(f) + 0.5f - 4.0f + dx / l * q * 3.4f,
+                 std::sin(q * kPi) * 3.2f - q * q * 0.6f,
+                 fi(r) + 0.5f - 4.0f + dz / l * q * 3.4f};
+      addToken(s, pos, f, r, 'P', true, o);
+    } else {
+      TokenOpt o;
+      o.fade = here;
+      addToken(s, pos, f, r, 'P', true, o);
+    }
+  }
+  {
+    TokenOpt o;
+    o.at = true;
+    if (boom <= 0.0f) {
+      o.fade = here;
+      o.where = {lerpf(0.0f, 3.0f, ease(app)) + 0.5f - 4.0f, 0.0f,
+                 lerpf(1.0f, 4.0f, ease(app)) + 0.5f - 4.0f};
+    } else {
+      const float q = ease(boom);
+      o.fade = gone;
+      o.where = {-0.5f - q * 2.4f, std::sin(q * kPi) * 3.6f, 0.5f - q * 2.0f};
+    }
+    addToken(s, pos, 0, 0, 'B', false, o);
+  }
+  if (boom > 0.0f) {
+    // Warm only. An explosion is a *game* event, so it spends blood and ember and may
+    // not touch the seam ramp - or the one thing a player learns by playing, that cold
+    // means the board is not flat, stops being true.
+    const OvVec3 at{-0.5f, 0.35f, 0.5f};
+    s.bursts.push_back(
+        {at, 0.6f + ease(boom) * 7.6f, 1.0f - ease(boom), th.blood, false});
+    s.bursts.push_back(
+        {at, 0.4f + easeIn(boom) * 2.2f, (1.0f - ease(boom)) * 0.9f, th.ember, false});
+  }
+  s.caption = t < 0.22f   ? "a triangle, and a bishop on the diagonal"
+              : t < 0.44f ? "the bishop takes the apex"
+              : t < 0.70f ? "and takes eight more with it"
+                          : "nine cells, and what is left to count";
+  return s;
+}
+
+OvertureScene sceneAtomicTorus(const view::Theme& th, float t) {
+  OvertureScene s;
+  const float form = ease(seg(t, 0.0f, 0.42f));
+  const float unroll = ease(seg(t, 0.74f, 1.0f));
+  const float shape = form * (1.0f - unroll);
+  const float mark = seg(t, 0.42f, 0.56f);
+  const float boom = seg(t, 0.56f, 0.74f);
+  s.cam = {lerpf(0.15f, 0.80f, ease(seg(t, 0.0f, 0.5f))),
+           lerpf(1.40f, 0.62f, ease(seg(t, 0.0f, 0.5f))),
+           lerpf(8.0f, 5.8f, ease(seg(t, 0.0f, 0.5f))), 0.12f};
+  TubeOpt o;
+  o.th = shape * kTau;
+  o.ph = shape * kTau;
+  o.open = lerpf(1.0f, 2.2f, shape);
+  const Pos pos = [o](float u, float v) { return tube(u, v, o); };
+
+  // The 3 x 3 neighbourhood of a1 *on a torus*, which is four corners of the flat
+  // board. The marks are a property of the cells, indexed by lattice position, so the
+  // unroll carries them for free - which is the whole reason this overture exists.
+  const auto inNb = [](int f, int r) {
+    const int df = std::min((f + 8) % 8, (8 - f) % 8);
+    const int dr = std::min((r + 8) % 8, (8 - r) % 8);
+    return df <= 1 && dr <= 1;
+  };
+  GridOpt g;
+  g.sub = 4;
+  g.tone = [&, mark, boom](int f, int r) {
+    if (!inNb(f, r)) return ((f + r) % 2 != 0) ? OvTone::Dark : OvTone::Light;
+    if (boom > 0.04f) return OvTone::Scorch;
+    if (mark > 0.04f) return OvTone::Lit;
+    return ((f + r) % 2 != 0) ? OvTone::Dark : OvTone::Light;
+  };
+  addGrid(s, pos, g);
+  addArmy(s, pos, 1.0f);
+
+  if (boom > 0.0f) {
+    const float q = ease(boom);
+    const float fade = 1.0f - ease(clampf(boom * 1.3f, 0.0f, 1.0f));
+    for (int f = 0; f < 8; ++f) {
+      for (int r = 0; r < 8; ++r) {
+        if (!inNb(f, r) || !(r <= 1 || r >= 6)) continue;
+        const char glyph = (r == 1 || r == 6) ? 'P' : kBack[f];
+        const OvVec3 c = cellCentre(pos, f, r, 8, 8);
+        const OvVec3 n = normalAt(pos, (fi(f) + 0.5f) / 8.0f, (fi(r) + 0.5f) / 8.0f);
+        TokenOpt tk;
+        tk.fade = fade;
+        tk.at = true;
+        tk.where = add(c, mul(n, q * 3.0f));
+        tk.hasNormal = true;
+        tk.normal = n;
+        addToken(s, pos, f, r, glyph, r <= 1, tk);
+      }
+    }
+    const OvVec3 c0 = cellCentre(pos, 0, 0, 8, 8);
+    s.bursts.push_back({c0, 0.6f + q * 6.4f, 1.0f - q, th.blood, false});
+    s.bursts.push_back(
+        {c0, 0.4f + easeIn(boom) * 2.0f, (1.0f - q) * 0.9f, th.ember, false});
+  }
+  s.caption = t < 0.42f   ? "the torus closes"
+              : t < 0.56f ? "nine cells about a1"
+              : t < 0.74f ? "and they are contiguous"
+                          : "flat again - and they are four corners";
+  return s;
+}
+
+OvertureScene sceneMustCapture(const view::Theme& th, float t) {
+  OvertureScene s;
+  s.cam = {0.18f, lerpf(1.50f, 1.18f, ease(t)), 8.2f, 0.09f};
+  const Pos pos = flatBoard();
+  const float start = seg(t, 0.0f, 0.24f);
+  const float lit = seg(t, 0.24f, 0.46f);
+  const float refuse = seg(t, 0.46f, 0.68f);
+  const float play = seg(t, 0.68f, 1.0f);
+  const float dim = ease(lit) * (1.0f - ease(play));
+  const auto isCap = [](int f, int r) {
+    return (f == 2 && r == 2) || (f == 5 && r == 3);
+  };
+  GridOpt g;
+  g.tone = [&, dim](int f, int r) {
+    return (isCap(f, r) && dim > 0.1f)
+               ? OvTone::Lit
+               : (((f + r) % 2 != 0) ? OvTone::Dark : OvTone::Light);
+  };
+  addGrid(s, pos, g);
+  // Everything a capture cannot be made from dims right down. The board states the
+  // constraint before anything moves, because a rule that acts by taking moves away has
+  // nothing else to show.
+  if (dim > 0.01f) {
+    for (int f = 0; f < 8; ++f) {
+      for (int r = 0; r < 8; ++r) {
+        if (isCap(f, r)) continue;
+        OvQuad q;
+        q.p[0] = {fi(f) - 4.0f + 0.03f, 0.004f, fi(r) - 4.0f + 0.03f};
+        q.p[1] = {fi(f) - 3.0f - 0.03f, 0.004f, fi(r) - 4.0f + 0.03f};
+        q.p[2] = {fi(f) - 3.0f - 0.03f, 0.004f, fi(r) - 3.0f - 0.03f};
+        q.p[3] = {fi(f) - 4.0f + 0.03f, 0.004f, fi(r) - 3.0f - 0.03f};
+        q.tone = OvTone::Scrim;
+        q.fade = dim * 0.55f;
+        s.quads.push_back(q);
+      }
+    }
+  }
+  addArmy(s, pos, 1.0f - ease(clampf(start * 1.3f, 0.0f, 1.0f)));
+
+  const float on = ease(clampf(start * 1.5f, 0.0f, 1.0f));
+  struct Cast {
+    int f, r;
+    char g;
+    bool white;
+  };
+  constexpr Cast kCast[]{{4, 0, 'K', true},  {4, 7, 'K', false}, {0, 1, 'P', true},
+                         {7, 6, 'P', false}, {5, 3, 'B', true},  {3, 5, 'R', false},
+                         {1, 6, 'P', false}, {6, 1, 'P', true}};
+  for (const Cast& c : kCast) {
+    TokenOpt o;
+    o.fade = on;
+    addToken(s, pos, c.f, c.r, c.g, c.white, o);
+  }
+  {
+    TokenOpt o;
+    o.fade = on * (1.0f - ease(clampf(play * 1.6f - 0.35f, 0.0f, 1.0f)));
+    addToken(s, pos, 4, 4, 'N', false, o);
+  }
+  float kf = 2.0f;
+  float kr = 2.0f;
+  float lift = 0.0f;
+  if (refuse > 0.0f && play <= 0.0f) {
+    // A hard stop, not a bounce: the quiet move is not discouraged, it does not exist.
+    const float q =
+        refuse < 0.72f ? ease(refuse / 0.72f) : 1.0f - ease((refuse - 0.72f) / 0.28f);
+    kf = lerpf(2.0f, 1.0f, q * 0.82f);
+    kr = lerpf(2.0f, 4.0f, q * 0.82f);
+    lift = std::sin(q * kPi) * 0.7f;
+    if (refuse > 0.55f) {
+      s.bursts.push_back(
+          {{-2.5f, 0.25f, 0.5f},
+           0.62f,
+           clampf((refuse - 0.55f) / 0.2f, 0.0f, 1.0f) * (1.0f - ease(refuse * 0.6f)),
+           th.blood,
+           true});
+    }
+  } else if (play > 0.0f) {
+    const float q = ease(play);
+    kf = lerpf(2.0f, 4.0f, q);
+    kr = lerpf(2.0f, 4.0f, q);
+    lift = std::sin(q * kPi) * 1.4f;
+  }
+  {
+    TokenOpt o;
+    o.fade = on;
+    o.at = true;
+    o.where = {kf - 4.0f + 0.5f, lift, kr - 4.0f + 0.5f};
+    addToken(s, pos, 0, 0, 'N', true, o);
+  }
+  s.caption = t < 0.24f   ? "a position with a capture in it"
+              : t < 0.46f ? "a capture exists"
+              : t < 0.68f ? "so the quiet move is not a move"
+                          : "the capture plays";
+  return s;
+}
+
+OvertureScene sceneMultiverse(const view::Theme& th, float t) {
+  OvertureScene s;
+  constexpr int N = 4;
+  const float cut = ease(seg(t, 0.0f, 0.16f));
+  const float shift = ease(seg(t, 0.16f, 0.22f));
+  const float grow = seg(t, 0.22f, 0.46f);
+  const float branch = seg(t, 0.46f, 0.70f);
+  const float pres = seg(t, 0.70f, 1.0f);
+  constexpr float BW = 6.6f;
+  constexpr float BH = 7.4f;
+  s.cam = {lerpf(0.0f, 0.22f, ease(t)), lerpf(1.50f, 1.02f, ease(t)),
+           lerpf(8.0f, 19.0f, ease(seg(t, 0.2f, 1.0f))), 0.08f};
+  addCutGrid(s, N, cut);
+
+  // Continuous lattice extent, so the recentring is smooth rather than jumping every
+  // time a board is born. The first board sits dead centre and the lattice grows around
+  // it - a lattice drifting off the pane explains nothing.
+  const auto bornOf = [=](int k, int l) -> float {
+    if (k == 0 && l == 0) return 1.0f;
+    if (l == 1) {
+      return ease(clampf((branch - (k == 1 ? 0.28f : 0.72f)) / 0.28f, 0.0f, 1.0f));
+    }
+    if (k == 1) return ease(clampf((grow - 0.22f) / 0.3f, 0.0f, 1.0f));
+    if (k == 2) return ease(clampf((grow - 0.64f) / 0.3f, 0.0f, 1.0f));
+    return ease(clampf((pres - 0.34f) / 0.3f, 0.0f, 1.0f));
+  };
+  // The lattice's extent, tracking the boards that are actually being born rather than a
+  // clock of its own: a board fading in has to pull the centring with it, or the whole
+  // arrangement leans for as long as it takes to arrive.
+  const float kGrow = bornOf(1, 0) + bornOf(2, 0) + bornOf(3, 0);
+  const float lGrow = std::max(bornOf(1, 1), bornOf(2, 1));
+  // Where the surviving block's centre is: at the a1 corner when the cut has just
+  // finished, and at the origin once it has slid. Every board is placed relative to it,
+  // so the lattice inherits the slide instead of teleporting to the middle.
+  const float slide = (fi(N) * 0.5f - 4.0f) * (1.0f - shift);
+  // A board being born slides out of the one it was appended to rather than fading in
+  // where it will end up. Two reasons, and the second is the load-bearing one: a move
+  // *appending* a board is the thing being explained, and a board that occupied its
+  // final slot while still invisible made the whole lattice lean for as long as it took
+  // to arrive, because the extent jumped and the recentring did not.
+  const auto originOf = [=](int k, int l) -> OvVec3 {
+    const float kEff = k > 0 ? fi(k - 1) + bornOf(k, l) : 0.0f;
+    const float lEff = l > 0 ? bornOf(k, l) : 0.0f;
+    return {(kEff - kGrow * 0.5f) * BW + slide, 0.0f, (lEff - lGrow * 0.5f) * BH + slide};
+  };
+  const auto posOf = [=](int k, int l) -> Pos {
+    const OvVec3 o = originOf(k, l);
+    const float born = bornOf(k, l);
+    return [=](float u, float v) -> OvVec3 {
+      return {o.x + u * fi(N) - fi(N) * 0.5f, (1.0f - born) * 4.0f,
+              o.z + v * fi(N) - fi(N) * 0.5f};
+    };
+  };
+  struct Board {
+    int k, l;
+  };
+  std::vector<Board> boards{{0, 0}};
+  if (grow > 0.22f) boards.push_back({1, 0});
+  if (grow > 0.64f) boards.push_back({2, 0});
+  if (branch > 0.28f) boards.push_back({1, 1});
+  if (branch > 0.72f) boards.push_back({2, 1});
+  if (pres > 0.34f) boards.push_back({3, 0});
+  if (pres > 0.58f) boards.push_back({3, 1});
+
+  constexpr char kRoyal[N]{'R', 'N', 'K', 'R'};
+  for (const Board& b : boards) {
+    const float born = bornOf(b.k, b.l);
+    if (born <= 0.02f) continue;
+    const Pos bp = posOf(b.k, b.l);
+    GridOpt g;
+    g.nx = N;
+    g.nz = N;
+    g.fade = born;
+    addGrid(s, bp, g);
+    // Boards along the turn axis alternate whose move it is, and are rimmed alternately
+    // to say so. The present column takes the accent.
+    const bool isPresent = pres > 0.34f && b.k == 3;
+    addRim(s, bp,
+           isPresent ? th.ember : ((b.k % 2 == 0) ? th.boneFaint : seamColour(th, 0, 2)),
+           isPresent ? 2.6f : 1.4f, born);
+    // The boards' own schematic army arrives as the opening array leaves, so the flat
+    // 8 x 8 this overture opens on carries exactly the pieces every other one does -
+    // and not, for a frame, both sets at once.
+    const float schematic = ease(clampf(cut * 3.0f, 0.0f, 1.0f));
+    for (int f = 0; f < N; ++f) {
+      TokenOpt o;
+      o.nx = N;
+      o.nz = N;
+      o.fade = born * schematic;
+      o.height = 0.8f;
+      addToken(s, bp, f, 0, kRoyal[f], true, o);
+      addToken(s, bp, f, N - 1, kRoyal[f], false, o);
+    }
+  }
+  if (grow < 0.3f) {
+    const Pos flat = flatBoard();
+    for (int f = 0; f < 8; ++f) {
+      for (const int r : {0, 1, 6, 7}) {
+        // The survivors have their own board above - except before the cut starts, where
+        // they have to be here or the flat 8 x 8 opens with a corner of its army
+        // missing, and handing over from another overture becomes a jump.
+        const bool doomed = !(f < N && r < N);
+        const float k = doomed ? cutFraction(N, f, r, cut)
+                               : 1.0f - ease(clampf(cut * 3.0f, 0.0f, 1.0f));
+        if (k <= 0.02f) continue;
+        TokenOpt o;
+        o.fade = k;
+        addToken(s, flat, f, r, (r == 1 || r == 6) ? 'P' : kBack[f], r <= 1, o);
+      }
+    }
+  }
+  for (const Board& b : boards) {
+    if (b.k == 0) continue;
+    const bool hasPrev = std::any_of(boards.begin(), boards.end(), [&](const Board& o) {
+      return o.k == b.k - 1 && o.l == b.l;
+    });
+    if (!hasPrev) continue;
+    const OvVec3 prev = originOf(b.k - 1, b.l);
+    const OvVec3 here = originOf(b.k, b.l);
+    OvTrail tr;
+    tr.colour = th.boneFaint;
+    tr.width = 1.3f;
+    tr.fade = 0.7f * bornOf(b.k, b.l);
+    tr.dashed = true;
+    tr.pts = {{prev.x + fi(N) * 0.5f + 0.2f, 0.2f, prev.z},
+              {here.x - fi(N) * 0.5f - 0.2f, 0.2f, here.z}};
+    s.trails.push_back(tr);
+  }
+  if (branch > 0.28f) {
+    const OvVec3 a = originOf(1, 0);
+    const OvVec3 b = originOf(1, 1);
+    const float s0 = ease(clampf((branch - 0.28f) / 0.34f, 0.0f, 1.0f));
+    OvTrail tr;
+    tr.colour = seamColour(th, 1, 2);
+    tr.width = 2.6f;
+    for (int i = 0; i <= 16; ++i) {
+      const float q = fi(i) / 16.0f * s0;
+      tr.pts.push_back({lerpf(a.x, b.x, q) - std::sin(q * kPi) * 2.4f,
+                        0.4f + std::sin(q * kPi) * 1.1f, lerpf(a.z, b.z, q)});
+    }
+    s.trails.push_back(tr);
+  }
+  s.caption = t < 0.16f   ? "cut, so seven boards will read"
+              : t < 0.22f ? "one board, centred"
+              : t < 0.46f ? "every half-move appends a board"
+              : t < 0.70f ? "going back makes a second timeline"
+                          : "the present is a column, not a board";
+  return s;
+}
+
+}  // namespace
+
+OvVec3 overtureSurfaceAt(app::Overture which, float u, float v) {
+  switch (which) {
+    case app::Overture::Cylinder: {
+      TubeOpt o;
+      o.th = kTau;
+      return tube(u, v, o);
+    }
+    case app::Overture::Torus:
+    case app::Overture::AtomicTorus: {
+      TubeOpt o;
+      o.th = kTau;
+      o.ph = kTau;
+      o.open = 2.2f;
+      return tube(u, v, o);
+    }
+    case app::Overture::Mobius:
+      return band(u, v, kTau, 1.0f);
+    case app::Overture::Klein:
+      return kleinSurf(u, v, kTau, 1.0f, kTau, 1.0f, 2.05f);
+    default:
+      return flatBoard()(u, v);
+  }
+}
+
+OvertureScene overtureScene(app::Overture which, float t, bool intro,
+                            const view::Theme& th) {
+  const float p = clampf(t, 0.0f, 1.0f);
+  OvertureScene out;
+  switch (which) {
+    case app::Overture::None:
+      return out;
+    case app::Overture::Standard:
+      out = sceneStandard(th, p, intro);
+      break;
+    case app::Overture::Cylinder:
+      out = sceneCylinder(th, p);
+      break;
+    case app::Overture::Torus:
+      out = sceneTorus(th, p);
+      break;
+    case app::Overture::Mobius:
+      out = sceneMobius(th, p);
+      break;
+    case app::Overture::Klein:
+      out = sceneKlein(th, p);
+      break;
+    case app::Overture::Mirrorbox:
+      out = sceneMirrorbox(th, p);
+      break;
+    case app::Overture::Cube5:
+      out = sceneCube5(th, p);
+      break;
+    case app::Overture::Hyper4:
+      out = sceneHyper4(th, p);
+      break;
+    case app::Overture::Atomic:
+      out = sceneAtomic(th, p);
+      break;
+    case app::Overture::AtomicTorus:
+      out = sceneAtomicTorus(th, p);
+      break;
+    case app::Overture::MustCapture:
+      out = sceneMustCapture(th, p);
+      break;
+    case app::Overture::Multiverse:
+      out = sceneMultiverse(th, p);
+      break;
+  }
+  // Settle the camera onto the shared opening pose as t reaches 0. Applied here rather
+  // than left to each scene, because "every overture opens on the same picture" is a
+  // property of the set, not of any one of them, and a scene cannot be trusted to
+  // remember a rule that is about its neighbours.
+  const float settle = ease(seg(p, 0.0f, 0.12f));
+  // And nothing is drawn *on* that opening board. A seam rim, a board outline, a wall -
+  // each is true of its own variant and of no other, so any of them present at t = 0
+  // makes the shared picture not shared. Faded in centrally for the same reason the
+  // camera is: it is a rule about the set, and a scene cannot be trusted to remember a
+  // rule about its neighbours.
+  for (OvTrail& tr : out.trails) tr.fade *= settle;
+  for (OvBurst& b : out.bursts) b.fade *= settle;
+  out.cam.yaw = lerpf(kOpenCam.yaw, out.cam.yaw, settle);
+  out.cam.elev = lerpf(kOpenCam.elev, out.cam.elev, settle);
+  out.cam.reach = lerpf(kOpenCam.reach, out.cam.reach, settle);
+  out.cam.persp = lerpf(kOpenCam.persp, out.cam.persp, settle);
+  return out;
+}
+
+// ===========================================================================
+// Drawing.
+//
+// One sorted list, far to near. Separate passes per kind would let a piece on the far
+// side of a torus draw over a cell on the near side, which is exactly the class of bug
+// the lattice decoration had before it started sorting.
+// ===========================================================================
+namespace {
+
+view::Rgba toneColour(const view::Theme& th, OvTone tone) {
+  switch (tone) {
+    case OvTone::Light:
+      return th.boardLight;
+    case OvTone::Dark:
+      return th.boardDark;
+    case OvTone::Lit:
+      return th.ember;
+    case OvTone::Scorch:
+      return th.blood;
+    case OvTone::Mirror:
+      return th.mirrorEdge;
+    // A wash rather than a hue: the cell is still itself, just out of play.
+    case OvTone::Scrim:
+      return th.light ? view::Rgba::hex(0xFFFFFF) : view::Rgba::hex(0x000000);
+  }
+  return th.boardLight;
+}
+
+view::Rgba shadeBy(view::Rgba c, float f) {
+  c.r = clampf(c.r * f, 0.0f, 1.0f);
+  c.g = clampf(c.g * f, 0.0f, 1.0f);
+  c.b = clampf(c.b * f, 0.0f, 1.0f);
+  return c;
+}
+
+/// Two-sided, because a glued board shows its underside constantly and an unlit face
+/// there reads as a hole rather than as a surface.
+float faceShade(const OvVec3 p[4]) {
+  const OvVec3 n = normalise(cross(sub(p[1], p[0]), sub(p[2], p[0])));
+  const OvVec3 light = normalise({-0.35f, 0.9f, -0.25f});
+  const float d = std::abs(n.x * light.x + n.y * light.y + n.z * light.z);
+  return 0.74f + 0.40f * d;
+}
+
+Archetype archetypeOf(char glyph) {
+  switch (glyph) {
+    case 'P':
+      return Archetype::Dome;
+    case 'R':
+      return Archetype::Tower;
+    case 'N':
+      return Archetype::Wedge;
+    case 'B':
+      return Archetype::Spire;
+    case 'Q':
+      return Archetype::Crown;
+    case 'K':
+      return Archetype::Monolith;
+    case 'U':
+      return Archetype::Horn;
+    default:
+      return Archetype::Tower;
+  }
+}
+
+/// One piece icon, filled then outlined. The outline is what keeps a pale piece visible
+/// on a pale cell, and it has to be stroked after the fill or it is lost under it.
+void drawIcon(ImDrawList* dl, IconStyle style, Archetype shape, ImVec2 centre, float size,
+              bool mirrored, ImU32 fill, ImU32 line) {
+  const PieceIcon art = pieceIcon(style, shape);
+  const float k = size / 100.0f;
+  const float sx = mirrored ? -k : k;
+  for (const IconPoly& poly : art.fills) {
+    if (poly.size() < 3) continue;
+    dl->PathClear();
+    for (const IconPoint& p : poly) {
+      dl->PathLineTo(ImVec2(centre.x + (p.x - 50.0f) * sx, centre.y + (p.y - 50.0f) * k));
+    }
+    const ImVector<ImVec2> path = dl->_Path;
+    dl->PathFillConcave(fill);
+    dl->_Path = path;
+    dl->PathStroke(line, ImDrawFlags_Closed, std::max(1.0f, size * 0.022f));
+  }
+}
+
+/// A dashed polyline. ImDrawList has no dash, and the w-edges of a hypercube and the
+/// connectors between boards both need to read as "not really there".
+void addDashed(ImDrawList* dl, const ImVec2* pts, int n, ImU32 col, float width) {
+  constexpr float kOn = 5.0f;
+  constexpr float kOff = 4.0f;
+  float carried = 0.0f;
+  bool on = true;
+  for (int i = 0; i + 1 < n; ++i) {
+    ImVec2 a = pts[i];
+    const ImVec2 b = pts[i + 1];
+    float len = std::hypot(b.x - a.x, b.y - a.y);
+    if (len < 1e-4f) continue;
+    const float ux = (b.x - a.x) / len;
+    const float uy = (b.y - a.y) / len;
+    while (len > 0.0f) {
+      const float want = (on ? kOn : kOff) - carried;
+      const float step = std::min(want, len);
+      const ImVec2 e(a.x + ux * step, a.y + uy * step);
+      if (on) dl->AddLine(a, e, col, width);
+      a = e;
+      len -= step;
+      carried += step;
+      if (carried >= (on ? kOn : kOff) - 1e-4f) {
+        on = !on;
+        carried = 0.0f;
+      }
+    }
+  }
+}
+
+}  // namespace
+
+void drawOverture(ImDrawList* dl, const OvertureScene& scene, ImVec2 min, ImVec2 max,
+                  const view::Theme& theme, IconStyle iconStyle, float zoom,
+                  float alpha) {
+  // An overture on its way out must leave no geometry behind, the same contract every
+  // decoration keeps.
+  if (alpha <= 0.001f) return;
+
+  const ImVec2 centre((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
+  const float paneW = max.x - min.x;
+  const float paneH = max.y - min.y;
+  if (std::min(paneW, paneH) <= 1.0f) return;
+  const float cy = std::cos(scene.cam.yaw);
+  const float sy = std::sin(scene.cam.yaw);
+  const float ce = std::cos(scene.cam.elev);
+  const float se = std::sin(scene.cam.elev);
+
+  struct Shot {
+    ImVec2 at;
+    float depth{0};
+    float k{1};
+  };
+  // Y is up and `elev` is the angle above the board, so the far rank is both higher on
+  // screen and deeper in the sort - which is the pair of facts a flat drawing of a solid
+  // has to keep consistent.
+  const auto raw = [&](const OvVec3& p) -> Shot {
+    const float x1 = p.x * cy + p.z * sy;
+    const float z1 = -p.x * sy + p.z * cy;
+    const float y2 = p.y * ce + z1 * se;
+    const float z2 = -p.y * se + z1 * ce;
+    const float k = 1.0f / std::max(0.2f, 1.0f + z2 * scene.cam.persp);
+    return {ImVec2(x1 * k, -y2 * k), z2, k};
+  };
+
+  // Fit by measuring, not by guessing a constant - the lesson the lattice decoration
+  // already learned. A shape under perspective is a very different size on screen from
+  // the same shape flat, so a per-overture radius that suits a donut runs a Klein bottle
+  // off the top of the pane. Measured on the cells only: a detonation throws pieces
+  // clear of the board on purpose, and letting that shrink the board would be the tail
+  // wagging the dog.
+  float extX = 1e-3f;
+  float extY = 1e-3f;
+  for (const OvQuad& q : scene.quads) {
+    for (const OvVec3& p : q.p) {
+      const Shot sh = raw(p);
+      extX = std::max(extX, std::abs(sh.at.x));
+      extY = std::max(extY, std::abs(sh.at.y));
+    }
+  }
+  // A little under half would fill the pane; the object sits at 70% of that instead, so
+  // it reads as something standing beside the menu rather than as the screen's subject -
+  // and so what the fit leaves out, a flung piece or a shockwave ring, still has
+  // somewhere to go.
+  constexpr float kFill = 0.40f * 0.70f;
+  const float scale = std::min(paneW * kFill / extX, paneH * kFill / extY) * zoom;
+  const auto project = [&](const OvVec3& p) -> Shot {
+    // `raw` has already flipped y into screen space - adding here rather than
+    // subtracting. Negating twice turns the board upside down, which does not look like
+    // a bug so much as like standing under the board: the far edge comes out wider than
+    // the near one and the whole trapezoid is inverted.
+    const Shot sh = raw(p);
+    return {ImVec2(centre.x + sh.at.x * scale, centre.y + sh.at.y * scale), sh.depth,
+            sh.k};
+  };
+
+  enum class Kind : std::uint8_t { Quad, Token, Trail, Burst };
+  struct Item {
+    float depth{0};
+    Kind kind{Kind::Quad};
+    int index{0};
+  };
+  std::vector<Item> items;
+  items.reserve(scene.quads.size() + scene.tokens.size() + scene.trails.size() +
+                scene.bursts.size());
+
+  std::vector<ImVec2> quadPts(scene.quads.size() * 4);
+  for (std::size_t i = 0; i < scene.quads.size(); ++i) {
+    float d = 0.0f;
+    for (int j = 0; j < 4; ++j) {
+      const Shot sh = project(scene.quads[i].p[j]);
+      quadPts[i * 4 + static_cast<std::size_t>(j)] = sh.at;
+      d += sh.depth;
+    }
+    items.push_back({d * 0.25f, Kind::Quad, static_cast<int>(i)});
+  }
+  struct TokenShot {
+    ImVec2 at;
+    float size{0};
+  };
+  std::vector<TokenShot> tokenShots(scene.tokens.size());
+  std::vector<Item> tokenItems;
+  tokenItems.reserve(scene.tokens.size());
+  for (std::size_t i = 0; i < scene.tokens.size(); ++i) {
+    const OvToken& tk = scene.tokens[i];
+    // Centred on the cell it stands on, not floated above it: a piece and its square
+    // are the same square, and an icon nudged along the normal reads as hovering - and
+    // on a steeply-seen board it drifts onto the neighbouring rank entirely.
+    const Shot base = project(tk.at);
+    tokenShots[i] = {base.at, std::max(4.0f, scale * base.k * 0.95f * tk.height)};
+    tokenItems.push_back({base.depth, Kind::Token, static_cast<int>(i)});
+  }
+  std::vector<std::vector<ImVec2>> trailPts(scene.trails.size());
+  for (std::size_t i = 0; i < scene.trails.size(); ++i) {
+    float d = 1e9f;
+    trailPts[i].reserve(scene.trails[i].pts.size());
+    for (const OvVec3& p : scene.trails[i].pts) {
+      const Shot sh = project(p);
+      trailPts[i].push_back(sh.at);
+      d = std::min(d, sh.depth);
+    }
+    items.push_back({d - 0.03f, Kind::Trail, static_cast<int>(i)});
+  }
+  std::vector<Shot> burstShots(scene.bursts.size());
+  for (std::size_t i = 0; i < scene.bursts.size(); ++i) {
+    burstShots[i] = project(scene.bursts[i].at);
+    items.push_back({burstShots[i].depth - 0.04f, Kind::Burst, static_cast<int>(i)});
+  }
+
+  // Surfaces first, then pieces. Depth alone is not enough: a cell of the rank in front
+  // is nearer than the piece behind it and would be drawn over its base, so a piece
+  // ends up sliced by the board it is standing on. Pieces are the subject, so they go
+  // on top of every surface and are sorted only against each other.
+  std::sort(items.begin(), items.end(),
+            [](const Item& a, const Item& b) { return a.depth > b.depth; });
+  std::sort(tokenItems.begin(), tokenItems.end(),
+            [](const Item& a, const Item& b) { return a.depth > b.depth; });
+  items.insert(items.end(), tokenItems.begin(), tokenItems.end());
+
+  // Cells are drawn without anti-aliased fill. A curved surface subdivides each cell so
+  // it can bend, and an anti-aliased edge on every sub-quad draws a faint seam inside
+  // the cell - a grid the board does not have, and a difference between a subdivided
+  // surface and a flat one that should not exist. Restored before returning: the flag
+  // belongs to the whole draw list, not to this object.
+  const ImDrawListFlags savedFlags = dl->Flags;
+  dl->Flags &= ~static_cast<ImDrawListFlags>(ImDrawListFlags_AntiAliasedFill);
+
+  for (const Item& it : items) {
+    const auto i = static_cast<std::size_t>(it.index);
+    switch (it.kind) {
+      case Kind::Quad: {
+        const OvQuad& q = scene.quads[i];
+        const bool flatFill = q.tone == OvTone::Scrim || q.tone == OvTone::Mirror;
+        const view::Rgba base = toneColour(theme, q.tone);
+        const view::Rgba col = flatFill ? base : shadeBy(base, faceShade(q.p));
+        const ImVec2* p = &quadPts[i * 4];
+        // Cells are drawn through. A closed surface hides half of itself, and the half
+        // it hides is usually the half that explains the gluing - the far side of a
+        // torus, the cells a Klein bottle passes through itself to reach. Sorting back
+        // to front means the blend is right; the transparency is what makes the shape
+        // legible rather than a silhouette.
+        const float sheer = flatFill ? 1.0f : 0.72f;
+        dl->AddQuadFilled(p[0], p[1], p[2], p[3],
+                          widgets::u32(col, q.fade * alpha * sheer));
+        if (q.tone == OvTone::Mirror) {
+          // A mirror gets no hue at all - there is nothing on the other side of it - so
+          // it is drawn as silvered metal, with a bright edge to say it is a surface.
+          dl->AddQuad(p[0], p[1], p[2], p[3],
+                      widgets::u32(theme.mirrorEdge, 0.8f * q.fade * alpha), 1.4f);
+        }
+        break;
+      }
+      case Kind::Token: {
+        const OvToken& tk = scene.tokens[i];
+        const view::Rgba fill = tk.white ? theme.whitePiece : theme.blackPiece;
+        const view::Rgba line = tk.white ? theme.blackPiece : theme.whitePiece;
+        drawIcon(dl, iconStyle, archetypeOf(tk.glyph), tokenShots[i].at,
+                 tokenShots[i].size, tk.mirrored,
+                 widgets::u32(fill, 0.97f * tk.fade * alpha),
+                 widgets::u32(line, 0.55f * tk.fade * alpha));
+        break;
+      }
+      case Kind::Trail: {
+        const OvTrail& tr = scene.trails[i];
+        if (trailPts[i].size() < 2) break;
+        const ImU32 col = widgets::u32(tr.colour, tr.fade * alpha);
+        if (tr.dashed) {
+          addDashed(dl, trailPts[i].data(), static_cast<int>(trailPts[i].size()), col,
+                    tr.width);
+        } else {
+          dl->AddPolyline(trailPts[i].data(), static_cast<int>(trailPts[i].size()), col,
+                          ImDrawFlags_None, tr.width);
+        }
+        break;
+      }
+      case Kind::Burst: {
+        const OvBurst& b = scene.bursts[i];
+        const float r = std::max(2.0f, b.radius * burstShots[i].k * scale);
+        const ImU32 col = widgets::u32(b.colour, b.fade * alpha);
+        const ImVec2 at = burstShots[i].at;
+        if (b.cross) {
+          dl->AddLine(ImVec2(at.x - r, at.y - r), ImVec2(at.x + r, at.y + r), col, 2.4f);
+          dl->AddLine(ImVec2(at.x + r, at.y - r), ImVec2(at.x - r, at.y + r), col, 2.4f);
+        } else if (r >= 0.5f) {
+          // An explicit segment count, never ImGui's automatic one: that path divides
+          // by a tessellation table which is zero-filled until NewFrame has run, so a
+          // headless draw list divides by zero. Stating the count also keeps the vertex
+          // count of a given frame fixed, which is what a reproducible screenshot needs.
+          const int segs = std::clamp(12 + static_cast<int>(r * 0.4f), 12, 64);
+          dl->AddCircle(at, r, col, segs, std::max(1.2f, 3.0f - b.radius * 0.2f));
+        }
+        break;
+      }
+    }
+  }
+  dl->Flags = savedFlags;
+}
+
+}  // namespace cb::render

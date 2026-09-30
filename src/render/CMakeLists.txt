@@ -53,7 +53,8 @@ find_package(imgui CONFIG)
 if(SDL3_FOUND)
   list(APPEND CB_RENDER_SOURCES window.cpp)
   if(imgui_FOUND)
-    list(APPEND CB_RENDER_SOURCES ui.cpp ui_menus.cpp ui_widgets.cpp deco.cpp)
+    list(APPEND CB_RENDER_SOURCES ui.cpp ui_menus.cpp ui_widgets.cpp deco.cpp
+                                 overture_scene.cpp)
   endif()
 endif()
 

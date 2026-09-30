@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "app/editor.hpp"
+#include "app/overture.hpp"
 #include "app/session.hpp"
 #include "app/settings.hpp"
 
@@ -127,6 +128,12 @@ class Shell {
     return editorVariant_;
   }
 
+  /// The library screen's overture: which variant's animation is playing, where it is in
+  /// its cycle, and what is queued behind it. Held here because it is a transition like
+  /// the screens are, and is tested the same way - with no window.
+  [[nodiscard]] OverturePlayer& overtures() noexcept { return overtures_; }
+  [[nodiscard]] const OverturePlayer& overtures() const noexcept { return overtures_; }
+
   void pause();
   void resume();
 
@@ -148,6 +155,7 @@ class Shell {
   VariantLoader loader_;
   VariantSourceLoader sourceLoader_;
   VariantPathResolver pathResolver_;
+  OverturePlayer overtures_;
   std::unique_ptr<Editor> editor_;
   std::string editorVariant_;
   std::filesystem::path editorPath_;

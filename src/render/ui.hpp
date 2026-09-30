@@ -100,6 +100,16 @@ class Ui {
   /// the cells it can reach marked quiet or capture. Reads the editor's atoms and walks
   /// them, so it shows the real movement rather than a picture of it.
   void drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& max);
+  /// The library's object: the selected variant's overture, in the half the
+  /// decoration would otherwise occupy.
+  void drawOvertureObject(app::Shell& shell, const ImVec2& min, const ImVec2& max,
+                          float zoom, float alpha);
+  /// Let the player turn whatever object the screen is showing, by dragging it.
+  ///
+  /// The turn is an *offset* on the object's own animation rather than a replacement, so
+  /// a manifold someone has taken hold of keeps turning under their hand instead of
+  /// freezing. Kept across screens, because it reads as one camera on one object.
+  void updateObjectDrag(app::Shell& shell, const ImVec2& min, const ImVec2& max);
   /// A red glow at the screen's edges while the side to move is in check, on every
   /// screen: the position is in trouble whether or not the board is the thing showing.
   void drawCheckEdges(app::Shell& shell);
@@ -149,6 +159,9 @@ class Ui {
   /// screen arrives; the menu is scaled and faded along it, which is as close to a
   /// camera push as a 2-D draw list gets.
   float clock_{0.0f};
+  /// The last frame's dt, so `build` can move the overture on. `tick` is the only place
+  /// that knows about time, and the overture is advanced where the shell is to hand.
+  float lastDt_{0.0f};
   float enter_{1.0f};
   int lastScreen_{-1};
   /// Which piece the piece designer has selected. Editor state, not shell state: the
@@ -181,6 +194,11 @@ class Ui {
   /// Which piece the piece-moves reference shows on its left. View state, like the
   /// editor's selected piece.
   int pieceMovesPick_{0};
+  /// How far the player has turned the menu's object, and whether they are turning it
+  /// now. View state: which way an ornament faces is not something the shell decides.
+  float objectYaw_{0.0f};
+  float objectElev_{0.0f};
+  bool objectDrag_{false};
   /// The decoration of the screen being left, and which way the camera is going. One
   /// clock (`enter_`) drives the arriving object, the leaving ghost, the menu pane and
   /// the field, so none of them can disagree about where the camera is.

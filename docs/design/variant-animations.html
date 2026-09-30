@@ -1,0 +1,1882 @@
+<title>Variant Overtures</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* ---------------------------------------------------------------------------
+   Variant Overtures - animation spec for the New Game screen.
+
+   The palette is not invented here. It is view::Theme, transcribed: the light
+   theme is manifold(), the dark theme is console(). Both are in
+   src/view/theme.hpp and both are the game's, so a colour approved on this
+   page is a colour that already exists in the build.
+   --------------------------------------------------------------------------- */
+:root {
+  /* manifold() - the shipped look: a light instrument, a dark board. */
+  --ink:        #B4C4DB;
+  --soot:       #E6EAF0;
+  --panel:      #EEF1F6;
+  --panel-hi:   #D2D9E4;
+  --rule:       #B4BECD;
+  --bone:       #0E121A;
+  --bone-dim:   #39414F;
+  --bone-faint: #737E90;
+  --ember:      #2E4BFF;
+  --ember-deep: #6F4FF2;
+  --rift:       #1C7FA8;
+  --rift-deep:  #0E4A63;
+  --board-light:#98A4BE;
+  --board-dark: #59637E;
+  --board-rim:  #39415A;
+  --white-piece:#F6F9FF;
+  --black-piece:#10141E;
+  --moss:       #17937A;
+  --blood:      #D24A6A;
+  --mirror:     #FFFFFF;
+  --d-easy:     #3FB950;
+  --d-medium:   #E3B341;
+  --d-hard:     #E5534B;
+  --d-other:    #2DD4BF;
+
+  --shadow: 0 1px 2px rgba(14,18,26,.06), 0 8px 24px -12px rgba(14,18,26,.18);
+  --stage-bg: #DCE3EC;
+
+  --f-display: "Chakra Petch", "DejaVu Sans Condensed", sans-serif;
+  --f-body: "IBM Plex Sans", "DejaVu Sans", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "DejaVu Sans Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    /* console() - the older candlelit palette, kept because a struct that only
+       ever holds one value is not really data. */
+    --ink:        #0D0B0A;
+    --soot:       #17130F;
+    --panel:      #1E1813;
+    --panel-hi:   #2A211A;
+    --rule:       #3A2E24;
+    --bone:       #E8DCC4;
+    --bone-dim:   #A99A80;
+    --bone-faint: #6F6353;
+    --ember:      #F0A23C;
+    --ember-deep: #A5601B;
+    --rift:       #5FE3E0;
+    --rift-deep:  #1E6F70;
+    --board-light:#A98F68;
+    --board-dark: #77614A;
+    --board-rim:  #241C15;
+    --white-piece:#E8DCC4;
+    --black-piece:#342A20;
+    --moss:       #8FB65C;
+    --blood:      #D4483B;
+    --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 28px -14px rgba(0,0,0,.7);
+    --stage-bg: #100D0B;
+  }
+}
+:root[data-theme="dark"] {
+  --ink:        #0D0B0A;
+  --soot:       #17130F;
+  --panel:      #1E1813;
+  --panel-hi:   #2A211A;
+  --rule:       #3A2E24;
+  --bone:       #E8DCC4;
+  --bone-dim:   #A99A80;
+  --bone-faint: #6F6353;
+  --ember:      #F0A23C;
+  --ember-deep: #A5601B;
+  --rift:       #5FE3E0;
+  --rift-deep:  #1E6F70;
+  --board-light:#A98F68;
+  --board-dark: #77614A;
+  --board-rim:  #241C15;
+  --white-piece:#E8DCC4;
+  --black-piece:#342A20;
+  --moss:       #8FB65C;
+  --blood:      #D4483B;
+  --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 28px -14px rgba(0,0,0,.7);
+  --stage-bg: #100D0B;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--bone);
+  font-family: var(--f-body);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1140px; margin: 0 auto; padding: 0 24px 96px; }
+
+/* ---- type ---------------------------------------------------------------- */
+h1, h2, h3, h4 { font-family: var(--f-display); font-weight: 600; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(30px, 4.4vw, 46px); letter-spacing: -.01em; line-height: 1.05; }
+h2 { font-size: 23px; letter-spacing: .005em; }
+h3 { font-size: 17px; }
+p { margin: 0; max-width: 66ch; }
+a { color: var(--ember); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+code, .mono { font-family: var(--f-mono); font-size: .88em; font-variant-numeric: tabular-nums; }
+.eyebrow {
+  font-family: var(--f-display); font-size: 11px; font-weight: 600;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--bone-faint);
+}
+
+/* ---- masthead ------------------------------------------------------------ */
+header.top { padding: 56px 0 30px; }
+header.top .eyebrow { display: block; margin-bottom: 14px; }
+header.top h1 { max-width: 20ch; }
+.lede { margin-top: 18px; font-size: 17.5px; color: var(--bone-dim); max-width: 60ch; }
+.meta {
+  margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--rule);
+  display: flex; flex-wrap: wrap; gap: 8px 34px;
+  font-family: var(--f-mono); font-size: 12px; color: var(--bone-faint);
+}
+.meta b { color: var(--bone-dim); font-weight: 500; }
+
+/* ---- the hero: the New Game screen, working ------------------------------ */
+.screen {
+  display: grid; grid-template-columns: 252px 1fr; gap: 0;
+  background: var(--panel); border: 1px solid var(--rule);
+  box-shadow: var(--shadow); overflow: hidden;
+}
+@media (max-width: 800px) { .screen { grid-template-columns: 1fr; } }
+
+.library { border-right: 1px solid var(--rule); padding: 16px 0 12px; background: var(--panel); }
+@media (max-width: 800px) { .library { border-right: 0; border-bottom: 1px solid var(--rule); } }
+.library .eyebrow { padding: 0 16px 10px; display: block; }
+.lib-group {
+  padding: 12px 16px 5px; font-family: var(--f-mono); font-size: 10.5px;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--bone-faint);
+}
+.lib-entry {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 7px 16px; border: 0; background: none; cursor: pointer;
+  font-family: var(--f-display); font-size: 14px; font-weight: 500;
+  letter-spacing: .03em; text-transform: uppercase; color: var(--bone-dim);
+  text-align: left;
+}
+.lib-entry:hover { background: var(--panel-hi); color: var(--bone); }
+.lib-entry .dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--d); }
+.lib-entry .q {
+  margin-left: auto; font-family: var(--f-mono); font-size: 9.5px; letter-spacing: .1em;
+  color: var(--ember); opacity: 0;
+}
+.lib-entry[data-queued="1"] .q { opacity: 1; }
+.lib-entry[aria-current="true"] {
+  background: var(--panel-hi); color: var(--bone);
+  box-shadow: inset 2px 0 0 var(--ember);
+}
+.lib-entry:focus-visible { outline: 2px solid var(--ember); outline-offset: -2px; }
+
+.stage-col { display: flex; flex-direction: column; min-width: 0; }
+.stage { position: relative; background: var(--stage-bg); aspect-ratio: 16 / 10; }
+.stage svg { display: block; width: 100%; height: 100%; }
+.caption {
+  position: absolute; left: 18px; bottom: 16px; right: 18px; pointer-events: none;
+  display: flex; align-items: baseline; gap: 12px;
+}
+.caption .name {
+  font-family: var(--f-display); font-size: 19px; font-weight: 700;
+  letter-spacing: .07em; text-transform: uppercase; color: var(--ember);
+}
+.caption .phase { font-family: var(--f-mono); font-size: 11.5px; color: var(--bone-dim); }
+.blurb {
+  position: absolute; left: 18px; top: 16px; right: 18px; pointer-events: none;
+  font-size: 13px; color: var(--bone-dim); max-width: 46ch;
+}
+
+.transport {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 11px 18px; border-top: 1px solid var(--rule); background: var(--panel);
+}
+.transport button {
+  font-family: var(--f-display); font-size: 12px; font-weight: 600; letter-spacing: .1em;
+  text-transform: uppercase; padding: 6px 13px; cursor: pointer;
+  color: var(--bone); background: var(--panel-hi);
+  border: 1px solid var(--rule);
+}
+.transport button:hover { border-color: var(--ember); color: var(--ember); }
+.transport button:focus-visible { outline: 2px solid var(--ember); outline-offset: 1px; }
+.transport label { font-family: var(--f-mono); font-size: 11px; color: var(--bone-faint); }
+.transport input[type="range"] { accent-color: var(--ember); }
+#tRange { flex: 1; min-width: 150px; }
+.state {
+  font-family: var(--f-mono); font-size: 11px; color: var(--bone-faint);
+  white-space: nowrap;
+}
+.state b { color: var(--ember); font-weight: 500; }
+
+/* ---- prose sections ------------------------------------------------------ */
+section { padding-top: 66px; }
+section > h2 { margin-bottom: 6px; }
+section > .sub { color: var(--bone-faint); font-size: 14px; margin-bottom: 26px; }
+
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 34px; }
+@media (max-width: 760px) { .two { grid-template-columns: 1fr; gap: 26px; } }
+
+.contract {
+  font-family: var(--f-mono); font-size: 12.5px; line-height: 1.75;
+  background: var(--panel); border: 1px solid var(--rule);
+  border-left: 3px solid var(--ember);
+  padding: 16px 18px; overflow-x: auto; white-space: pre;
+  color: var(--bone-dim);
+}
+.contract em { color: var(--ember); font-style: normal; }
+
+ol.machine { margin: 0; padding-left: 0; list-style: none; counter-reset: st; }
+ol.machine li {
+  display: grid; grid-template-columns: auto 1fr; gap: 14px;
+  padding: 11px 0; border-top: 1px solid var(--rule);
+}
+ol.machine li:first-child { border-top: 0; }
+ol.machine .st {
+  font-family: var(--f-mono); font-size: 11px; letter-spacing: .06em;
+  color: var(--ember); padding-top: 3px; white-space: nowrap;
+}
+ol.machine p { font-size: 14px; color: var(--bone-dim); }
+ol.machine strong { color: var(--bone); font-weight: 600; }
+
+/* ---- variant spec cards -------------------------------------------------- */
+.card {
+  border-top: 1px solid var(--rule); padding: 30px 0;
+  display: grid; grid-template-columns: 1fr 336px; gap: 34px; align-items: start;
+}
+@media (max-width: 860px) { .card { grid-template-columns: 1fr; gap: 20px; } }
+.card-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.card-head h3 {
+  font-size: 20px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+}
+.card-head .diff {
+  font-family: var(--f-mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+  padding: 2px 7px; color: var(--bone); background: var(--d);
+}
+.card-head .dims { font-family: var(--f-mono); font-size: 11px; color: var(--bone-faint); }
+.card .thesis { margin: 12px 0 18px; font-size: 15px; }
+.card .thesis b { color: var(--ember); font-weight: 600; }
+
+table.phases { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table.phases th {
+  text-align: left; font-family: var(--f-mono); font-weight: 500; font-size: 10px;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--bone-faint);
+  padding: 0 10px 6px 0; border-bottom: 1px solid var(--rule);
+}
+table.phases td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+table.phases td.t { font-family: var(--f-mono); font-size: 11.5px; color: var(--ember); white-space: nowrap; }
+table.phases td.lb {
+  font-family: var(--f-display); font-weight: 600; font-size: 13px; letter-spacing: .04em;
+  text-transform: uppercase; white-space: nowrap;
+}
+table.phases td.ds { color: var(--bone-dim); }
+
+.note {
+  margin-top: 16px; padding: 12px 14px; background: var(--panel);
+  border: 1px solid var(--rule); font-size: 13px; color: var(--bone-dim);
+}
+.note b { color: var(--bone); font-weight: 600; font-family: var(--f-display); letter-spacing: .03em; }
+.note.warm { border-left: 3px solid var(--blood); }
+.note.cold { border-left: 3px solid var(--rift); }
+
+.frames { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.frames figure { margin: 0; }
+.frames .box { background: var(--stage-bg); border: 1px solid var(--rule); aspect-ratio: 1 / 1; }
+.frames svg { display: block; width: 100%; height: 100%; }
+.frames figcaption {
+  font-family: var(--f-mono); font-size: 10px; color: var(--bone-faint);
+  padding-top: 4px; text-align: center;
+}
+
+.landing { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+.landing div { background: var(--panel); padding: 13px 16px; display: grid; grid-template-columns: 200px 1fr; gap: 16px; }
+@media (max-width: 700px) { .landing div { grid-template-columns: 1fr; gap: 4px; } }
+.landing .k { font-family: var(--f-mono); font-size: 12px; color: var(--ember); }
+.landing .v { font-size: 14px; color: var(--bone-dim); }
+.landing .v code { color: var(--bone); }
+
+footer { margin-top: 70px; padding-top: 20px; border-top: 1px solid var(--rule); }
+footer p { font-size: 13px; color: var(--bone-faint); }
+
+@media (prefers-reduced-motion: reduce) { .stage { }  }
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <span class="eyebrow">ChessBox · M7 · New Game screen</span>
+  <h1>Variant Overtures</h1>
+  <p class="lede">Twelve short animations, one per variant. Each opens on the same
+  8&nbsp;×&nbsp;8 board every player already knows, then becomes the thing that makes
+  its variant different — and then takes it all back, because the only way out of one
+  overture is the way in.</p>
+  <div class="meta">
+    <span><b>Status</b> specification · for approval</span>
+    <span><b>Lands in</b> <code>src/render/deco.cpp</code></span>
+    <span><b>Palette</b> <code>view::Theme</code>, unmodified</span>
+    <span><b>Excluded</b> torus3d · t6 · charged</span>
+  </div>
+</header>
+
+<!-- ------------------------------------------------------------------ hero -->
+<div class="screen">
+  <div class="library">
+    <span class="eyebrow">Library</span>
+    <div id="libList"></div>
+  </div>
+  <div class="stage-col">
+    <div class="stage">
+      <svg id="heroSvg" viewBox="-320 -200 640 400" aria-label="variant geometry animation"><g id="heroG"></g></svg>
+      <div class="blurb" id="heroBlurb"></div>
+      <div class="caption">
+        <span class="name" id="heroName"></span>
+        <span class="phase" id="heroPhase"></span>
+      </div>
+    </div>
+    <div class="transport">
+      <button id="playBtn" type="button">Pause</button>
+      <label for="tRange">t</label>
+      <input id="tRange" type="range" min="0" max="1000" value="0" aria-label="animation progress">
+      <span class="state mono" id="tRead">0.000</span>
+      <label for="spdRange">speed</label>
+      <input id="spdRange" type="range" min="25" max="250" value="100" style="width:80px" aria-label="playback speed">
+      <button id="introBtn" type="button">Replay intro</button>
+      <span class="state">state <b id="stRead">forward</b> · queued <b id="qRead">—</b></span>
+    </div>
+  </div>
+</div>
+
+<!-- -------------------------------------------------------------- contract -->
+<section id="contract">
+  <h2>One rule makes the rest of this cheap</h2>
+  <p class="sub">Everything below follows from it, including reverse playback, which
+  does not exist as code.</p>
+  <div class="two">
+    <div>
+      <p>An overture is <strong>a pure function of progress</strong>. Given a variant and
+      a number <code>t</code> between 0 and 1, it returns a complete scene — every cell's
+      four corners, every piece's position, every trail and flash. It reads no clock,
+      keeps no state, and remembers nothing about the frame before it.</p>
+      <p style="margin-top:14px">Two things fall out for free. <strong>Reverse is
+      <code>t</code> counting down</strong>; there is no second animation to write, and
+      no way for the two directions to disagree. And <strong>a screenshot is
+      reproducible</strong>, which matters here more than it sounds — see the landing
+      notes at the foot of this page.</p>
+      <div class="note"><b>Why not keyframes</b> — a keyframed timeline has to be
+      unwound by replaying it backwards, and every piece of state it accumulated on the
+      way in (a spawned particle, a removed cell) has to be undone in the right order.
+      Pure <code>t</code> has no way in and no way out, so it cannot get that wrong.</div>
+    </div>
+    <div>
+      <div class="contract">Overture = {
+  <em>name</em>    : "torus"
+  <em>camera</em>  : t -> { yaw, elev, dist }
+  <em>scene</em>   : t -> {
+      quads  : [ { p[4], tone, fade } ]
+      pieces : [ { at, normal, glyph, side, fade } ]
+      trails : [ { pts[], tone } ]
+      bursts : [ { at, radius, fade } ]
+      caption: "the tube closes into a ring"
+  }
+}
+
+<em>frame(v, t)</em> is total.
+No t is a special case.
+No frame reads the frame before it.</div>
+      <div class="note cold" style="margin-top:14px"><b>Dwell</b> — the cycle is not
+      0&nbsp;→&nbsp;1&nbsp;→&nbsp;0 at constant speed. It holds <b>700&nbsp;ms</b> at
+      <code>t = 1</code> so the formed shape can be read, and <b>250&nbsp;ms</b> at
+      <code>t = 0</code> so the 8&nbsp;×&nbsp;8 registers as the common ground rather
+      than as a frame in passing. Forward and reverse each run <b>2.4&nbsp;s</b>.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ----------------------------------------------------------------- queue -->
+<section id="queue">
+  <h2>The queue: an overture is never cut off</h2>
+  <p class="sub">Click through the library above while something is mid-flight — the
+  formed shape unwinds first, and only then does the next one begin.</p>
+  <div class="two">
+    <ol class="machine">
+      <li><span class="st">SETTLED</span><p><strong>t = 0, flat.</strong> The 8 × 8 board,
+      the state every overture passes through. A selection made here starts immediately.</p></li>
+      <li><span class="st">FORWARD</span><p><strong>t climbing.</strong> A selection made
+      here does <em>not</em> interrupt and does not redirect: it is stored as
+      <code>pending</code>, and the shape on screen carries on forming as if nothing had
+      happened.</p></li>
+      <li><span class="st">HELD</span><p><strong>t = 1, dwelling.</strong> Same as
+      FORWARD: store it and let the dwell finish.</p></li>
+      <li><span class="st">REVERSE</span><p><strong>t falling.</strong> A selection here
+      only <em>replaces</em> <code>pending</code>. The shape on screen is already on its
+      way home; nothing needs to change but the destination.</p></li>
+      <li><span class="st">→ SETTLED</span><p>On reaching <code>t = 0</code>: if
+      <code>pending</code> is set, it becomes the current variant and clears; either way
+      the state goes to FORWARD. So an unattended screen loops its own overture, and an
+      attended one always arrives flat before it changes shape.</p></li>
+    </ol>
+    <div>
+      <div class="contract">one pending slot, not a list
+
+select(v):
+  if v == current      -> pending = null   (cancels a queued one)
+  if state == SETTLED  -> current = v; FORWARD
+  else                 -> pending = v      (and nothing else)
+
+atSettled():
+  if pending: current = pending
+              pending = null
+  state = FORWARD</div>
+      <div class="note"><b>Why one slot and not a queue</b> — a player running down the
+      library with the arrow keys would otherwise enqueue eleven overtures and watch them
+      all. The latest selection is the only one they are still interested in, so it
+      overwrites rather than appends. The library marks the stored one
+      <code class="mono">QUEUED</code> so the wait is legible instead of looking like a
+      dead click.</div>
+      <div class="note warm"><b>The one real choice here, decided</b> — the first draft
+      cut straight to REVERSE the instant a new variant was picked, which makes the
+      screen answer faster. It was rejected, and the reason is the better one: a variant
+      glanced at for a second would then be a variant whose overture nobody ever sees
+      finish, and the shapes are the point of the screen. A selection now waits its turn
+      completely. One slot still, so glancing down the list queues nothing but the last
+      thing looked at.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------- the cards -->
+<section id="cards">
+  <h2>The twelve</h2>
+  <p class="sub">Ordered as the library orders them — difficulty, then name. Keyframes are
+  rendered by the same scene function that drives the stage above, at fixed
+  <code>t</code>, so they cannot drift from it.</p>
+  <div id="cardList"></div>
+</section>
+
+<!-- --------------------------------------------------------------- landing -->
+<section id="landing">
+  <h2>Landing it</h2>
+  <p class="sub">What the implementation has to respect in this repo, beyond drawing the
+  shapes.</p>
+  <div class="landing">
+    <div><span class="k">src/render/deco.cpp</span><span class="v">Where it goes, per
+    AGENTS.md: <code>decoForScreen</code> already owns each menu screen's decorative
+    object, and New Game's is currently the selected variant's lattice. An overture is
+    that object with a <code>t</code>.</span></div>
+    <div><span class="k">Shell::preview(name)</span><span class="v">Already returns a
+    loaded <code>VariantSpec</code> for a variant the player is only <em>looking</em>
+    at, cached so the picker does not parse a file per frame. An overture needs nothing
+    else from the engine: no <code>Session</code>, no <code>Game</code>, no legal
+    moves.</span></div>
+    <div><span class="k">No engine queries</span><span class="v">The pieces in an
+    overture are authored, not generated. Nothing here may call
+    <code>legalMoves()</code> — the shapes are a story about the variant, and a real
+    position would make the New Game screen depend on movegen to draw a
+    menu.</span></div>
+    <div><span class="k">float t, and where it comes from</span><span class="v"><code>Ui::tick(dt)</code>
+    already advances the shell's own clock for the drifting field. The overture's
+    <code>t</code> rides that clock. <b>This matters for the tests:</b>
+    <code>captureFrame</code> deliberately feeds a <em>fixed</em> step (<code>0.0f</code>
+    then <code>1.0f</code>) so a screenshot is the same picture every time it is taken —
+    so pick a canonical <code>t</code> for <code>gui-newgame</code> and make the capture
+    path set it outright rather than integrate towards it.</span></div>
+    <div><span class="k">view::layout</span><span class="v">The flat 8 × 8 at
+    <code>t = 0</code> must be laid out by the same projection the real board uses, or
+    the overture will not visually hand over to the game that starts after it. The warps
+    are a <code>t</code>-blend away from that layout, never a replacement for it.</span></div>
+    <div><span class="k">No floats below view</span><span class="v">All of this is
+    presentation maths and belongs at L60 <code>src/view</code> or above, where floating
+    point is allowed. Nothing in an overture may reach down into
+    <code>chessbox_core</code>.</span></div>
+    <div><span class="k">Colour discipline</span><span class="v">The seam ramp
+    (<code>seamHueBegin</code> → <code>seamHueEnd</code>) is spent only where a board
+    stops being flat: gluings, wraps, extra axes. A detonation is a <em>game</em> event
+    and takes <code>blood</code> and <code>ember</code>. A mirror gets no hue at all —
+    <code>mirrorEdge</code> is white metal, because there is nothing on the other side of
+    it.</span></div>
+    <div><span class="k">Cost</span><span class="v">Worst case here is
+    <code>hyper4</code> at 256 cells and <code>5d</code> at seven boards. Both are one
+    instanced draw call in the real renderer, so the budget is the vertex transform, not
+    the geometry count. This prototype rebuilds SVG each frame and draws
+    <code>5d</code>'s boards at reduced cell resolution purely to stay smooth in a
+    browser — the shipped version has no reason to.</span></div>
+    <div><span class="k">prefers-reduced-motion</span><span class="v">There is no
+    equivalent setting in the game yet. Worth one: an overture is decorative, and the
+    screen must stay usable held at <code>t = 0</code>. It would sit beside
+    <code>animateMoves</code> in <code>app::Settings</code>.</span></div>
+  </div>
+</section>
+
+<section id="asbuilt">
+  <h2>As built</h2>
+  <p class="sub">Where the shipped code has moved on from the prototype above. The
+  prototype is the design record; these are the decisions the implementation forced or
+  the review changed.</p>
+  <div class="landing">
+    <div><span class="k">Klein: figure-eight</span><span class="v">A circular
+    cross-section cannot close <code>flip = ["file"]</code> — a half-turn brings a circle
+    back <em>shifted</em> by four files, not reflected. The cross-section pinches into a
+    lemniscate, for which a half-turn <em>is</em> the reflection. Pinned by a test that
+    states each variant's own gluing as arithmetic.</span></div>
+    <div><span class="k">Cuts, not rescales</span><span class="v">Whole files and ranks
+    are dropped one at a time and every survivor keeps its own size and place, so what is
+    left is the a1 corner block — deliberately off-centre until it slides. Applies to
+    <code>cube5</code>, <code>hyper4</code> and <code>5d</code> alike.</span></div>
+    <div><span class="k">hyper4 unfolds 2 × 2</span><span class="v">A row of four cubes
+    became a thin strip, and once the framing had to hold the whole strip each cube was
+    too small to read a move on. Two by two says the same thing at twice the
+    size.</span></div>
+    <div><span class="k">Framing is measured</span><span class="v">Not a per-overture
+    radius. A shape under perspective is a very different size on screen from the same
+    shape flat, and a constant that suited the donut ran the Klein bottle off the top of
+    the pane. Measured on the cells only, so a detonation throwing pieces clear does not
+    shrink the board.</span></div>
+    <div><span class="k">Cells are drawn through</span><span class="v">At 72 %. A closed
+    surface hides half of itself, and the hidden half is usually the half that explains
+    the gluing.</span></div>
+    <div><span class="k">Pieces centre on cells</span><span class="v">And are drawn after
+    every surface. Depth alone is not enough — a cell of the rank in front is nearer than
+    the piece behind it, so sorting by depth alone slices a piece with the board it
+    stands on.</span></div>
+    <div><span class="k">One opening, shared</span><span class="v">Every overture's
+    <code>t = 0</code> is the <em>identical</em> picture — same board, same army, same
+    camera, and nothing drawn on top of it. Trails and the camera settle onto a single
+    opening pose centrally rather than per-scene, because it is a rule about the set and
+    a scene cannot be trusted to remember a rule about its neighbours. Without it,
+    standard → atomic was a cut rather than a hand-over. A test compares the covered
+    area, the bounds and the whole roster across all twelve.</span></div>
+    <div><span class="k">Three sign bugs</span><span class="v">All in the same family, and
+    none of them looked like a bug: the surface normal cross-multiplied the wrong way
+    round put every piece <em>under</em> its board; a doubled negation in the projection
+    turned the whole scene upside down, which reads as standing beneath the board rather
+    than as an error; and a token placed away from its cell took cell a1's normal, so a
+    rook riding a torus stood up as though it had never left the corner. Each is now a
+    test.</span></div>
+  </div>
+</section>
+
+<footer>
+  <p>Specification only — no engine or renderer code has been changed. The palette is
+  <code>view::Theme::manifold()</code> in light and <code>::console()</code> in dark,
+  transcribed from <code>src/view/theme.hpp</code>; the seam hues are computed from
+  <code>seamHueBegin</code>, <code>seamHueEnd</code>, <code>seamSaturation</code> and
+  <code>seamValue</code> with the same formula the renderer uses. The two 8&nbsp;×&nbsp;8
+  board greys are the pair a contrast test pinned, and are not adjusted anywhere on this
+  page.</p>
+</footer>
+</div>
+
+<script>
+/* ===========================================================================
+   Geometry, projection and the twelve scene functions.
+
+   In the shipped renderer this is a vertex transform. Here it is arithmetic in
+   JS feeding SVG polygons, which buys exact depth sorting and removes every CSS
+   3-D transform sign convention from the discussion. The *shape functions* are
+   the spec; the SVG is only how this page shows them.
+   =========================================================================== */
+const TAU = Math.PI * 2;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp  = (a, b, t) => a + (b - a) * t;
+/* progress of a sub-phase: 0 before `a`, 1 after `b` */
+const seg   = (t, a, b) => clamp((t - a) / (b - a), 0, 1);
+const ease  = t => t * t * (3 - 2 * t);
+const easeO = t => 1 - (1 - t) * (1 - t);
+const easeI = t => t * t;
+
+/* ---- palette ------------------------------------------------------------- */
+const MANIFOLD = {
+  board: ['#98A4BE', '#59637E'], rim: '#39415A', white: '#F6F9FF', black: '#10141E',
+  ember: '#2E4BFF', emberDeep: '#6F4FF2', rift: '#1C7FA8', bone: '#0E121A',
+  boneDim: '#39414F', boneFaint: '#737E90', blood: '#D24A6A', moss: '#17937A',
+  mirror: '#FFFFFF', seamS: 0.80, seamV: 0.74, light: true
+};
+const CONSOLE = {
+  board: ['#A98F68', '#77614A'], rim: '#241C15', white: '#E8DCC4', black: '#342A20',
+  ember: '#F0A23C', emberDeep: '#A5601B', rift: '#5FE3E0', bone: '#E8DCC4',
+  boneDim: '#A99A80', boneFaint: '#6F6353', blood: '#D4483B', moss: '#8FB65C',
+  mirror: '#FFFFFF', seamS: 0.72, seamV: 0.95, light: false
+};
+const SEAM_H0 = 0.42, SEAM_H1 = 0.88;   /* theme.hpp seamHueBegin / seamHueEnd */
+
+function themeName() {
+  const s = document.documentElement.getAttribute('data-theme');
+  if (s === 'dark' || s === 'light') return s;
+  return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+let P = MANIFOLD;
+function syncPalette() { P = themeName() === 'dark' ? CONSOLE : MANIFOLD; }
+
+const hex2rgb = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+function shade(hexc, f, alpha) {
+  const [r, g, b] = hex2rgb(hexc);
+  const m = v => clamp(Math.round(v * f), 0, 255);
+  return alpha === undefined || alpha >= 1
+    ? `rgb(${m(r)},${m(g)},${m(b)})`
+    : `rgba(${m(r)},${m(g)},${m(b)},${alpha.toFixed(3)})`;
+}
+/* hue in turns -> hex, exactly the renderer's seam ramp */
+function hsv(hTurns, s, v) {
+  const h = ((hTurns % 1) + 1) % 1 * 6, i = Math.floor(h), f = h - i;
+  const p = v * (1 - s), q = v * (1 - s * f), u = v * (1 - s * (1 - f));
+  const r = [v, q, p, p, u, v][i % 6], g = [u, v, v, q, p, p][i % 6], b = [p, p, u, v, v, q][i % 6];
+  const to = x => Math.round(x * 255).toString(16).padStart(2, '0');
+  return `#${to(r)}${to(g)}${to(b)}`;
+}
+/* portal k of n, the two ends of one identification sharing a colour */
+const seamColor = (k, n) => hsv(lerp(SEAM_H0, SEAM_H1, n <= 1 ? 0 : k / (n - 1)), P.seamS, P.seamV);
+
+/* ---- projection ---------------------------------------------------------- */
+/* World: y is up, the flat board lies in y = 0, files along x, ranks along z.
+   `elev` is the camera's angle above the board plane. Depth is returned so the
+   caller can sort far-to-near, which CSS 3-D would not do for a torus. */
+function project(p, cam) {
+  const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw);
+  const x1 =  p[0] * cy + p[2] * sy;
+  const z1 = -p[0] * sy + p[2] * cy;
+  const ce = Math.cos(cam.elev), se = Math.sin(cam.elev);
+  const y2 =  p[1] * ce + z1 * se;
+  const z2 = -p[1] * se + z1 * ce;
+  const d  = cam.dist + z2;
+  const k  = cam.fov / Math.max(d, 0.6);
+  return [x1 * k, -y2 * k, d, k];
+}
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const mul = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
+function cross(a, b) { return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]; }
+function norm(a) { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; }
+const LIGHT = norm([-0.35, 0.9, -0.25]);
+/* Lambert-ish, two-sided: a glued board shows its underside constantly and an
+   unlit face there would read as a hole rather than as a surface. */
+function faceShade(p0, p1, p2) {
+  const n = norm(cross(sub(p1, p0), sub(p2, p0)));
+  const d = Math.abs(n[0]*LIGHT[0] + n[1]*LIGHT[1] + n[2]*LIGHT[2]);
+  return 0.72 + 0.42 * d;
+}
+
+/* ---- the surface warps --------------------------------------------------- */
+/* W, H: the board's world extent. A cell is one unit. */
+const W = 8, H = 8;
+
+/* Roll the file axis into a tube (axis along z = rank), then optionally bend
+   that tube's axis into a ring, optionally giving the cross-section a half-turn
+   around the ring.
+     th  0..2pi   how far the files have rolled          (2pi = closed tube)
+     ph  0..2pi   how far the tube has bent into a ring  (2pi = closed torus)
+     tau 0..1     half-turn of the cross-section around the ring -> KLEIN
+     open         ring-radius multiplier; see the note on the horn torus
+   cylinder: {th:2pi}          torus: {th:2pi, ph:2pi}
+   klein:    {th:2pi, ph:2pi, tau:1} */
+function tube(u, v, o) {
+  const xl = (u - 0.5) * W, zl = (v - 0.5) * H;
+  const th = o.th || 0, ph = o.ph || 0, tau = o.tau || 0, open = o.open === undefined ? 1 : o.open;
+  let a, b;                                   /* cross-section: a -> x, b -> y */
+  if (th > 1e-4) { const R = W / th, t = xl / R; a = R * Math.sin(t); b = R * Math.cos(t) - R; }
+  else { a = xl; b = 0; }
+  let s = zl;                                 /* along the tube axis */
+  if (ph > 1e-4) {
+    const Rr = (H / ph) * open, p = s / (H / ph);
+    const chi = tau * p / 2;
+    const a2 = a * Math.cos(chi) - b * Math.sin(chi);
+    const b2 = a * Math.sin(chi) + b * Math.cos(chi);
+    return [Rr * (1 - Math.cos(p)) + a2 * Math.cos(p), b2, Rr * Math.sin(p) - a2 * Math.sin(p)];
+  }
+  return [a, b, s];
+}
+
+/* Bend the file axis into a big loop in the board's own plane and let the rank
+   extent stick out as the strip's width, optionally rotating that width as it
+   travels round. This is the only embedding that can absorb a rank flip, which
+   is why the MOBIUS overture has to leave the tube to close its seam.
+     th  0..2pi  how far round the loop the files have gone
+     tau 0..1    half-turn of the width over one loop -> MOBIUS */
+function band(u, v, o) {
+  const xl = (u - 0.5) * W, zl = (v - 0.5) * H;
+  const th = o.th || 0, tau = o.tau || 0;
+  if (th <= 1e-4) return [xl, 0, zl];
+  const R = W / th, t = xl / R;
+  const psi = tau * t / 2;
+  const radial = [Math.sin(t), 0, Math.cos(t)];
+  const centre = [R * Math.sin(t), 0, R * Math.cos(t) - R];
+  return [
+    centre[0] + zl * Math.cos(psi) * radial[0],
+    centre[1] + zl * Math.sin(psi),
+    centre[2] + zl * Math.cos(psi) * radial[2]
+  ];
+}
+/* Cut an 8 x 8 down to an n x n corner block by dropping whole files and ranks,
+   outermost first, one at a time so the count reads.
+
+   The survivors keep their own cell size and their own place in the lattice.
+   That is the whole point: scaling a board down to n units wide reads as someone
+   laying a smaller board on top of the big one, which is not what happens to a
+   board when a variant has fewer files. `shift` then slides what is left to the
+   middle of the pane as a separate, visible motion. */
+function cutFraction(n, f, r, t) {
+  const steps = (8 - n) * 2;
+  if (steps <= 0) return 1;
+  /* file 7 goes, then rank 7, then file 6, then rank 6, ... */
+  let idx = -1;
+  for (let k = 0; k < steps; k++) {
+    const ring = 7 - Math.floor(k / 2);
+    const isFile = (k % 2) === 0;
+    if (isFile && f === ring) { idx = k; break; }
+    if (!isFile && r === ring) { idx = k; break; }
+  }
+  if (idx < 0) return 1;                        /* a survivor */
+  const per = 1 / steps;
+  return 1 - clamp((t - idx * per) / per, 0, 1);
+}
+/* The surviving n x n block, in the original lattice's coordinates, slid towards
+   the centre by `shift` (0 = where the cells actually were, 1 = centred). */
+function cornerPos(n, shift, y) {
+  const off = (4 - n / 2) * shift;
+  return (u, v) => [ u * n - 4 + off, y || 0, v * n - 4 + off ];
+}
+/* The doomed part of the board: the full 8 x 8 with the survivors suppressed,
+   since those are drawn by cornerPos and are the ones allowed to move. */
+function cutGrid(out, n, t) {
+  grid(out, (u, v) => [ u * 8 - 4, 0, v * 8 - 4 ], {
+    nx: 8, nz: 8,
+    keep: (f, r) => (f < n && r < n) ? 0 : cutFraction(n, f, r, t),
+    tone: (f, r) => ((f + r) % 2 ? 'dark' : 'light')
+  });
+}
+
+/* Klein bottle, as the figure-eight immersion.
+
+   A circular cross-section CANNOT close this gluing. `klein` joins the ranks
+   with flip = ["file"], so after one trip round the ring the cross-section has
+   to come back to itself *reflected*. Rotating a circle by a half-turn brings it
+   back SHIFTED by half the board instead - a different gluing, and the reason a
+   plain twisted torus leaves the two circular edges not meeting.
+
+   A figure-eight can do it. Rotating the lemniscate (sin a, sin 2a) by pi gives
+   (-sin a, -sin 2a) = (sin(-a), sin(-2a)), which is exactly a -> -a: the file
+   reversed. So the cross-section pinches into a figure-eight first, and then the
+   ring closes exactly.
+     th    0..2pi  the files roll into a closed cross-section
+     pinch 0..1    circle -> figure-eight
+     ph    0..2pi  that cross-section travels round the ring
+     tau   0..1    half-turn of the cross-section over the trip
+   At th=2pi, pinch=1, ph=2pi, tau=1 both seams meet to machine precision. */
+function kleinSurf(u, v, o) {
+  const xl = (u - 0.5) * W, zl = (v - 0.5) * H;
+  const th = o.th || 0, pinch = o.pinch || 0, ph = o.ph || 0, tau = o.tau || 0;
+  const open = o.open === undefined ? 1 : o.open;
+  let cr, ca;                            /* cross-section: radial, axial */
+  if (th > 1e-4) { const R = W / th, a = xl / R; cr = R * Math.sin(a); ca = R * Math.cos(a) - R; }
+  else { cr = xl; ca = 0; }
+  if (pinch > 1e-4) {
+    const rho = (W / TAU) * 1.45, a = (u - 0.5) * TAU;
+    cr = lerp(cr, rho * Math.sin(a), pinch);
+    ca = lerp(ca, rho * Math.sin(2 * a), pinch);
+  }
+  if (ph > 1e-4) {
+    const base = H / ph, Rr = base * open, p = zl / base;
+    const chi = tau * p / 2;
+    const r2 = cr * Math.cos(chi) - ca * Math.sin(chi);
+    const a2 = cr * Math.sin(chi) + ca * Math.cos(chi);
+    return [ Rr * (1 - Math.cos(p)) + r2 * Math.cos(p), a2, Rr * Math.sin(p) - r2 * Math.sin(p) ];
+  }
+  return [cr, ca, zl];
+}
+
+const blend = (fa, fb, m) => (u, v) => {
+  const A = fa(u, v), B = fb(u, v);
+  return [lerp(A[0], B[0], m), lerp(A[1], B[1], m), lerp(A[2], B[2], m)];
+};
+
+/* ---- scene building blocks ---------------------------------------------- */
+/* An 8 x 8 (or n x m) grid of quads laid on an arbitrary surface. `pos(u,v)`
+   takes normalised lattice coordinates, so the same call serves every geometry. */
+function grid(out, pos, opt) {
+  const nx = opt.nx || 8, nz = opt.nz || 8;
+  const keep = opt.keep, tone = opt.tone, fade = opt.fade === undefined ? 1 : opt.fade;
+  const inset = opt.inset === undefined ? 0.03 : opt.inset;
+  /* How many sub-quads each cell is broken into, per side. One planar quad per
+     cell facets a curved surface badly - a torus made of 64 flat tiles reads as a
+     polyhedron - so a warped geometry asks for 3 or 4 and gets a surface that
+     actually bends. A cell keeps ONE colour across all its sub-quads: the
+     subdivision is there to carry curvature, not to make a finer chequer. */
+  const sd = Math.max(1, opt.sub || 1);
+  for (let f = 0; f < nx; f++) for (let r = 0; r < nz; r++) {
+    const k = keep ? keep(f, r) : 1;
+    if (k <= 0.001) continue;
+    const tn = tone ? tone(f, r) : ((f + r) % 2 ? 'dark' : 'light');
+    const u0 = (f + inset) / nx, u1 = (f + 1 - inset) / nx;
+    const v0 = (r + inset) / nz, v1 = (r + 1 - inset) / nz;
+    for (let a = 0; a < sd; a++) for (let b = 0; b < sd; b++) {
+      const ua = lerp(u0, u1, a / sd), ub = lerp(u0, u1, (a + 1) / sd);
+      const va = lerp(v0, v1, b / sd), vb = lerp(v0, v1, (b + 1) / sd);
+      out.quads.push({
+        p: [pos(ua, va), pos(ub, va), pos(ub, vb), pos(ua, vb)],
+        tone: tn, fade: fade * k
+      });
+    }
+  }
+}
+/* Surface normal by finite difference - cheaper to write than to derive for
+   four warps, and a piece only needs to stand up straight. */
+function normalAt(pos, u, v) {
+  const e = 0.004, o = pos(u, v);
+  const n = cross(sub(pos(Math.min(u + e, 1), v), o), sub(pos(u, Math.min(v + e, 1)), o));
+  const l = Math.hypot(n[0], n[1], n[2]);
+  return l < 1e-6 ? [0, 1, 0] : [n[0]/l, n[1]/l, n[2]/l];
+}
+const cellCentre = (pos, f, r, nx, nz) => pos((f + 0.5) / (nx || 8), (r + 0.5) / (nz || 8));
+function piece(out, pos, f, r, glyph, side, opt) {
+  const o = opt || {}, nx = o.nx || 8, nz = o.nz || 8;
+  const at = o.at || cellCentre(pos, f, r, nx, nz);
+  const nrm = o.normal || normalAt(pos, (f + 0.5) / nx, (r + 0.5) / nz);
+  out.pieces.push({
+    at, normal: nrm, glyph, side,
+    h: (o.h === undefined ? 1 : o.h), fade: (o.fade === undefined ? 1 : o.fade),
+    mirrored: !!o.mirrored
+  });
+}
+const BACK = ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R'];
+/* The opening array, on any surface. `ranks` selects which of the four home
+   ranks to place, so an overture can clear the board without special-casing. */
+function army(out, pos, opt) {
+  const o = opt || {}, fade = o.fade === undefined ? 1 : o.fade;
+  if (fade <= 0.001) return;
+  for (let f = 0; f < 8; f++) {
+    piece(out, pos, f, 0, BACK[f], 'white', { fade, h: o.h });
+    piece(out, pos, f, 1, 'P', 'white', { fade, h: o.h });
+    piece(out, pos, f, 6, 'P', 'black', { fade, h: o.h });
+    piece(out, pos, f, 7, BACK[f], 'black', { fade, h: o.h });
+  }
+}
+/* A polyline in world space, sampled along a surface so a trail that crosses a
+   seam follows the surface rather than cutting through it. */
+function trailOn(pos, from, to, n, tone, lift) {
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const s = i / n;
+    const u = lerp(from[0], to[0], s), v = lerp(from[1], to[1], s);
+    const p = pos(u, v), nn = normalAt(pos, u, v);
+    const l = (lift === undefined ? 0.28 : lift);
+    pts.push(add(p, mul(nn, l)));
+  }
+  return { pts, tone };
+}
+const emptyScene = () => ({ quads: [], pieces: [], trails: [], bursts: [], caption: '' });
+
+/* ===========================================================================
+   The twelve overtures.
+   =========================================================================== */
+const OV = {};
+
+/* ---------------------------------------------------------------- standard */
+OV.standard = {
+  label: 'standard', diff: 'easy', dims: '8 × 8 · flat',
+  blurb: 'The board every other overture departs from, and returns to.',
+  thesis: 'The reference frame, and the only overture with two versions. <b>The board is built once</b> — on the first entry to this screen in a session — and never again; after that the same slot plays the game rather than the construction.',
+  intro: true,
+  cam: t => ({ yaw: lerp(-0.12, 0.34, ease(t)), elev: lerp(1.45, 0.70, ease(t)), dist: lerp(23, 25.5, ease(t)), fov: 560 }),
+  phases: [
+    ['0.00 – 0.35', 'Tile in', 'FIRST ENTRY ONLY. The 64 cells arrive on a diagonal wave from the a1 corner, dropping the last of their height as they land. The camera starts almost straight down, as a diagram.'],
+    ['0.35 – 0.58', 'The army', 'FIRST ENTRY ONLY. Pieces rise on the four home ranks, tallest first, so the height that encodes value is the thing that reads as the board fills.'],
+    ['0.58 – 1.00', 'First moves', 'Always. 1. e4 e5 2. Nf3 — the knight arcing because it leaps and the pawns gliding because they do not. On later cycles this beat is spread over the whole range and the board is simply there from t = 0.']
+  ],
+  note: ['', 'The construction is consumed at <code>t = 1</code>, not at <code>t = 0</code>, and that is deliberate: the two versions of this scene are identical at <code>t = 1</code> by construction, so the flag can be flipped there with nothing visible happening. Flipping it at <code>t = 0</code> would pop an empty board into a full one during the 250 ms dwell.'],
+  scene(t, intro) {
+    const S = emptyScene(), pos = (u, v) => tube(u, v, {});
+    /* On a later cycle the board is already there and the whole range is the game. */
+    const build = intro ? seg(t, 0, 0.35) : 1;
+    const rise = intro ? seg(t, 0.35, 0.58) : 1;
+    const mv = intro ? seg(t, 0.58, 1) : t;
+    if (intro) {
+      grid(S, (u, v) => {
+        const f = Math.floor(u * 8), r = Math.floor(v * 8);
+        const d = clamp(build * 2.05 - (f + r) / 14, 0, 1);
+        return [ (u - 0.5) * W, (1 - ease(d)) * 7, (v - 0.5) * H ];
+      }, { keep: (f, r) => clamp(build * 2.2 - (f + r) / 14, 0, 1) });
+    } else {
+      grid(S, pos, {});
+    }
+    /* 1. e4 e5 2. Nf3 - authored coordinates, not generated */
+    const glide = (f0, r0, f1, r1, a, b, arc) => {
+      const s = ease(seg(mv, a, b));
+      return { f: lerp(f0, f1, s), r: lerp(r0, r1, s), lift: arc ? Math.sin(s * Math.PI) * 1.5 : 0 };
+    };
+    const e2 = glide(4, 1, 4, 3, 0.05, 0.32, false);
+    const e7 = glide(4, 6, 4, 4, 0.36, 0.63, false);
+    const g1 = glide(6, 0, 5, 2, 0.67, 0.95, true);
+    const up = clamp(rise * 1.8, 0, 1);
+    for (let f = 0; f < 8; f++) {
+      if (f !== 4) { piece(S, pos, f, 1, 'P', 'white', { fade: up }); piece(S, pos, f, 6, 'P', 'black', { fade: up }); }
+      if (f !== 6) piece(S, pos, f, 0, BACK[f], 'white', { fade: up });
+      piece(S, pos, f, 7, BACK[f], 'black', { fade: up });
+    }
+    const at = g => [ (g.f + 0.5 - 4), g.lift, (g.r + 0.5 - 4) ];
+    piece(S, pos, 0, 0, 'P', 'white', { fade: up, at: at(e2) });
+    piece(S, pos, 0, 0, 'P', 'black', { fade: up, at: at(e7) });
+    piece(S, pos, 0, 0, 'N', 'white', { fade: up, at: at(g1) });
+    S.caption = !intro ? '1. e4 e5 2. Nf3'
+      : t < 0.35 ? 'sixty-four cells' : t < 0.58 ? 'the army stands' : '1. e4 e5 2. Nf3';
+    return S;
+  }
+};
+
+/* ---------------------------------------------------------------- cylinder */
+OV.cylinder = {
+  label: 'cylinder', diff: 'easy', dims: '8 × 8 · file periodic',
+  blurb: 'The a-file and the h-file are the same edge. Nothing else changes.',
+  thesis: 'The gentlest gluing, and the one that teaches the seam colour. <b>The rank walls stay</b> — so pawns, promotion and castling all survive, and the overture has to show a tube with two open rims rather than a closed surface.',
+  cam: t => ({ yaw: lerp(-0.1, 0.62, ease(t)), elev: lerp(1.40, 0.42, ease(t)), dist: lerp(23, 21, ease(t)), fov: 560 }),
+  phases: [
+    ['0.00 – 0.16', 'Name the seam', 'The a-file and h-file edges take the two ends of one portal colour off the seam ramp — the same hue, because they are the same edge.'],
+    ['0.16 – 0.74', 'Roll', 'The file axis rolls into a circle: θ sweeps 0 → 2π and the board closes into a tube whose axis runs along the ranks. The camera drops from overhead to nearly level as it forms.'],
+    ['0.74 – 1.00', 'Circumnavigate', 'A rook on rank 4 slides off h and arrives on a, tracing a closed ring right round the tube. The rims stay bright and unglued, because the rank axis is still a wall.']
+  ],
+  note: ['cold', 'The two seam ends share one hue on purpose — a seam is coloured by the <em>portal</em> it belongs to, not by being a seam. A cylinder therefore reads as one gradient repeated, which is the whole reason the ramp exists.'],
+  scene(t) {
+    const S = emptyScene();
+    const th = ease(seg(t, 0.16, 0.74)) * TAU;
+    const pos = (u, v) => tube(u, v, { th });
+    grid(S, pos, { sub: 4 });
+    army(S, pos, { fade: 1 });
+    /* the glued file edges, and the rank rims that are still walls */
+    const nm = seg(t, 0, 0.16);
+    if (nm > 0) {
+      const c = seamColor(0, 1);
+      for (const u of [0.0005, 0.9995]) {
+        const pts = [];
+        for (let i = 0; i <= 8; i++) pts.push(add(pos(u, i / 8), mul(normalAt(pos, u, clamp(i / 8, .01, .99)), 0.06)));
+        S.trails.push({ pts, tone: c, w: 3.2, fade: nm });
+      }
+    }
+    for (const v of [0.0005, 0.9995]) {
+      const pts = [];
+      for (let i = 0; i <= 24; i++) pts.push(pos(i / 24, v));
+      S.trails.push({ pts, tone: P.boneFaint, w: 1.6, fade: 0.55 + 0.45 * ease(seg(t, 0.16, 0.74)) });
+    }
+    const ride = seg(t, 0.74, 1);
+    if (ride > 0) {
+      const u = 0.5 + ease(ride) * 0.999;
+      S.trails.push(Object.assign(trailOn(pos, [0.5, 0.44], [u, 0.44], 40, seamColor(0, 1)), { w: 2.6, fade: 1 }));
+      piece(S, pos, 0, 0, 'R', 'white', { at: add(pos(u % 1, 0.44), mul(normalAt(pos, u % 1, 0.44), 0.02)), normal: normalAt(pos, u % 1, 0.44) });
+    }
+    S.caption = t < 0.16 ? 'one portal, two ends' : t < 0.74 ? 'the files roll into a loop' : 'off h, onto a, all the way round';
+    return S;
+  }
+};
+
+/* ------------------------------------------------------------------ atomic */
+OV.atomic = {
+  label: 'atomic', diff: 'easy', dims: '8 × 8 · flat · capture detonates',
+  blurb: 'A capture takes its own neighbourhood with it.',
+  thesis: 'The only overture with no geometry in it at all, and it still needs one: <b>the variants the rule VM exists for are the ones that currently explain themselves least.</b> A flat board where nine pieces vanish between frames looks like a bug.',
+  cam: t => ({ yaw: lerp(0.22, 0.46, ease(t)), elev: lerp(0.95, 0.60, ease(seg(t, 0.4, 1))), dist: lerp(22, 24, ease(t)), fov: 560 }),
+  phases: [
+    ['0.00 – 0.22', 'Set the piece', 'The army clears to a single figure: seven pawns in a triangle, apex at d5, with a black bishop waiting on the long diagonal. Authored, not played.'],
+    ['0.22 – 0.44', 'The approach', 'The bishop slides up the diagonal onto the apex pawn. At the moment of contact the capture cell flashes once in <code>ember</code>.'],
+    ['0.44 – 0.70', 'Detonation', 'The 3 × 3 neighbourhood goes: eight pawns and the capturing bishop launch on ballistic arcs, spinning, fading as they fall. A shockwave ring crosses the board in <code>blood</code> and dies at the rim.'],
+    ['0.70 – 1.00', 'The crater', 'Nine empty cells, dimmed and still warm. The two surviving base pawns of the triangle stand at the edge of it — the point being that the triangle is what tells you how much was taken.']
+  ],
+  note: ['warm', 'Warm only. An explosion is a <em>game</em> event, so it spends <code>blood</code> and <code>ember</code> and may not touch the seam ramp — otherwise the one thing a player learns by playing, that cold means the board is not flat, stops being true. In reverse this implodes, and it is worth watching: the pieces fly home and the bishop retreats down the diagonal, which comes free from t alone.'],
+  scene(t) {
+    const S = emptyScene(), pos = (u, v) => tube(u, v, {});
+    const set = seg(t, 0, 0.22), app = seg(t, 0.22, 0.44), boom = seg(t, 0.44, 0.70);
+    /* triangle of pawns, apex at (3,4) */
+    const TRI = [[3, 4], [2, 3], [3, 3], [4, 3], [1, 2], [2, 2], [3, 2], [4, 2], [5, 2]];
+    const blast = TRI.filter(([f, r]) => Math.abs(f - 3) <= 1 && Math.abs(r - 4) <= 1);
+    const isBlast = (f, r) => Math.abs(f - 3) <= 1 && Math.abs(r - 4) <= 1;
+    grid(S, pos, { tone: (f, r) => (isBlast(f, r) && boom > 0.05) ? 'scorch' : ((f + r) % 2 ? 'dark' : 'light') });
+    army(S, pos, { fade: 1 - ease(clamp(set * 1.25, 0, 1)) });
+
+    const bf = lerp(0, 3, ease(app)), br = lerp(1, 4, ease(app));
+    const gone = ease(boom);
+    for (const [f, r] of TRI) {
+      const inBlast = isBlast(f, r);
+      if (inBlast && boom > 0) {
+        /* ballistic: outward from the capture cell, up, then down and out */
+        const dx = f - 3 || (Math.random() * 0 + 0.001), dz = r - 4;
+        const l = Math.hypot(dx, dz) || 1;
+        const s = ease(boom);
+        const at = [ (f + 0.5 - 4) + dx / l * s * 3.4, Math.sin(s * Math.PI) * 3.2 - s * s * 0.6, (r + 0.5 - 4) + dz / l * s * 3.4 ];
+        if (f === 3 && r === 4) continue;             /* the captured pawn is simply gone */
+        piece(S, pos, f, r, 'P', 'white', { at, fade: 1 - ease(clamp(boom * 1.35, 0, 1)) });
+      } else if (!inBlast) {
+        piece(S, pos, f, r, 'P', 'white', { fade: ease(clamp(set * 1.4, 0, 1)) });
+      } else {
+        piece(S, pos, f, r, 'P', 'white', { fade: ease(clamp(set * 1.4, 0, 1)) });
+      }
+    }
+    if (boom <= 0) {
+      piece(S, pos, 0, 0, 'B', 'black', { at: [ (bf + 0.5 - 4), 0, (br + 0.5 - 4) ], fade: ease(clamp(set * 1.4, 0, 1)) });
+    } else {
+      const s = ease(boom);
+      piece(S, pos, 0, 0, 'B', 'black', { at: [ (3.5 - 4) - s * 2.4, Math.sin(s * Math.PI) * 3.6, (4.5 - 4) - s * 2.0 ], fade: 1 - ease(clamp(boom * 1.35, 0, 1)) });
+    }
+    if (boom > 0) {
+      S.bursts.push({ at: [ -0.5, 0.35, 0.5 ], r: 0.6 + ease(boom) * 7.6, fade: 1 - ease(boom), tone: P.blood });
+      S.bursts.push({ at: [ -0.5, 0.35, 0.5 ], r: 0.4 + easeI(boom) * 2.2, fade: (1 - ease(boom)) * 0.9, tone: P.ember });
+    }
+    S.caption = t < 0.22 ? 'a triangle, and a bishop on the diagonal'
+      : t < 0.44 ? 'the bishop takes the apex'
+      : t < 0.70 ? 'and takes eight more with it' : 'nine cells, and what is left to count';
+    return S;
+  }
+};
+
+/* --------------------------------------------------------------- mirrorbox */
+OV.mirrorbox = {
+  label: 'mirrorbox', diff: 'easy', dims: '8 × 8 · file walls reflect',
+  blurb: 'The file walls reflect. Nothing is glued, and nothing teleports.',
+  thesis: 'The counter-example in the library. Every other non-flat variant here joins one edge to another; <b>this one joins an edge to itself</b>, stays orientable, keeps 64 distinct cells — and gets no portal hue at all, because there is nothing on the far side of a mirror.',
+  cam: t => ({ yaw: lerp(0, 0.30, ease(t)), elev: lerp(1.42, 0.78, ease(t)), dist: 23.5, fov: 560 }),
+  phases: [
+    ['0.00 – 0.30', 'The walls rise', 'Two panels stand up on the a-file and h-file edges, drawn as polished metal — <code>mirrorEdge</code>, white, unhued. The rank edges stay open and plainly unwalled.'],
+    ['0.30 – 0.84', 'The billiard', 'A bishop on c1 fires along its diagonal. The ray reaches the h-wall, reflects, crosses to the a-wall, reflects again, and again — four bounces drawn as one continuous bright trail, with a flash at each incidence.'],
+    ['0.84 – 1.00', 'The unfolding', 'The classic proof: the reflected continuation is drawn once more, faintly, <em>through</em> each mirror as the straight line it really is. Bounce and straight line are the same path, which is what "nothing teleports" means.']
+  ],
+  note: ['', 'This is the overture that most wants the bounce to be traced by <code>view::tracePath</code>, which already exists and already returns <code>StepKind::Bounce</code> per step. The authored path here should match what it produces, or the menu is teaching a route the game will not draw.'],
+  scene(t) {
+    const S = emptyScene(), pos = (u, v) => tube(u, v, {});
+    grid(S, pos, {});
+    army(S, pos, { fade: 1 });
+    const rise = ease(seg(t, 0, 0.30));
+    for (const side of [-1, 1]) {
+      const x = side * W / 2, hgt = rise * 2.5;
+      if (hgt > 0.02) S.quads.push({
+        p: [[x, 0, -H/2], [x, 0, H/2], [x, hgt, H/2], [x, hgt, -H/2]],
+        tone: 'mirror', fade: rise
+      });
+    }
+    /* the ray: start c1 going up-right, reflect in x at |x| = 4 */
+    const ray = seg(t, 0.30, 0.84);
+    if (ray > 0) {
+      const total = 26, n = Math.max(2, Math.round(total * ease(ray)));
+      const pts = [], flat = [];
+      let x = -1.5, z = -3.5, dx = 1, dz = 1;
+      flat.push([x, z]);
+      for (let i = 0; i < n; i++) {
+        x += dx * 0.5; z += dz * 0.5;
+        if (x > 4) { x = 8 - x; dx = -dx; S.bursts.push({ at: [4, 0.3, z], r: 0.55, fade: 0.8, tone: P.mirror }); }
+        if (x < -4) { x = -8 - x; dx = -dx; S.bursts.push({ at: [-4, 0.3, z], r: 0.55, fade: 0.8, tone: P.mirror }); }
+        flat.push([x, z]);
+      }
+      for (const [fx, fz] of flat) pts.push([fx, 0.3, fz]);
+      S.trails.push({ pts, tone: P.ember, w: 2.8, fade: 1 });
+      piece(S, pos, 0, 0, 'B', 'white', { at: [flat[flat.length - 1][0], 0.02, flat[flat.length - 1][1]] });
+      /* the unfolding: the same path, straight, drawn through the mirrors */
+      const unf = seg(t, 0.84, 1);
+      if (unf > 0) {
+        const straight = [];
+        let sx = -1.5, sz = -3.5;
+        for (let i = 0; i <= n; i++) { straight.push([sx, 0.3, sz]); sx += 0.5; sz += 0.5; }
+        S.trails.push({ pts: straight, tone: P.ember, w: 1.4, fade: 0.45 * ease(unf), dash: '4 5' });
+      }
+    }
+    S.caption = t < 0.30 ? 'two walls, silvered' : t < 0.84 ? 'the ray bounces and keeps going' : 'bounce and straight line are one path';
+    return S;
+  }
+};
+
+/* ------------------------------------------------------------- mustcapture */
+OV.mustcapture = {
+  label: 'mustcapture', diff: 'easy', dims: '8 × 8 · flat · captures compulsory',
+  blurb: 'Every capture is compulsory. Decline one and the move is simply illegal.',
+  thesis: 'A constraint has no shape, so this overture animates <b>the refusal</b> — the only way to show a rule that acts by taking moves away is to try one and be told no.',
+  cam: t => ({ yaw: 0.18, elev: lerp(1.50, 1.18, ease(t)), dist: 22.5, fov: 560 }),
+  phases: [
+    ['0.00 – 0.24', 'A position', 'The opening resolves to a small middlegame: a black knight on e5 is attacked, and a white knight on c3 has a quiet square available as well as the capture.'],
+    ['0.24 – 0.46', 'What is forced', 'Every cell a capture can be made from lights in <code>ember</code>; every other cell dims right down. The board states the constraint before anything moves.'],
+    ['0.46 – 0.68', 'The refusal', 'The white knight lifts towards the quiet square, gets most of the way, and snaps back. A cross in <code>blood</code> marks where it was going. This is the beat the variant is named for.'],
+    ['0.68 – 1.00', 'The forced move', 'The capture plays instead, and the dimming lifts. The board returns to ordinary contrast, having made its point.']
+  ],
+  note: ['warm', 'The refusal needs an easing with a hard stop, not a bounce: the move is not <em>discouraged</em>, it does not exist. Snap back over 90 ms with no overshoot, and let the cross do the talking.'],
+  scene(t) {
+    const S = emptyScene(), pos = (u, v) => tube(u, v, {});
+    const lit = seg(t, 0.24, 0.46), refuse = seg(t, 0.46, 0.68), play = seg(t, 0.68, 1);
+    const dim = ease(lit) * (1 - ease(play));
+    const capFrom = [[2, 2], [5, 3]];
+    const isCap = (f, r) => capFrom.some(([a, b]) => a === f && b === r);
+    grid(S, pos, {
+      tone: (f, r) => isCap(f, r) && dim > 0.1 ? 'lit' : ((f + r) % 2 ? 'dark' : 'light'),
+      fade: 1
+    });
+    for (let f = 0; f < 8; f++) for (let r = 0; r < 8; r++) {
+      if (!isCap(f, r) && dim > 0.01) S.quads.push({
+        p: [[f - 4 + .03, .004, r - 4 + .03], [f - 3 - .03, .004, r - 4 + .03], [f - 3 - .03, .004, r - 3 - .03], [f - 4 + .03, .004, r - 3 - .03]],
+        tone: 'scrim', fade: dim * 0.55
+      });
+    }
+    /* a small middlegame, authored */
+    const START = seg(t, 0, 0.24);
+    army(S, pos, { fade: 1 - ease(clamp(START * 1.3, 0, 1)) });
+    const on = ease(clamp(START * 1.5, 0, 1));
+    const cast = [[4, 0, 'K', 'white'], [4, 7, 'K', 'black'], [0, 1, 'P', 'white'], [7, 6, 'P', 'black'],
+                  [5, 3, 'B', 'white'], [3, 5, 'R', 'black'], [1, 6, 'P', 'black'], [6, 1, 'P', 'white']];
+    for (const [f, r, g, s] of cast) piece(S, pos, f, r, g, s, { fade: on });
+    /* the black knight on e5 (4,4) - taken at the end */
+    piece(S, pos, 4, 4, 'N', 'black', { fade: on * (1 - ease(clamp(play * 1.6 - 0.35, 0, 1))) });
+    /* the white knight on c3 (2,2): quiet attempt, then the capture */
+    let kf = 2, kr = 2, lift = 0;
+    if (refuse > 0 && play <= 0) {
+      const s = refuse < 0.72 ? ease(refuse / 0.72) : 1 - ease((refuse - 0.72) / 0.28);
+      kf = lerp(2, 1, s * 0.82); kr = lerp(2, 4, s * 0.82); lift = Math.sin(s * Math.PI) * 0.7;
+      if (refuse > 0.55) S.bursts.push({ at: [1 - 4 + .5, 0.25, 4 - 4 + .5], r: 0.62, fade: clamp((refuse - 0.55) / 0.2, 0, 1) * (1 - ease(refuse * 0.6)), tone: P.blood, cross: true });
+    } else if (play > 0) {
+      const s = ease(play);
+      kf = lerp(2, 4, s); kr = lerp(2, 4, s); lift = Math.sin(s * Math.PI) * 1.4;
+    }
+    piece(S, pos, 0, 0, 'N', 'white', { at: [kf - 4 + .5, lift, kr - 4 + .5], fade: on });
+    S.caption = t < 0.24 ? 'a position with a capture in it'
+      : t < 0.46 ? 'a capture exists'
+      : t < 0.68 ? 'so the quiet move is not a move' : 'the capture plays';
+    return S;
+  }
+};
+
+/* ------------------------------------------------------------------- torus */
+OV.torus = {
+  label: 'torus', diff: 'medium', dims: '8 × 8 · file and rank periodic',
+  blurb: 'Every edge joined to its opposite: no corners, no walls, no promotion rank.',
+  thesis: 'The overture the whole idea was sketched from, and the clearest one. <b>Two gluings, applied in sequence</b>, so the player sees that a torus is a cylinder that kept going rather than a shape that arrived all at once.',
+  cam: t => ({ yaw: lerp(-0.08, 0.72, ease(t)), elev: lerp(1.42, 0.60, ease(t)), dist: lerp(23, 17, ease(seg(t, 0.35, 1))), fov: 560 }),
+  phases: [
+    ['0.00 – 0.12', 'Name both seams', 'Two portals, two hues off the ramp: the file pair and the rank pair, each with its two ends sharing a colour.'],
+    ['0.12 – 0.48', 'Files → cylinder', 'The first gluing, exactly as in <code>cylinder</code>. The tube forms, rims still open.'],
+    ['0.48 – 0.86', 'Ranks → ring', 'The second gluing bends the tube\'s axis round until its two rims meet. Cells and pieces morph with the surface — a pawn on the old rank 8 is now standing next to a pawn on rank 1.'],
+    ['0.86 – 1.00', 'A closed circuit', 'A queen runs a loop that returns to its own starting cell without ever reversing. The four old corner cells flash as they become ordinary interior cells, which is the plainest statement of "no corners".']
+  ],
+  note: ['cold', 'A flat 8 × 8 glued into a torus has equal circumferences, so the honest result is a <em>horn</em> torus with no hole at all. The overture opens the hole by scaling the ring radius to 2.2 × as it closes. That is a legibility cheat and should be stated in the code, not hidden: the real ratio is 1 : 1.'],
+  scene(t) {
+    const S = emptyScene();
+    const th = ease(seg(t, 0.12, 0.48)) * TAU;
+    const pr = ease(seg(t, 0.48, 0.86));
+    const ph = pr * TAU;
+    const pos = (u, v) => tube(u, v, { th, ph, open: lerp(1, 2.2, pr) });
+    grid(S, pos, { sub: 4 });
+    army(S, pos, { fade: 1 });
+    const nm = seg(t, 0, 0.12) * (1 - ease(seg(t, 0.5, 0.86)));
+    if (nm > 0.01) {
+      for (const [k, fixed, along] of [[0, 'u', 0], [1, 'v', 1]]) {
+        const c = seamColor(k, 2);
+        for (const e of [0.0005, 0.9995]) {
+          const pts = [];
+          for (let i = 0; i <= 16; i++) {
+            const s = i / 16;
+            pts.push(pos(along ? s : e, along ? e : s));
+          }
+          S.trails.push({ pts, tone: c, w: 3.0, fade: nm });
+        }
+      }
+    }
+    const ride = seg(t, 0.86, 1);
+    if (ride > 0) {
+      const s = ease(ride);
+      S.trails.push(Object.assign(trailOn(pos, [0.19, 0.19], [0.19 + s, 0.19 + s * 1], 60, seamColor(0, 2)), { w: 2.6, fade: 1 }));
+      const u = (0.19 + s) % 1, v = (0.19 + s) % 1;
+      piece(S, pos, 0, 0, 'Q', 'white', { at: pos(u, v), normal: normalAt(pos, u, v) });
+      for (const [cu, cv] of [[0.06, 0.06], [0.94, 0.06], [0.06, 0.94], [0.94, 0.94]])
+        S.bursts.push({ at: pos(cu, cv), r: 0.5 + Math.sin(s * Math.PI) * 0.35, fade: Math.sin(s * Math.PI) * 0.8, tone: seamColor(1, 2) });
+    }
+    S.caption = t < 0.12 ? 'two portals, four edges' : t < 0.48 ? 'the files close' :
+      t < 0.86 ? 'the ranks close' : 'a loop home, without turning round';
+    return S;
+  }
+};
+
+/* ------------------------------------------------------------ atomic_torus */
+OV.atomic_torus = {
+  label: 'atomic_torus', diff: 'medium', dims: '8 × 8 · torus · capture detonates',
+  blurb: 'Atomic chess where the explosions meet geometry that wraps.',
+  thesis: 'Not a combination for its own sake: <b>on a torus the 3 × 3 neighbourhood of a corner cell is four corners of the flat board.</b> This overture exists to show that one fact, and it needs both halves of the animation to do it — the blast on the donut, then the same blast flattened out.',
+  cam: t => ({ yaw: lerp(0.15, 0.80, ease(seg(t, 0, 0.5))), elev: lerp(1.40, 0.62, ease(seg(t, 0, 0.5))), dist: lerp(22, 17.5, ease(seg(t, 0, 0.5))), fov: 560 }),
+  phases: [
+    ['0.00 – 0.42', 'Form the torus', 'The <code>torus</code> warp, run at pace. No new geometry — literally the same function, which is the point of keeping these pure.'],
+    ['0.42 – 0.56', 'Take on a corner', 'A capture on a1 — a cell that on a torus touches h8, a8 and h1. The nine cells about to go light up first, contiguous on the surface and obviously so.'],
+    ['0.56 – 0.74', 'Detonate', 'The blast, warm, as in <code>atomic</code>. On the donut the nine cells are one patch; there is nothing surprising to see yet, and that is deliberate.'],
+    ['0.74 – 1.00', 'Unroll, marks kept', 'The surface flattens back to 8 × 8 <em>carrying its scorch marks</em>. The single patch tears into four, one in each corner. The whole variant, in one frame.']
+  ],
+  note: ['warm', 'The scorch marks must survive the unroll, which is the one place this overture needs care: the marks are a property of the <em>cells</em>, indexed by lattice position, not of screen-space. Author them as a cell set and the flattening carries them for free.'],
+  scene(t) {
+    const S = emptyScene();
+    const form = ease(seg(t, 0, 0.42));
+    const unroll = ease(seg(t, 0.74, 1));
+    const shape = form * (1 - unroll);
+    const th = shape * TAU, ph = shape * TAU;
+    const pos = (u, v) => tube(u, v, { th, ph, open: lerp(1, 2.2, shape) });
+    const mark = seg(t, 0.42, 0.56), boom = seg(t, 0.56, 0.74);
+    /* the 3x3 neighbourhood of a1 on a torus */
+    const nb = [];
+    for (let df = -1; df <= 1; df++) for (let dr = -1; dr <= 1; dr++) nb.push([(0 + df + 8) % 8, (0 + dr + 8) % 8]);
+    const inNb = (f, r) => nb.some(([a, b]) => a === f && b === r);
+    grid(S, pos, {
+      sub: 4,
+      tone: (f, r) => inNb(f, r) ? (boom > 0.04 ? 'scorch' : (mark > 0.04 ? 'lit' : ((f + r) % 2 ? 'dark' : 'light'))) : ((f + r) % 2 ? 'dark' : 'light')
+    });
+    army(S, pos, { fade: 1 - ease(clamp(boom * 1.5, 0, 1)) * 0.0 });
+    /* pieces in the blast leave; everything else stays put */
+    if (boom > 0) {
+      for (const [f, r] of nb) {
+        const home = (r <= 1 || r >= 6);
+        if (!home) continue;
+        const g = r === 1 || r === 6 ? 'P' : BACK[f];
+        const side = r <= 1 ? 'white' : 'black';
+        const c = cellCentre(pos, f, r, 8, 8), n = normalAt(pos, (f + .5) / 8, (r + .5) / 8);
+        const s = ease(boom);
+        piece(S, pos, f, r, g, side, { at: add(c, mul(n, s * 3.0)), fade: 1 - ease(clamp(boom * 1.3, 0, 1)) });
+      }
+      const c0 = cellCentre(pos, 0, 0, 8, 8);
+      S.bursts.push({ at: c0, r: 0.6 + ease(boom) * 6.4, fade: 1 - ease(boom), tone: P.blood });
+      S.bursts.push({ at: c0, r: 0.4 + easeI(boom) * 2.0, fade: (1 - ease(boom)) * 0.9, tone: P.ember });
+    }
+    S.caption = t < 0.42 ? 'the torus closes' : t < 0.56 ? 'nine cells about a1'
+      : t < 0.74 ? 'and they are contiguous' : 'flat again — and they are four corners';
+    return S;
+  }
+};
+
+/* ------------------------------------------------------------------- cube5 */
+OV.cube5 = {
+  label: 'cube5', diff: 'medium', dims: '5 × 5 × 5 · Raumschach',
+  blurb: 'Chess in a five-by-five-by-five cube, with unicorns that travel through space.',
+  thesis: 'The first overture that leaves the plane. It answers two questions in order — <b>why the board got smaller, and where the other 100 cells came from</b> — and it answers the first by <em>cutting</em>: three files and three ranks are dropped, the survivors keep their own size and their own place, and the corner block that is left is deliberately not centred until it slides.',
+  cam: t => ({ yaw: lerp(0.05, 0.66, ease(t)), elev: lerp(1.45, 0.52, ease(t)), dist: lerp(22, 28, ease(seg(t, 0.44, 1))), fov: 560 }),
+  phases: [
+    ['0.00 – 0.34', 'Cut', 'Files h, g, f and ranks 8, 7, 6 fall away one at a time, alternating, so the six cuts can be counted. Nothing rescales: every surviving cell keeps the size and position it had on the 8 × 8, which is why what is left is the a1 corner block and not a smaller board laid on top.'],
+    ['0.34 – 0.44', 'Recentre', 'The 5 × 5 that survived slides from the a1 corner to the middle of the pane. A separate, visible motion — the board being moved, not the board having been secretly smaller all along.'],
+    ['0.44 – 0.74', 'Extrude', 'Four more 5 × 5 layers lift off the first and space out into the cube. They rise together and separate late, so it reads as one object gaining depth rather than five boards arriving.'],
+    ['0.74 – 1.00', 'The triagonal', 'A unicorn moves [1,1,1] — one step on every axis at once — as a line straight through the solid, crossing three layers. Then a knight\'s 3-D leap, arcing out of its plane, because that is the move a player will misjudge first.']
+  ],
+  note: ['cold', 'The extra axis is cold: layer rims and connectors take the seam ramp, because an axis you cannot see in a plane is exactly what the cold half of the palette is reserved for. Pieces stay warm. The cut order — file, rank, file, rank — matters: dropping all three files and then all three ranks reads as two events, and this is one.'],
+  scene(t) {
+    const S = emptyScene();
+    const N = 5;
+    const cut = ease(seg(t, 0, 0.34));
+    const shift = ease(seg(t, 0.34, 0.44));
+    const ext = ease(seg(t, 0.44, 0.74));
+    const gap = lerp(0, 1.65, ext);
+    cutGrid(S, N, cut);
+    /* the surviving corner block, and the levels that grow off it */
+    const lv = L => cornerPos(N, shift, (L - 2) * gap);
+    for (let L = 0; L < N; L++) {
+      const alive = L === 2 ? 1 : clamp(ext * 1.5 - (Math.abs(L - 2) - 1) * 0.28, 0, 1);
+      if (alive <= 0.01) continue;
+      grid(S, lv(L), { nx: N, nz: N, fade: alive * (L === 2 ? 1 : 0.92),
+                       tone: (f, r) => ((f + r + L) % 2 ? 'dark' : 'light') });
+    }
+    /* the 8 x 8 army goes with the cells it was standing on */
+    const flat = (u, v) => [ u * 8 - 4, 0, v * 8 - 4 ];
+    if (ext < 0.35) for (let f = 0; f < 8; f++) for (const r of [0, 1, 6, 7]) {
+      const doomed = !(f < N && r < N);
+      const k = doomed ? cutFraction(N, f, r, cut) : 1 - ease(clamp(ext * 2.4, 0, 1));
+      if (k <= 0.02) continue;
+      const g = (r === 1 || r === 6) ? 'P' : BACK[f];
+      const side = r <= 1 ? 'white' : 'black';
+      if (doomed) piece(S, flat, f, r, g, side, { fade: k });
+      else piece(S, lv(2), f, r, g, side, { nx: N, nz: N, fade: k });
+    }
+    /* a Raumschach army once the cube exists */
+    if (ext > 0.3) {
+      const born = ease(seg(t, 0.56, 0.72));
+      const ROYAL = ['R', 'N', 'K', 'N', 'R'];
+      for (const [L, side] of [[0, 'white'], [1, 'white'], [3, 'black'], [4, 'black']]) {
+        const pL = lv(L);
+        for (let f = 0; f < N; f++) {
+          const r = side === 'white' ? (L === 0 ? 0 : 1) : (L === 4 ? 4 : 3);
+          const g = (L === 0 || L === 4) ? ROYAL[f] : 'P';
+          piece(S, pL, f, r, g, side, { nx: N, nz: N, fade: born });
+        }
+      }
+    }
+    if (ext > 0.05) for (let L = 0; L < N; L++) {
+      const pL = lv(L);
+      S.trails.push({ pts: [pL(0, 0), pL(1, 0), pL(1, 1), pL(0, 1), pL(0, 0)],
+                      tone: seamColor(L, N), w: 1.3, fade: 0.5 * ext });
+    }
+    const move = seg(t, 0.74, 1);
+    if (move > 0) {
+      const s = ease(clamp(move / 0.62, 0, 1));
+      const c0 = lv(1), c3 = lv(4);
+      const a = c0(1.5 / N, 1.5 / N), b = c3(4.5 / N, 4.5 / N);
+      const now = [lerp(a[0], b[0], s), lerp(a[1], b[1], s), lerp(a[2], b[2], s)];
+      S.trails.push({ pts: [a, now], tone: P.ember, w: 2.8, fade: 1 });
+      piece(S, lv(1), 0, 0, 'U', 'white', { nx: N, nz: N, at: now });
+      const kn = seg(move, 0.62, 1);
+      if (kn > 0) {
+        const ks = ease(kn), ka = lv(1)(0.5 / N, 2.5 / N), kb = lv(3)(1.5 / N, 2.5 / N);
+        const pts = [];
+        for (let i = 0; i <= 14; i++) {
+          const q = i / 14 * ks;
+          pts.push([lerp(ka[0], kb[0], q), lerp(ka[1], kb[1], q) + Math.sin(q * Math.PI) * 0.9, lerp(ka[2], kb[2], q)]);
+        }
+        S.trails.push({ pts, tone: seamColor(2, N), w: 2.2, fade: 1 });
+        piece(S, lv(1), 0, 0, 'N', 'white', { nx: N, nz: N, at: pts[pts.length - 1] });
+      }
+    }
+    S.caption = t < 0.34 ? 'three files and three ranks go' : t < 0.44 ? 'what is left moves to the middle'
+      : t < 0.74 ? 'and gains a third axis' : 'the unicorn goes through the solid';
+    return S;
+  }
+};
+
+/* ------------------------------------------------------------------ klein */
+OV.klein = {
+  label: 'klein', diff: 'medium', dims: '8 × 8 · file periodic, rank periodic with a file flip',
+  blurb: 'One pair of edges joined straight, one with a twist — and a bishop that finally escapes its colour.',
+  thesis: 'The gluing that <b>no circular cross-section can close</b>. The ranks join with the file reversed, and a half-turn brings a circle back shifted rather than reflected — so the tube has to pinch into a figure-eight, which a half-turn <em>does</em> reflect. That pinch is the whole content of the overture.',
+  cam: t => ({ yaw: lerp(-0.05, 1.02, ease(t)), elev: lerp(1.42, 0.46, ease(t)), dist: lerp(23, 19, ease(seg(t, 0.3, 1))), fov: 560 }),
+  phases: [
+    ['0.00 – 0.26', 'Files → cylinder', 'Straight, no flip, identical to <code>cylinder</code>. The overture deliberately spends its opening looking like a variant the player may already have watched.'],
+    ['0.26 – 0.40', 'The rims refuse', 'The tube tries to bring its two rims together with the file reversed, and cannot: a circle rotated a half-turn comes back <em>shifted</em> by four files, so the join is off by half a board. Marked in <code>blood</code>, file by file.'],
+    ['0.40 – 0.60', 'Pinch', 'The cross-section deforms from a circle into a figure-eight. Nothing else moves. This is the step that makes the gluing possible, so it gets the screen to itself.'],
+    ['0.60 – 0.86', 'Close the ring', 'The figure-eight travels round the ring and takes its half-turn. It comes back reflected, the seam meets exactly, and the surface passes through itself — drawn at reduced opacity, because a Klein bottle does not embed in three dimensions and a player about to try one should see that.'],
+    ['0.86 – 1.00', 'Colour escape', 'The light squares light. A bishop sets off from one, rides the loop, and lands on a dark square — legally. Nothing else in the library can do this, and it is exactly what the reflection buys.']
+  ],
+  note: ['cold', 'The figure-eight is not a stylisation, it is the fix. Rotating (sin a, sin 2a) by pi gives (sin(−a), sin(−2a)), which is the file reversed — so at <code>pinch = 1</code> both seams meet to machine precision. With a circular cross-section they cannot meet at all, which is what the first version of this overture showed by accident.'],
+  scene(t) {
+    const S = emptyScene();
+    const th = ease(seg(t, 0, 0.26)) * TAU;
+    const bad = seg(t, 0.26, 0.40);
+    const pinch = ease(seg(t, 0.40, 0.60));
+    const pr = ease(seg(t, 0.60, 0.86));
+    const esc = seg(t, 0.86, 1);
+    const pos = (u, v) => kleinSurf(u, v, { th, pinch, ph: pr * TAU, tau: pr, open: lerp(1, 2.05, pr) });
+    grid(S, pos, {
+      sub: 4,
+      tone: (f, r) => {
+        const lightSq = (f + r) % 2 === 0;
+        return (esc > 0.05 && lightSq) ? 'lit' : (lightSq ? 'light' : 'dark');
+      }
+    });
+    army(S, pos, { fade: 1 });
+    /* the two rims, in one portal colour, while they are still apart */
+    if (pr < 0.98) {
+      const c = seamColor(1, 2);
+      for (const e of [0.0005, 0.9995]) {
+        const pts = [];
+        for (let i = 0; i <= 24; i++) pts.push(pos(i / 24, e));
+        S.trails.push({ pts, tone: c, w: 2.6, fade: 1 - pr * 0.55 });
+      }
+    }
+    /* the refusal: a circle's half-turn lands file f opposite file f+4 */
+    const showBad = bad * (1 - ease(seg(t, 0.40, 0.52)));
+    if (showBad > 0.02) {
+      for (let f = 0; f < 8; f++) {
+        const u0 = (f + 0.5) / 8, u1 = ((f + 4) % 8 + 0.5) / 8;
+        S.trails.push({ pts: [pos(u0, 0.0005), pos(u1, 0.9995)], tone: P.blood, w: 1.6, fade: showBad * 0.7, dash: '3 4' });
+      }
+      S.bursts.push({ at: pos(0.5, 0.0005), r: 0.5, fade: showBad, tone: P.blood, cross: true });
+    }
+    if (esc > 0) {
+      const s = ease(esc);
+      S.trails.push(Object.assign(trailOn(pos, [0.19, 0.31], [0.19, 0.31 + s], 56, P.ember), { w: 2.8, fade: 1 }));
+      const v = (0.31 + s) % 1;
+      piece(S, pos, 0, 0, 'B', 'white', { at: pos(0.19, v), normal: normalAt(pos, 0.19, v) });
+    }
+    S.caption = t < 0.26 ? 'the files close, straight'
+      : t < 0.40 ? 'a circle comes back shifted, not reflected'
+      : t < 0.60 ? 'so the cross-section pinches'
+      : t < 0.86 ? 'and now the ring closes exactly' : 'a bishop leaves its colour';
+    return S;
+  }
+};
+
+/* ------------------------------------------------------------------ mobius */
+OV.mobius = {
+  label: 'mobius', diff: 'medium', dims: '8 × 8 · file periodic with a rank flip',
+  blurb: 'The files are glued with a half-twist. Ride the board twice and you come home mirrored.',
+  thesis: 'The most instructive overture in the set, because <b>the shape the cylinder settles into cannot absorb the flip.</b> The tube forms, fails to close, and has to open out into a band and take a half-turn. That failure is the whole lesson about non-orientable boards, and it is free — it is just what the geometry does.',
+  cam: t => ({ yaw: lerp(-0.05, 0.74, ease(t)), elev: lerp(1.42, 0.55, ease(t)), dist: lerp(23, 21, ease(t)), fov: 560 }),
+  phases: [
+    ['0.00 – 0.30', 'Roll, as a cylinder would', 'Identical to <code>cylinder</code>. There is no hint yet that anything is different.'],
+    ['0.30 – 0.44', 'The seam refuses', 'The seam tries to close and does not match: rank 1 has arrived opposite rank 8, and the checker parity clashes along the whole join. The mismatch is marked in <code>blood</code> — an authoring error, drawn as one.'],
+    ['0.44 – 0.64', 'Open out', 'The tube opens into a flat band: the same gluing, a different embedding, because the tube has no way to reverse its own axis and the band does.'],
+    ['0.64 – 0.84', 'Half-turn', 'The band\'s width rotates 180° over one trip round the loop. The seam closes cleanly, parity and all.'],
+    ['0.84 – 1.00', 'Home mirrored', 'A bishop rides once round and lands on the opposite parity, its glyph mirrored. Caption: ride twice to come home.']
+  ],
+  note: ['cold', 'The tube → band morph is a straight positional lerp between the two embeddings, which is smooth because both are closed surfaces of the same gluing. It is the one place an overture changes its mind about how to draw a surface, and it is doing so for a reason the player can see.'],
+  scene(t) {
+    const S = emptyScene();
+    const roll = ease(seg(t, 0, 0.30));
+    const openOut = ease(seg(t, 0.44, 0.64));
+    const tw = ease(seg(t, 0.64, 0.84));
+    const th = roll * TAU;
+    const asTube = (u, v) => tube(u, v, { th });
+    const asBand = (u, v) => band(u, v, { th, tau: tw });
+    const pos = blend(asTube, asBand, openOut);
+    grid(S, pos, { sub: 4 });
+    army(S, pos, { fade: 1 });
+    const bad = seg(t, 0.30, 0.44) * (1 - ease(seg(t, 0.44, 0.60)));
+    if (bad > 0.02) {
+      const pts = [];
+      for (let i = 0; i <= 8; i++) pts.push(pos(0.9995, i / 8));
+      S.trails.push({ pts, tone: P.blood, w: 3.4, fade: bad });
+      for (let i = 0; i < 8; i++) S.bursts.push({ at: pos(0.9995, (i + 0.5) / 8), r: 0.30, fade: bad * 0.9, tone: P.blood, cross: true });
+    }
+    if (tw > 0.05) {
+      const c = seamColor(0, 1), pts = [];
+      for (let i = 0; i <= 8; i++) pts.push(pos(0.9995, i / 8));
+      S.trails.push({ pts, tone: c, w: 3.0, fade: tw });
+    }
+    const ride = seg(t, 0.84, 1);
+    if (ride > 0) {
+      const s = ease(ride);
+      S.trails.push(Object.assign(trailOn(pos, [0.12, 0.28], [0.12 + s, 0.28], 50, P.ember), { w: 2.6, fade: 1 }));
+      const u = (0.12 + s) % 1;
+      piece(S, pos, 0, 0, 'B', 'white', { at: pos(u, 0.28), normal: normalAt(pos, u, 0.28), mirrored: s > 0.5 });
+    }
+    S.caption = t < 0.30 ? 'the files roll, as ever' : t < 0.44 ? 'and the seam does not match'
+      : t < 0.64 ? 'so the tube opens out' : t < 0.84 ? 'and takes a half-turn' : 'home, and mirrored';
+    return S;
+  }
+};
+
+/* ---------------------------------------------------------------------- 5d */
+OV['5d'] = {
+  label: '5d', diff: 'hard', dims: '8 × 8 × turn(10) × line(5)',
+  blurb: 'Chess on a board with time and timelines.',
+  thesis: 'The only overture whose subject is <b>boards, not cells</b>. It opens on one board dead centre, cuts it to 4 × 4 so that seven of them will still be legible, and then grows the lattice outward — staying centred the whole way, because the thing being explained is the shape of the lattice and a lattice drifting off the pane explains nothing.',
+  cam: t => ({ yaw: lerp(0, 0.22, ease(t)), elev: lerp(1.50, 1.02, ease(t)), dist: lerp(21, 44, ease(seg(t, 0.2, 1))), fov: 560 }),
+  phases: [
+    ['0.00 – 0.16', 'Cut', 'Four files and four ranks fall away, leaving a 4 × 4. Same cut as <code>cube5</code> and <code>hyper4</code>: cells keep their size. Here it buys legibility — seven 8 × 8 boards at this camera distance is mush, and the cut says so out loud rather than quietly drawing small boards.'],
+    ['0.16 – 0.22', 'Recentre', 'What survived slides to the middle. From here to the end the lattice stays centred on the pane as it grows, so the first board never walks off the edge.'],
+    ['0.22 – 0.46', 'Time is an axis', 'A move plays and a copy of the board appears to its right; then another. Boards along the turn axis alternate whose move it is, and are rimmed alternately to say so.'],
+    ['0.46 – 0.70', 'Branch', 'A piece moves <em>backwards</em> along the turn axis into an earlier board. That board cannot simply be overwritten, so a new row appears below it — a second timeline — joined by a curved connector.'],
+    ['0.70 – 1.00', 'The present', 'The present column lights and both live timelines answer. The camera has pulled back to a lattice of seven boards, which is what a 5-D position actually is.']
+  ],
+  note: ['cold', 'One gotcha from ADR-0013: the turn axis has <code>pitch = 2</code>, because boards along it alternate whose move it is and <em>one turn of travel is two boards</em>. A piece stepping one board back along time is moving half a turn, and the caption should not call it a turn.'],
+  scene(t) {
+    const S = emptyScene();
+    const N = 4;
+    const cut = ease(seg(t, 0, 0.16));
+    const shift = ease(seg(t, 0.16, 0.22));
+    const grow = seg(t, 0.22, 0.46), branch = seg(t, 0.46, 0.70), pres = seg(t, 0.70, 1);
+    const BW = 6.6, BH = 7.4;
+    cutGrid(S, N, cut);
+    /* Continuous lattice extent, so the recentring is smooth rather than jumping
+       every time a board is born. */
+    const kGrow = ease(seg(t, 0.24, 0.96)) * 3;
+    const lGrow = ease(seg(t, 0.48, 0.84));
+    const off = (4 - N / 2) * shift;
+    const originOf = (k, l) => [ (k - kGrow / 2) * BW + off, 0, (l - lGrow / 2) * BH + off ];
+    const boards = [[0, 0]];
+    if (grow > 0.22) boards.push([1, 0]);
+    if (grow > 0.64) boards.push([2, 0]);
+    if (branch > 0.28) boards.push([1, 1]);
+    if (branch > 0.72) boards.push([2, 1]);
+    if (pres > 0.34) boards.push([3, 0]);
+    if (pres > 0.58) boards.push([3, 1]);
+    const bornOf = (k, l) => {
+      if (k === 0 && l === 0) return 1;
+      if (l === 1) return ease(clamp((branch - (k === 1 ? 0.28 : 0.72)) / 0.28, 0, 1));
+      if (k === 1) return ease(clamp((grow - 0.22) / 0.3, 0, 1));
+      if (k === 2) return ease(clamp((grow - 0.64) / 0.3, 0, 1));
+      return ease(clamp((pres - 0.34) / 0.3, 0, 1));
+    };
+    const posOf = (k, l) => {
+      const o = originOf(k, l), born = bornOf(k, l);
+      return (u, v) => [ o[0] + u * N - N / 2, (1 - born) * 4, o[2] + v * N - N / 2 ];
+    };
+    for (const [k, l] of boards) {
+      const born = bornOf(k, l);
+      if (born <= 0.02) continue;
+      const bp = posOf(k, l);
+      grid(S, bp, { nx: N, nz: N, fade: born, inset: 0.04,
+                    tone: (f, r) => ((f + r) % 2 ? 'dark' : 'light') });
+      const isPresent = pres > 0.34 && k === 3;
+      const rim = isPresent ? P.ember : ((k % 2) === 0 ? P.boneFaint : seamColor(0, 2));
+      S.trails.push({ pts: [bp(0, 0), bp(1, 0), bp(1, 1), bp(0, 1), bp(0, 0)],
+                      tone: rim, w: isPresent ? 2.6 : 1.4, fade: born });
+      for (let f = 0; f < N; f++) {
+        piece(S, bp, f, 0, ['R', 'N', 'K', 'R'][f], 'white', { nx: N, nz: N, fade: born, h: 0.8 });
+        piece(S, bp, f, N - 1, ['R', 'N', 'K', 'R'][f], 'black', { nx: N, nz: N, fade: born, h: 0.8 });
+      }
+    }
+    /* the 8 x 8 army goes with its cells */
+    if (grow < 0.3) for (let f = 0; f < 8; f++) for (const r of [0, 1, 6, 7]) {
+      const doomed = !(f < N && r < N);
+      const k = doomed ? cutFraction(N, f, r, cut) : 0;
+      if (k <= 0.02) continue;
+      piece(S, (u, v) => [u * 8 - 4, 0, v * 8 - 4], f, r,
+            (r === 1 || r === 6) ? 'P' : BACK[f], r <= 1 ? 'white' : 'black', { fade: k });
+    }
+    /* connectors along turn */
+    for (const [k, l] of boards) {
+      if (k === 0 || !boards.some(([a, b]) => a === k - 1 && b === l)) continue;
+      const prev = originOf(k - 1, l), here = originOf(k, l);
+      S.trails.push({ pts: [[prev[0] + N / 2 + 0.2, 0.2, prev[2]], [here[0] - N / 2 - 0.2, 0.2, here[2]]],
+                      tone: P.boneFaint, w: 1.3, fade: 0.7 * bornOf(k, l), dash: '3 4' });
+    }
+    /* the branch: a curve down to the new timeline */
+    if (branch > 0.28) {
+      const a = originOf(1, 0), b = originOf(1, 1), pts = [];
+      const s0 = ease(clamp((branch - 0.28) / 0.34, 0, 1));
+      for (let i = 0; i <= 16; i++) {
+        const s = i / 16 * s0;
+        pts.push([ lerp(a[0], b[0], s) - Math.sin(s * Math.PI) * 2.4,
+                   0.4 + Math.sin(s * Math.PI) * 1.1, lerp(a[2], b[2], s) ]);
+      }
+      S.trails.push({ pts, tone: seamColor(1, 2), w: 2.6, fade: 1 });
+    }
+    S.caption = t < 0.16 ? 'cut, so seven boards will read' : t < 0.22 ? 'one board, centred'
+      : t < 0.46 ? 'every half-move appends a board'
+      : t < 0.70 ? 'going back makes a second timeline' : 'the present is a column, not a board';
+    return S;
+  }
+};
+
+/* ------------------------------------------------------------------ hyper4 */
+OV.hyper4 = {
+  label: 'hyper4', diff: 'hard', dims: '4 × 4 × 4 × 4 · aeon',
+  blurb: 'A four-dimensional board. Here a knight reaches in forty-eight directions.',
+  thesis: 'Four axes cannot be drawn, so this shows the construction: cut, extrude, and then <b>the fourth axis arrives as a hypercube</b> — nested cubes with the w-edges faint, the picture everyone has already seen — which only afterwards unfolds into the row of four cubes a player can actually read a move on.',
+  cam: t => ({ yaw: lerp(0.05, 0.46, ease(t)), elev: lerp(1.45, 0.60, ease(t)), dist: lerp(22, 46, ease(seg(t, 0.55, 1))), fov: 560 }),
+  phases: [
+    ['0.00 – 0.16', 'Cut', 'Four files and four ranks fall away, alternating, leaving the a1 corner 4 × 4. Same grammar as <code>cube5</code>, and for the same reason: cells keep their size, so the board loses rows rather than shrinking.'],
+    ['0.16 – 0.24', 'Recentre', 'The surviving 4 × 4 slides to the middle.'],
+    ['0.24 – 0.40', 'Third axis', 'Four levels extrude into a 4 × 4 × 4 cube.'],
+    ['0.40 – 0.62', 'Hypercube', 'The fourth axis arrives the way a 4-cube is always drawn: the other three aeon slices fade in nested inside and outside the first, scaled by their w coordinate, with the w-edges joining corresponding cells at low opacity. The whole figure turns slowly in the x–w plane so the nesting reads as depth and not as decoration.'],
+    ['0.62 – 0.78', 'Unfold', 'The nesting pulls apart into a row of four cubes along <code>aeon</code>, the w-edges stretching into the connectors between them. One continuous motion — the same 256 cells the whole way, only their positions interpolating.'],
+    ['0.78 – 1.00', 'Forty-eight', 'A rook slides along <code>aeon</code>, block to block, its connector bright so the move reads as a slide and not a teleport. Then the knight: from one cell, all 48 destinations light at once, across every block.']
+  ],
+  note: ['cold', 'The 48 pips must be authored from the atom, not by hand: {1,2} on any two of four axes, both orders, both signs, clipped to the board. The same expansion the engine does — which is the claim the variant is making — and the count on screen should be exactly 48 before clipping.'],
+  scene(t) {
+    const S = emptyScene();
+    const N = 4;
+    const cut = ease(seg(t, 0, 0.16));
+    const shift = ease(seg(t, 0.16, 0.24));
+    const ext = ease(seg(t, 0.24, 0.40));
+    const hyp = ease(seg(t, 0.40, 0.62));
+    const unfold = ease(seg(t, 0.62, 0.78));
+    const gap = lerp(0, 1.5, ext);
+    const aeonGap = 11.5;
+    const spin = 0.55 + t * 0.9;
+    cutGrid(S, N, cut);
+    const off = (4 - N / 2) * shift;
+    /* Three placements for the same cell, blended by phase: the plain cube (w
+       ignored), the 4-cube projection, and the unfolded row. */
+    const cubeAt = c => [ c[0] + off, c[1] * gap, c[2] + off ];
+    const hyperAt = c => {
+      const nx = c[0] * Math.cos(spin) - c[3] * Math.sin(spin);
+      const nw = c[0] * Math.sin(spin) + c[3] * Math.cos(spin);
+      const k = 2.35 / (3.5 - nw);
+      return [ nx * k * 2.15 + off, c[1] * k * 2.15 * 1.05, c[2] * k * 2.15 + off ];
+    };
+    const rowAt = c => [ c[3] * aeonGap + c[0] + off, c[1] * gap, c[2] + off ];
+    const place = c => {
+      const a = cubeAt(c), b = hyperAt(c), d = rowAt(c);
+      const m = hyp * (1 - unfold), n = unfold;
+      return [ lerp(lerp(a[0], b[0], m), d[0], n), lerp(lerp(a[1], b[1], m), d[1], n),
+               lerp(lerp(a[2], b[2], m), d[2], n) ];
+    };
+    /* cell (f,r) on level L of aeon slice A, in centred lattice coordinates */
+    const cellPos = (A, L) => (u, v) => place([ u * N - 2, L - 1.5, v * N - 2, A - 1.5 ]);
+    const nSlices = hyp > 0.02 ? N : 1;
+    for (let A = 0; A < nSlices; A++) {
+      const alive = A === 1 ? 1 : clamp(hyp * 1.7 - Math.abs(A - 1) * 0.16, 0, 1);
+      if (alive <= 0.01) continue;
+      for (let L = 0; L < N; L++) {
+        const lAlive = L === 1 ? 1 : clamp(ext * 1.5 - (Math.abs(L - 1) - 1) * 0.22, 0, 1);
+        if (lAlive <= 0.01) continue;
+        grid(S, cellPos(A, L), {
+          nx: N, nz: N, fade: alive * lAlive * (A === 1 ? 1 : 0.86),
+          tone: (f, r) => ((f + r + L + A) % 2 ? 'dark' : 'light'), inset: 0.05
+        });
+      }
+    }
+    /* the 8 x 8 army goes with its cells */
+    if (ext < 0.4) for (let f = 0; f < 8; f++) for (const r of [0, 1, 6, 7]) {
+      const doomed = !(f < N && r < N);
+      const k = doomed ? cutFraction(N, f, r, cut) : 1 - ease(clamp(ext * 2.2, 0, 1));
+      if (k <= 0.02) continue;
+      const g = (r === 1 || r === 6) ? 'P' : BACK[f];
+      const side = r <= 1 ? 'white' : 'black';
+      if (doomed) piece(S, (u, v) => [u * 8 - 4, 0, v * 8 - 4], f, r, g, side, { fade: k });
+      else piece(S, cellPos(1, 1), f, r, g, side, { nx: N, nz: N, fade: k });
+    }
+    /* level rims, and the w-edges that make the figure a hypercube */
+    if (ext > 0.08) for (let A = 0; A < nSlices; A++) {
+      const alive = A === 1 ? 1 : clamp(hyp * 1.7 - Math.abs(A - 1) * 0.16, 0, 1);
+      if (alive <= 0.01) continue;
+      for (let L = 0; L < N; L++) {
+        const p = cellPos(A, L);
+        S.trails.push({ pts: [p(0, 0), p(1, 0), p(1, 1), p(0, 1), p(0, 0)],
+                        tone: seamColor(L, N), w: 1.1, fade: 0.42 * ext * alive });
+      }
+    }
+    if (hyp > 0.05) for (let A = 0; A < N - 1; A++) {
+      const alive = clamp(hyp * 1.7 - Math.abs(A - 1) * 0.16, 0, 1);
+      for (const L of [0, 3]) for (const cu of [0, 1]) for (const cv of [0, 1]) {
+        const a = cellPos(A, L)(cu, cv), b = cellPos(A + 1, L)(cu, cv);
+        S.trails.push({ pts: [a, b], tone: seamColor(3, N), w: 0.9,
+                        fade: 0.26 * alive, dash: unfold > 0.5 ? '3 5' : null });
+      }
+    }
+    /* the army, once there is a block to stand it on */
+    if (ext > 0.3 && hyp > 0.2) {
+      const born = ease(seg(t, 0.44, 0.60)), p = cellPos(1, 0);
+      for (let f = 0; f < N; f++) {
+        piece(S, p, f, 0, ['R', 'N', 'K', 'R'][f], 'white', { nx: N, nz: N, fade: born, h: 0.85 });
+        piece(S, p, f, 3, ['R', 'N', 'K', 'R'][f], 'black', { nx: N, nz: N, fade: born, h: 0.85 });
+      }
+    }
+    const show = seg(t, 0.78, 1);
+    if (show > 0) {
+      const s = ease(clamp(show / 0.5, 0, 1));
+      const rk = A => cellPos(A, 1)(1.5 / N, 2.5 / N);
+      const a0 = rk(0), now = place([ 1.5 - 2, 1 - 1.5, 2.5 - 2, lerp(0, 3, s) - 1.5 ]);
+      S.trails.push({ pts: [a0, now], tone: P.ember, w: 2.6, fade: 1 });
+      piece(S, cellPos(0, 1), 0, 0, 'R', 'white', { nx: N, nz: N, at: now });
+      const fan = seg(show, 0.5, 1);
+      if (fan > 0) {
+        /* {1,2} on any two of four axes, both orders, both signs - 48 of them */
+        const base = [1, 1, 1, 1];
+        let seen = 0;
+        for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+          if (i === j) continue;
+          for (const si of [-1, 1]) for (const sj of [-1, 1]) {
+            const c = base.slice();
+            c[i] += si; c[j] += sj * 2;
+            seen++;
+            if (c.some(x => x < 0 || x > 3)) continue;
+            S.bursts.push({ at: place([ c[0] + 0.5 - 2, c[2] - 1.5, c[1] + 0.5 - 2, c[3] - 1.5 ]),
+                            r: 0.30, fade: clamp(fan * 2 - seen / 96, 0, 1) * 0.95, tone: seamColor(1, N) });
+          }
+        }
+        piece(S, cellPos(1, 1), 0, 0, 'N', 'white', { nx: N, nz: N, at: place([1.5 - 2, 1 - 1.5, 1.5 - 2, 1 - 1.5]) });
+      }
+    }
+    S.caption = t < 0.16 ? 'four files and four ranks go' : t < 0.24 ? 'and what is left moves in'
+      : t < 0.40 ? 'a third axis' : t < 0.62 ? 'and a fourth, as a hypercube'
+      : t < 0.78 ? 'which unfolds into four cubes'
+      : show > 0.5 ? 'one knight, forty-eight destinations' : 'the rook slides through aeon';
+    return S;
+  }
+};
+
+/* ===========================================================================
+   Renderer: world scene -> sorted SVG.
+   =========================================================================== */
+const TONE = () => ({
+  light:  P.board[0], dark: P.board[1],
+  lit:    P.ember,    scorch: P.blood,
+  mirror: P.mirror,   scrim: P.light ? '#FFFFFF' : '#000000',
+  rim:    P.rim
+});
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+function render(sc, cam) {
+  const items = [];
+  const tones = TONE();
+  for (const q of sc.quads) {
+    const pr = q.p.map(p => project(p, cam));
+    const sh = faceShade(q.p[0], q.p[1], q.p[2]);
+    const base = tones[q.tone] || q.tone;
+    const isScrim = q.tone === 'scrim';
+    const d = (pr[0][2] + pr[1][2] + pr[2][2] + pr[3][2]) / 4;
+    items.push({
+      d, svg: `<polygon points="${pr.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ')}" fill="${isScrim ? base : shade(base, q.tone === 'mirror' ? 1 : sh)}" fill-opacity="${(q.fade * (isScrim ? 1 : 1)).toFixed(3)}" ${q.tone === 'mirror' ? 'stroke="' + shade(P.mirror, .8) + '" stroke-width="1"' : ''}/>`
+    });
+  }
+  for (const tr of sc.trails) {
+    const pr = tr.pts.map(p => project(p, cam));
+    const d = Math.min(...pr.map(p => p[2])) - 0.01;
+    items.push({
+      d, svg: `<polyline points="${pr.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ')}" fill="none" stroke="${tr.tone}" stroke-width="${(tr.w || 2)}" stroke-opacity="${(tr.fade === undefined ? 1 : tr.fade).toFixed(3)}" stroke-linecap="round" stroke-linejoin="round" ${tr.dash ? 'stroke-dasharray="' + tr.dash + '"' : ''}/>`
+    });
+  }
+  for (const b of sc.bursts) {
+    const p = project(b.at, cam);
+    const r = Math.max(1.5, b.r * p[3]);
+    items.push({
+      d: p[2] - 0.02, svg: b.cross
+        ? `<g stroke="${b.tone}" stroke-width="2.4" stroke-opacity="${b.fade.toFixed(3)}" stroke-linecap="round"><line x1="${(p[0]-r).toFixed(1)}" y1="${(p[1]-r).toFixed(1)}" x2="${(p[0]+r).toFixed(1)}" y2="${(p[1]+r).toFixed(1)}"/><line x1="${(p[0]+r).toFixed(1)}" y1="${(p[1]-r).toFixed(1)}" x2="${(p[0]-r).toFixed(1)}" y2="${(p[1]+r).toFixed(1)}"/></g>`
+        : `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${r.toFixed(1)}" fill="none" stroke="${b.tone}" stroke-width="${Math.max(1.2, 3 - b.r * 0.2).toFixed(1)}" stroke-opacity="${b.fade.toFixed(3)}"/>`
+    });
+  }
+  for (const pc of sc.pieces) {
+    if (pc.fade <= 0.02) continue;
+    const base = project(pc.at, cam);
+    const top = project(add(pc.at, mul(pc.normal, 0.62 * pc.h)), cam);
+    const w = Math.max(1.6, 0.30 * base[3]);
+    const fill = pc.side === 'white' ? P.white : P.black;
+    const edge = pc.side === 'white' ? shade(P.white, 0.72) : shade(P.black, 2.3);
+    const txt = pc.side === 'white' ? P.black : P.white;
+    const fs = Math.max(6, 0.40 * base[3]);
+    items.push({
+      d: base[2] - 0.04,
+      svg: `<g opacity="${pc.fade.toFixed(3)}">`
+        + `<ellipse cx="${base[0].toFixed(1)}" cy="${base[1].toFixed(1)}" rx="${(w * 1.05).toFixed(1)}" ry="${(w * 0.46).toFixed(1)}" fill="${shade('#000000', 1, 0.16)}"/>`
+        + `<polygon points="${(base[0]-w).toFixed(1)},${base[1].toFixed(1)} ${(base[0]+w).toFixed(1)},${base[1].toFixed(1)} ${(top[0]+w*0.62).toFixed(1)},${top[1].toFixed(1)} ${(top[0]-w*0.62).toFixed(1)},${top[1].toFixed(1)}" fill="${fill}" stroke="${edge}" stroke-width="0.8"/>`
+        + `<circle cx="${top[0].toFixed(1)}" cy="${top[1].toFixed(1)}" r="${(w * 0.82).toFixed(1)}" fill="${fill}" stroke="${edge}" stroke-width="0.8"/>`
+        + `<text x="${top[0].toFixed(1)}" y="${top[1].toFixed(1)}" dy="${(fs * 0.34).toFixed(1)}" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="${fs.toFixed(1)}" fill="${txt}"${pc.mirrored ? ` transform="translate(${(top[0] * 2).toFixed(1)},0) scale(-1,1)"` : ''}>${esc(pc.glyph)}</text>`
+        + `</g>`
+    });
+  }
+  items.sort((a, b) => b.d - a.d);
+  return items.map(i => i.svg).join('');
+}
+
+/* ===========================================================================
+   The hero: library, transport, and the queue state machine.
+   =========================================================================== */
+const ORDER = ['atomic', 'cylinder', 'mirrorbox', 'mustcapture', 'standard',
+               'atomic_torus', 'cube5', 'klein', 'mobius', 'torus', '5d', 'hyper4'];
+const GROUPS = [['Easy', 0, 5], ['Medium', 5, 10], ['Hard', 10, 12]];
+const DIFFVAR = { easy: 'var(--d-easy)', medium: 'var(--d-medium)', hard: 'var(--d-hard)' };
+
+const FWD = 2.4, REV = 2.4, HOLD1 = 0.7, HOLD0 = 0.25;
+let current = 'standard', pending = null, state = 'forward', t = 0, dwell = 0;
+/* The standard overture builds the board on the first entry to this screen and
+   never again. Consumed at t = 1, where the two versions of that scene are
+   identical by construction, so the flag can flip with nothing visible. */
+let introPending = true;
+let playing = true, speed = 1;
+
+const heroG = document.getElementById('heroG');
+const heroName = document.getElementById('heroName');
+const heroPhase = document.getElementById('heroPhase');
+const heroBlurb = document.getElementById('heroBlurb');
+const tRange = document.getElementById('tRange');
+const tRead = document.getElementById('tRead');
+const stRead = document.getElementById('stRead');
+const qRead = document.getElementById('qRead');
+const playBtn = document.getElementById('playBtn');
+
+/* ---- library ------------------------------------------------------------- */
+const libList = document.getElementById('libList');
+let libHtml = '';
+for (const [name, a, b] of GROUPS) {
+  libHtml += `<div class="lib-group">${name}</div>`;
+  for (const key of ORDER.slice(a, b)) {
+    const o = OV[key];
+    libHtml += `<button class="lib-entry" type="button" data-v="${key}" style="--d:${DIFFVAR[o.diff]}">`
+      + `<span class="dot"></span><span>${esc(o.label)}</span><span class="q">queued</span></button>`;
+  }
+}
+libList.innerHTML = libHtml;
+libList.addEventListener('click', e => {
+  const b = e.target.closest('.lib-entry');
+  if (b) select(b.dataset.v);
+});
+
+function select(v) {
+  if (v === current) { pending = null; syncLib(); return; }
+  if (state === 'settled') { current = v; pending = null; state = 'forward'; t = 0; }
+  else { pending = v; }          /* stored, and nothing on screen is interrupted */
+  syncLib();
+}
+function syncLib() {
+  for (const b of libList.querySelectorAll('.lib-entry')) {
+    b.setAttribute('aria-current', String(b.dataset.v === current));
+    b.dataset.queued = b.dataset.v === pending ? '1' : '0';
+  }
+  qRead.textContent = pending ? OV[pending].label : '—';
+  stRead.textContent = state;
+}
+
+/* ---- phase readout ------------------------------------------------------- */
+function phaseOf(o, tt) {
+  for (const [range, label] of o.phases) {
+    const [a, b] = range.split('–').map(s => parseFloat(s));
+    if (tt >= a - 1e-6 && tt <= b + 1e-6) return `${label.toLowerCase()}   t ${tt.toFixed(2)}`;
+  }
+  return `t ${tt.toFixed(2)}`;
+}
+
+/* ---- loop ---------------------------------------------------------------- */
+let last = performance.now();
+const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+if (reduced.matches) { playing = false; t = 0.55; playBtn.textContent = 'Play'; }
+
+function step(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  if (playing) {
+    if (state === 'forward') {
+      t += dt * speed / FWD;
+      if (t >= 1) {
+        t = 1; state = 'held'; dwell = 0;
+        if (current === 'standard') introPending = false;
+        syncLib();
+      }
+    } else if (state === 'held') {
+      dwell += dt * speed;
+      if (dwell >= HOLD1) { state = 'reverse'; syncLib(); }
+    } else if (state === 'reverse') {
+      t -= dt * speed / REV;
+      if (t <= 0) { t = 0; state = 'settled'; dwell = 0; syncLib(); }
+    } else {
+      dwell += dt * speed;
+      if (dwell >= HOLD0) {
+        if (pending) { current = pending; pending = null; }
+        state = 'forward'; syncLib();
+      }
+    }
+    tRange.value = String(Math.round(t * 1000));
+  }
+  draw();
+  requestAnimationFrame(step);
+}
+function draw() {
+  syncPalette();
+  const o = OV[current];
+  const sc = o.scene(t, introPending && current === 'standard');
+  heroG.innerHTML = render(sc, o.cam(t));
+  heroName.textContent = o.label;
+  heroPhase.textContent = sc.caption ? sc.caption + '   ·   t ' + t.toFixed(2) : phaseOf(o, t);
+  heroBlurb.textContent = o.blurb;
+  tRead.textContent = t.toFixed(3);
+}
+playBtn.addEventListener('click', () => {
+  playing = !playing;
+  playBtn.textContent = playing ? 'Pause' : 'Play';
+});
+tRange.addEventListener('input', () => {
+  playing = false; playBtn.textContent = 'Play';
+  t = Number(tRange.value) / 1000;
+  state = t >= 1 ? 'held' : t <= 0 ? 'settled' : 'forward';
+  syncLib();
+});
+document.getElementById('introBtn').addEventListener('click', () => {
+  introPending = true; current = 'standard'; pending = null;
+  state = 'forward'; t = 0; dwell = 0; playing = true;
+  playBtn.textContent = 'Pause'; syncLib();
+});
+document.getElementById('spdRange').addEventListener('input', e => { speed = Number(e.target.value) / 100; });
+
+/* ===========================================================================
+   The spec cards, with keyframes rendered by the same scene functions.
+   =========================================================================== */
+const STILLS = [0.18, 0.55, 0.92];
+const cardList = document.getElementById('cardList');
+let cardsHtml = '';
+for (const key of ORDER) {
+  const o = OV[key];
+  cardsHtml += `<article class="card" id="card-${key}">`
+    + `<div>`
+    + `<div class="card-head"><h3>${esc(o.label)}</h3>`
+    + `<span class="diff" style="--d:${DIFFVAR[o.diff]}">${o.diff}</span>`
+    + `<span class="dims">${esc(o.dims)}</span></div>`
+    + `<p class="thesis">${o.thesis}</p>`
+    + `<table class="phases"><thead><tr><th>t</th><th>Beat</th><th>What happens</th></tr></thead><tbody>`
+    + o.phases.map(([r, l, d]) => `<tr><td class="t">${r}</td><td class="lb">${esc(l)}</td><td class="ds">${d}</td></tr>`).join('')
+    + `</tbody></table>`
+    + (o.note ? `<div class="note ${o.note[0]}"><b>Note</b> — ${o.note[1]}</div>` : '')
+    + `</div>`
+    + `<div class="frames">`
+    + STILLS.map((s, i) => `<figure><div class="box"><svg viewBox="-320 -260 640 520" data-still="${key}" data-t="${s}"><g></g></svg></div><figcaption>t = ${s.toFixed(2)}</figcaption></figure>`).join('')
+    + `</div></article>`;
+}
+cardList.innerHTML = cardsHtml;
+
+function drawStills() {
+  syncPalette();
+  for (const svg of cardList.querySelectorAll('svg[data-still]')) {
+    const o = OV[svg.dataset.still], tt = Number(svg.dataset.t);
+    const cam = o.cam(tt);
+    svg.firstChild.innerHTML = render(o.scene(tt, !!o.intro), Object.assign({}, cam, { fov: cam.fov * 0.86 }));
+  }
+}
+drawStills();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawStills);
+new MutationObserver(drawStills).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+syncLib();
+draw();
+requestAnimationFrame(step);
+</script>

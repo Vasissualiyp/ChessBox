@@ -41,6 +41,7 @@ nix flake check                  # THE gate: both compilers, sanitizers, coverag
 ./build/dev/src/gui/chessbox_gui klein                 # any variant in variants/
 ./build/dev/src/gui/chessbox_gui cube5 --shot out.ppm --script "click c1"
 ./build/dev/src/gui/chessbox_gui --shot out.ppm --screen settings   # any screen
+./build/dev/src/gui/chessbox_gui torus --shot o.ppm --screen newgame --t 0.6  # an overture
 ```
 
 **A build directory remembers which shell configured it.** One configured under
@@ -77,7 +78,7 @@ Each layer is a CMake target linking only to lower layers, so a violation is a
 |---|---|---|
 | L110 | `src/cli` | the scriptable command-line front end |
 | L110 | `src/gui` | the playable window's main loop (exe only) |
-| L100 | `src/render` | Vulkan, offscreen target, instanced renderer, piece meshes, ImGui panels |
+| L100 | `src/render` | Vulkan, offscreen target, instanced renderer, piece meshes, ImGui panels, variant overtures |
 | L105 | `src/net` | the multiplayer front end: framed protocol, in-process transport, authoritative server, thin client |
 | L95 | `src/app` | screens, settings, interaction: actions in, snapshot out |
 | L90 | `src/io` | variant TOML loader, notation, FEN-N, ASCII board, replay |
@@ -113,6 +114,8 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | UI colours | `src/view/theme.hpp` - two themes, one struct, no renderer changes | |
 | A flat piece icon | `src/render/piece_icon.cpp` - polygon tables, two styles | |
 | A menu's decorative object | `src/render/deco.cpp` + `decoForScreen` | |
+| How a menu object answers a drag | `Ui::updateObjectDrag`; the turn is an offset on the object's own animation | |
+| A variant's library animation | `src/render/overture_scene.cpp`; which one, and its cycle, in `src/app/overture.cpp` | |
 | New module in a layer | that layer's dir + CMake edge + test + this table | `cb-new-module` |
 | A decision | `docs/adr/` | `cb-adr` |
 | Perft mismatch | bisect with `divide` against the oracle | `cb-perft-golden` |
@@ -205,3 +208,19 @@ These are the ones that have actually cost time here, not hypotheticals.
   scale. A fraction-of-the-box band turns the board's plinth into a solid orange slab.
 - Debug is pinned to `-O0` because nix injects `-O2`; a Catch2 `[.]`-hidden test still
   runs if a filter matches any of its other tags.
+- **An overture is a pure function of `t`.** `overtureScene(which, t, intro, theme)` reads
+  no clock and no previous frame, which is what makes reverse playback free - the player
+  counts `t` down - and a screenshot reproducible. Anything that needs to remember
+  something between frames belongs in `app::OverturePlayer`, not in a scene.
+- **`--shot` hands the interface a fixed timestep on purpose**, and the interface hands
+  that same timestep to the overture as its dt. `setProgress` therefore *pins* the player
+  so the capture stays where it was put; pinning without holding put `--screen newgame`
+  almost half a cycle past the `--t` it was given.
+- A Klein bottle cannot be closed with a circular cross-section. `klein` glues its ranks
+  with the file reversed, and a half-turn brings a circle back *shifted*, not reflected -
+  so `kleinSurf` pinches the cross-section into a figure-eight, for which a half-turn
+  *is* the reflection. `tests/render/test_overture_scene.cpp` states each variant's own
+  gluing as arithmetic, which is the test that caught it.
+- `ImDrawList::AddCircle` with `num_segments = 0` divides by a tessellation table that is
+  zero-filled until `NewFrame` has run - so it is an integer divide by zero in a headless
+  draw list. Always state the segment count.

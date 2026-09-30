@@ -88,8 +88,14 @@ class DepthField {
 /// `zoom` scales the object about the rect's centre (the camera dolly, as a 2-D draw list
 /// can show it) and `alpha` fades every colour it emits. At `alpha` 0 it draws nothing at
 /// all, so a screen on its way out leaves no geometry behind.
+///
+/// `yawTurn` and `elevTurn` are the viewer's own, from dragging the object: added to
+/// whatever turn the object was already making rather than replacing it, so a decoration
+/// someone has taken hold of keeps drifting instead of freezing under the cursor. The
+/// atom is flat and ignores both.
 void drawDeco(ImDrawList* dl, Deco what, ImVec2 min, ImVec2 max, const view::Theme& theme,
               IconStyle iconStyle, float time, const VariantSpec* variant,
-              float zoom = 1.0f, float alpha = 1.0f);
+              float zoom = 1.0f, float alpha = 1.0f, float yawTurn = 0.0f,
+              float elevTurn = 0.0f);
 
 }  // namespace cb::render

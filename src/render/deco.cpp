@@ -129,12 +129,12 @@ Vec3 quintic(int k1, int k2, float x, float y) {
 }
 
 void drawManifold(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
-                  IconStyle iconStyle, float t) {
+                  IconStyle iconStyle, float t, float yawTurn, float elevTurn) {
   Camera cam;
   cam.centre = ImVec2((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
   cam.scale = std::min(max.x - min.x, max.y - min.y) * 0.20f;
-  cam.yaw = t * 0.09f;
-  cam.pitch = 0.45f + std::sin(t * 0.05f) * 0.22f;
+  cam.yaw = t * 0.09f + yawTurn;
+  cam.pitch = std::clamp(0.45f + std::sin(t * 0.05f) * 0.22f + elevTurn, -1.35f, 1.35f);
 
   constexpr int kSteps = 6;
   struct Tile {
@@ -210,7 +210,8 @@ void drawManifold(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& the
 }
 
 void drawLattice(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
-                 IconStyle iconStyle, float t, const VariantSpec* variant) {
+                 IconStyle iconStyle, float t, const VariantSpec* variant, float yawTurn,
+                 float elevTurn) {
   // How many boards, and how deep: read off the variant rather than hardcoded, so the
   // decoration is genuinely about the thing you are choosing.
   int across = 1, down = 1, layers = 1;
@@ -248,8 +249,8 @@ void drawLattice(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& them
   Camera cam;
   cam.centre = ImVec2(0, 0);
   cam.scale = 1.0f;
-  cam.yaw = t * 0.16f;
-  cam.pitch = 0.82f + std::sin(t * 0.09f) * 0.09f;
+  cam.yaw = t * 0.16f + yawTurn;
+  cam.pitch = std::clamp(0.82f + std::sin(t * 0.09f) * 0.09f + elevTurn, -1.35f, 1.35f);
   cam.perspective = 0.06f;
 
   // Fit by measuring, not by guessing a constant: the arrangement turns, and a lattice
@@ -350,11 +351,11 @@ void drawLattice(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& them
 }
 
 void drawTesseract(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
-                   float t) {
+                   float t, float yawTurn, float elevTurn) {
   const ImVec2 centre((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
   // A decoration beside a menu, not the subject: half the size it used to be.
   const float scale = std::min(max.x - min.x, max.y - min.y) * 0.13f;
-  const float a = t * 0.14f, b = t * 0.09f;
+  const float a = t * 0.14f + yawTurn, b = t * 0.09f;
 
   ImVec2 pts[16];
   for (int i = 0; i < 16; ++i) {
@@ -369,7 +370,8 @@ void drawTesseract(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& th
     const float ny = y * std::cos(b) - z * std::sin(b);
     const float nz = y * std::sin(b) + z * std::cos(b);
     const float k = 1.0f / (2.4f - nw * 0.85f);
-    const Vec3 p = rotateX({nx * k * 2.2f, ny * k * 2.2f, nz * k * 2.2f}, 0.35f);
+    const Vec3 p = rotateX({nx * k * 2.2f, ny * k * 2.2f, nz * k * 2.2f},
+                           std::clamp(0.35f + elevTurn, -1.35f, 1.35f));
     const float pp = 1.0f / (1.0f + p.z * 0.2f);
     pts[i] = ImVec2(centre.x + p.x * scale * pp, centre.y - p.y * scale * pp);
   }
@@ -453,8 +455,11 @@ Deco decoForScreen(int screen) noexcept {
   switch (static_cast<app::Screen>(screen)) {
     case app::Screen::MainMenu:
       return Deco::Manifold;
+    // The library's object is the selected variant's *overture*, which the screen draws
+    // itself - see Ui::drawOvertureObject. The turning lattice it replaces said only how
+    // many boards a variant had; an overture says what shape they are on.
     case app::Screen::NewGame:
-      return Deco::Lattice;
+      return Deco::None;
     case app::Screen::Settings:
       return Deco::Tesseract;
     case app::Screen::Editor:
@@ -586,7 +591,7 @@ void DepthField::draw(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme&
 
 void drawDeco(ImDrawList* dl, Deco what, ImVec2 min, ImVec2 max, const view::Theme& theme,
               IconStyle iconStyle, float time, const VariantSpec* variant, float zoom,
-              float alpha) {
+              float alpha, float yawTurn, float elevTurn) {
   // A decoration at alpha 0 must emit nothing at all, or the leaving screen's object
   // would still be in the draw list and the headless capture would see it.
   if (alpha <= 0.0f) return;
@@ -598,13 +603,13 @@ void drawDeco(ImDrawList* dl, Deco what, ImVec2 min, ImVec2 max, const view::The
   gDecoAlpha = alpha;
   switch (what) {
     case Deco::Manifold:
-      drawManifold(dl, lo, hi, theme, iconStyle, time);
+      drawManifold(dl, lo, hi, theme, iconStyle, time, yawTurn, elevTurn);
       break;
     case Deco::Lattice:
-      drawLattice(dl, lo, hi, theme, iconStyle, time, variant);
+      drawLattice(dl, lo, hi, theme, iconStyle, time, variant, yawTurn, elevTurn);
       break;
     case Deco::Tesseract:
-      drawTesseract(dl, lo, hi, theme, time);
+      drawTesseract(dl, lo, hi, theme, time, yawTurn, elevTurn);
       break;
     case Deco::Atom:
       drawAtom(dl, lo, hi, theme, iconStyle, time);

@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -185,7 +186,7 @@ void syncMarks(render::BoardRenderer& renderer, const app::Session& session) {
 /// use. That makes the whole screen capturable on a machine with no compositor, which is
 /// how the interface gets reviewed at all.
 int captureFrame(const std::string& variantName, const std::string& path,
-                 const std::string& script, const std::string& screen) {
+                 const std::string& script, const std::string& screen, float overtureT) {
   // Captures use default settings, never the person's own. A screenshot that changes
   // because whoever ran it likes a larger interface is not a screenshot of the game -
   // and `ctest -R gui-` would then pass or fail by whose machine it ran on.
@@ -214,9 +215,17 @@ int captureFrame(const std::string& variantName, const std::string& path,
     shell->go(app::Screen::GameInfo);
   else if (screen == "pieces")
     shell->go(app::Screen::PieceMoves);
-  else if (screen == "newgame")
+  else if (screen == "newgame") {
     shell->go(app::Screen::NewGame);
-  else if (screen == "quit")
+    // The named variant is the one under review, so the capture shows *its* overture
+    // rather than whatever the picker would have opened on.
+    shell->overtures().jumpTo(app::overtureFor(variantName));
+    // A canonical point in the overture's cycle, stated rather than integrated towards:
+    // the capture feeds a fixed timestep on purpose, and a screenshot of the library has
+    // to be the same picture every time it is taken. Late enough that the selected
+    // variant's shape has formed and there is something to look at.
+    shell->overtures().setProgress(overtureT);
+  } else if (screen == "quit")
     shell->go(app::Screen::QuitConfirm);
 
   if (SDL_getenv("DISPLAY") == nullptr && SDL_getenv("WAYLAND_DISPLAY") == nullptr) {
@@ -261,6 +270,9 @@ int captureFrame(const std::string& variantName, const std::string& path,
     // A fixed step rather than a real clock: the shell animates, and a capture has to
     // be the same picture every time it is taken.
     (*ui)->tick(frame == 0 ? 0.0f : 1.0f);
+    // Re-pinned every frame, because that fixed one-second tick is exactly what the
+    // interface hands the overture as its own dt - so pinning once before the loop put
+    // the capture almost half a cycle past where it was asked for.
     (*ui)->newFrame();
     const render::UiRequest request = (*ui)->build(*shell, 60.0f);
     (*ui)->endFrame();
@@ -329,6 +341,7 @@ int main(int argc, char** argv) {
   std::string shotPath;
   std::string script;
   std::string screen;
+  float overtureT = 0.78f;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "-h" || arg == "--help") {
@@ -340,7 +353,9 @@ int main(int argc, char** argv) {
           "With no variant, the game opens on the main menu.\n"
           "--shot renders one frame to a PPM and exits, with no display required;\n"
           "--screen picks which one: menu, newgame, pause, settings, editor, info,\n"
-          "pieces, or the board by default.\n");
+          "pieces, or the board by default.\n"
+          "--t 0..1 is where the library screen's overture is in its cycle: 0 the flat\n"
+          "board every variant starts from, 1 the shape it becomes.\n");
       return 0;
     }
     if (arg == "--shot" && i + 1 < argc)
@@ -349,12 +364,14 @@ int main(int argc, char** argv) {
       script = argv[++i];
     else if (arg == "--screen" && i + 1 < argc)
       screen = argv[++i];
+    else if (arg == "--t" && i + 1 < argc)
+      overtureT = std::strtof(argv[++i], nullptr);
     else if (!arg.starts_with("-"))
       variantName = arg;
   }
   if (!shotPath.empty()) {
     return captureFrame(variantName.empty() ? "standard" : variantName, shotPath, script,
-                        screen);
+                        screen, overtureT);
   }
 
   auto shell = makeShell();
@@ -493,9 +510,12 @@ int main(int argc, char** argv) {
         }
         case SDL_EVENT_KEY_DOWN: {
           if (consumed) break;
-          // In two-player mode each half of the keyboard enters its own moves; a key
-          // that a player owns is consumed here so it cannot also trigger a shortcut.
-          if (inGame && shell->session()->feedHotSeat(keyChar(e.key.key))) break;
+          // In two-player mode the keyboard belongs to the players, not the shell: a key
+          // a player owns is fed to their half of the board, and the single-player
+          // shortcuts are off entirely so a stray key while the other player types cannot
+          // undo or reset the game. Esc still pauses.
+          const bool twoPlayer = inGame && shell->session()->hotSeat();
+          if (twoPlayer && shell->session()->feedHotSeat(keyChar(e.key.key))) break;
           app::Action a;
           switch (e.key.key) {
             case SDLK_ESCAPE:
@@ -506,13 +526,13 @@ int main(int argc, char** argv) {
               if (shell->screen() == app::Screen::MainMenu) running = false;
               break;
             case SDLK_U:
-              if (inGame) {
+              if (inGame && !twoPlayer) {
                 a.kind = app::ActionKind::Undo;
                 (void)shell->session()->apply(a);
               }
               break;
             case SDLK_R:
-              if (inGame) {
+              if (inGame && !twoPlayer) {
                 a.kind = app::ActionKind::Reset;
                 (void)shell->session()->apply(a);
               }

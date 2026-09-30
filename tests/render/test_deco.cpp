@@ -9,6 +9,7 @@
 #ifdef CB_HAVE_IMGUI
 
 #include <utility>
+#include <vector>
 
 #include <imgui.h>
 
@@ -59,6 +60,34 @@ TEST_CASE("a decoration at alpha zero emits nothing", "[render]") {
   drawDeco(&g.dl, Deco::Manifold, ImVec2(0, 0), ImVec2(400, 300), view::Theme::manifold(),
            IconStyle::Faceted, 0.0f, nullptr, 1.0f, 1.0f);
   CHECK(g.dl.VtxBuffer.Size > 0);
+}
+
+TEST_CASE("a decoration answers a turn", "[render]") {
+  // The menu objects can be dragged. The failure this guards against is the quiet one:
+  // a turn parameter that is threaded through the call but never reaches the camera,
+  // which looks exactly like an object that simply does not rotate.
+  const auto vertices = [](Deco what, float yaw, float elev) {
+    DecoFrame f;
+    drawDeco(&f.dl, what, ImVec2(0, 0), ImVec2(400, 300), view::Theme::manifold(),
+             IconStyle::Faceted, 0.0f, nullptr, 1.0f, 1.0f, yaw, elev);
+    std::vector<float> out;
+    out.reserve(static_cast<std::size_t>(f.dl.VtxBuffer.Size) * 2);
+    for (int i = 0; i < f.dl.VtxBuffer.Size; ++i) {
+      out.push_back(f.dl.VtxBuffer[i].pos.x);
+      out.push_back(f.dl.VtxBuffer[i].pos.y);
+    }
+    return out;
+  };
+  for (const Deco what : {Deco::Manifold, Deco::Lattice, Deco::Tesseract}) {
+    const std::vector<float> still = vertices(what, 0.0f, 0.0f);
+    REQUIRE(!still.empty());
+    const std::vector<float> turned = vertices(what, 0.7f, 0.0f);
+    const std::vector<float> tipped = vertices(what, 0.0f, 0.5f);
+    REQUIRE(turned.size() == still.size());
+    REQUIRE(tipped.size() == still.size());
+    CHECK(turned != still);
+    CHECK(tipped != still);
+  }
 }
 
 TEST_CASE("zooming a decoration scales it about its centre", "[render]") {

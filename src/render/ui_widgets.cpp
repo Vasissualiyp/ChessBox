@@ -256,6 +256,13 @@ bool& currentPaneRemember() {
   static bool remember = true;
   return remember;
 }
+/// Whether ImGui actually laid the pane out this frame. It does not while the pane's
+/// alpha is still zero at the very start of a transition, and a zero height recorded
+/// then would fling the pane to the wrong place on the next frame.
+bool& currentPaneBuilt() {
+  static bool built = true;
+  return built;
+}
 
 /// The transition scale a pane's finished drawing is transformed by at endPane, and the
 /// point it is transformed about. One pane is built at a time (a departing ghost first,
@@ -297,11 +304,12 @@ void beginPane(const char* id, ImVec2 min, ImVec2 max, float scale, float alpha,
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
   ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
   ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0, 0, 0, 0));
-  ImGui::Begin(id, nullptr,
-               ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
-                   ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar |
-                   ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings |
-                   ImGuiWindowFlags_NoBackground);
+  const bool began = ImGui::Begin(
+      id, nullptr,
+      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
+          ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoScrollbar |
+          ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBackground);
+  currentPaneBuilt() = began;
   // Draw without the window's own clip, so a pane scaled up past its settled edge is not
   // cut off there.
   const ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -317,7 +325,7 @@ void beginPane(const char* id, ImVec2 min, ImVec2 max, float scale, float alpha,
 }
 
 void endPane() {
-  if (currentPaneRemember()) {
+  if (currentPaneRemember() && currentPaneBuilt()) {
     paneHeights()[currentPane()] = ImGui::GetCursorPosY() - currentPaneTop();
   }
   // Scale the pane's finished drawing about its centre. The clip pushed at beginPane is

@@ -16,6 +16,7 @@
 #include "pieces/atom.hpp"
 #include "render/deco.hpp"
 #include "render/offscreen_target.hpp"
+#include "render/overture_scene.hpp"
 #include "render/piece_icon.hpp"
 #include "render/piece_mesh.hpp"
 #include "render/ui_widgets.hpp"
@@ -355,6 +356,7 @@ bool Ui::capturesKeyboard() const {
 }
 
 void Ui::tick(float dt) {
+  lastDt_ = dt;
   clock_ += dt;
   field_.advance(dt);
   // Ease the arrival rather than run it linearly: a screen that stops dead has not
@@ -366,6 +368,43 @@ void Ui::newFrame() {
   ImGui_ImplVulkan_NewFrame();
   ImGui_ImplSDL3_NewFrame();
   ImGui::NewFrame();
+}
+
+void Ui::updateObjectDrag(app::Shell& shell, const ImVec2& min, const ImVec2& max) {
+  ImGuiIO& io = ImGui::GetIO();
+  const ImVec2 m = io.MousePos;
+  const bool inside = m.x >= min.x && m.x < max.x && m.y >= min.y && m.y < max.y;
+  // The grab has to *start* on the object. Testing "inside" every frame would let a
+  // drag that began on a menu row keep turning the object once the pointer crossed the
+  // hairline, which feels like the interface grabbing at the cursor.
+  if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && inside && !io.WantCaptureMouse) {
+    objectDrag_ = true;
+  }
+  if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) objectDrag_ = false;
+  if (!objectDrag_) return;
+
+  const app::Settings& set = shell.settings();
+  const float k = 0.007f * set.orbitSensitivity;
+  objectYaw_ += io.MouseDelta.x * k;
+  // Dragging down lowers the camera, the same way round as orbiting the board, and the
+  // same setting inverts both.
+  objectElev_ -= io.MouseDelta.y * k * (set.invertOrbitY ? -1.0f : 1.0f);
+  // Kept off the poles: an object seen exactly edge-on is a line, and one turned past
+  // the vertical is being looked at from underneath - which is the thing that most
+  // reliably reads as a bug rather than as a camera.
+  objectElev_ = std::clamp(objectElev_, -1.15f, 1.15f);
+}
+
+void Ui::drawOvertureObject(app::Shell& shell, const ImVec2& min, const ImVec2& max,
+                            float zoom, float alpha) {
+  const app::OverturePlayer& p = shell.overtures();
+  OvertureScene scene = overtureScene(p.current(), p.progress(), p.intro(), theme_);
+  // The player's turn is added to the overture's own camera, not substituted for it, so
+  // a shape taken hold of mid-morph carries on morphing.
+  scene.cam.yaw += objectYaw_;
+  scene.cam.elev = std::clamp(scene.cam.elev + objectElev_, 0.10f, 1.53f);
+  drawOverture(ImGui::GetBackgroundDrawList(), scene, min, max, theme_, iconStyle_, zoom,
+               alpha);
 }
 
 void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
@@ -416,20 +455,29 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
   const float outE = outEase();
   const float inZoom = deeper_ ? 0.55f + 0.45f * inE : 1.7f - 0.7f * inE;
   drawDeco(dl, decoForScreen(static_cast<int>(shell.screen())), decoMin, decoMax, theme_,
-           iconStyle_, clock_, subjectFor(shell.screen()), inZoom, inE);
+           iconStyle_, clock_, subjectFor(shell.screen()), inZoom, inE, objectYaw_,
+           objectElev_);
   if (leaving_ != Deco::None && outE < 1.0f) {
     const float outZoom = deeper_ ? 1.0f + 0.8f * outE : 1.0f - 0.5f * outE;
     const VariantSpec* leavingSubject =
         leavingScreen_ >= 0 ? subjectFor(static_cast<app::Screen>(leavingScreen_))
                             : nullptr;
     drawDeco(dl, leaving_, decoMin, decoMax, theme_, iconStyle_, clock_, leavingSubject,
-             outZoom, 1.0f - outE);
+             outZoom, 1.0f - outE, objectYaw_, objectElev_);
   }
 
   // The piece designer's object *is* a board: the selected piece at its centre and the
   // cells its atoms reach, in the half the decoration would otherwise occupy.
   if (shell.screen() == app::Screen::Editor && editorPage_ == 1) {
     drawEditorPreview(shell, decoMin, decoMax);
+  }
+  // Whatever object this screen shows, the player can take hold of it and turn it.
+  updateObjectDrag(shell, decoMin, decoMax);
+  // And the library's object is the selected variant's overture: the 8x8 board becoming
+  // whatever that variant plays on, and back again. It replaces the turning lattice,
+  // which said only how many boards there were.
+  if (shell.screen() == app::Screen::NewGame) {
+    drawOvertureObject(shell, decoMin, decoMax, inZoom, inE);
   }
 
   // A hairline between the object and the menu, and the depth ladder on the far left.
@@ -700,6 +748,19 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
     deeper_ = deeper;
     enter_ = 0.0f;
     lastScreen_ = screen;
+    // The library always opens on standard. It is the board every overture departs from,
+    // so it is the one that makes the next choice legible - and reopening on whatever
+    // was picked last time means arriving mid-thought at a shape with no context.
+    // Not when a capture has already said what it wants to see: `--shot --screen newgame`
+    // pins the overture before the first frame is built, and this hook runs on that very
+    // frame - so without the guard every capture would come back showing standard.
+    if (shell.screen() == app::Screen::NewGame && !shell.overtures().pinned()) {
+      const auto& lib = shell.library();
+      if (std::find(lib.begin(), lib.end(), "standard") != lib.end()) {
+        pickedVariant_ = "standard";
+        shell.overtures().jumpTo(app::Overture::Standard);
+      }
+    }
   }
 
   // The departing menu first, so the arriving one is drawn over it.
@@ -1070,6 +1131,40 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       const view::MoveAnimation::Sample at = anim.sample();
       if (at.moving) {
         drawToken(session.snapshot().at(movingTo), view::Vec3{at.x, at.y, at.z});
+      }
+    }
+  }
+
+  // Two players, one keyboard: put each square's keys on the board, for the player to
+  // move, so the mapping is learnt in place rather than read off a line of legend. The
+  // key list is indexed by coordinate on every axis, so a cell's label is one character
+  // per board axis. Drawn in screen space over the board, flat or solid.
+  if (session.hotSeat()) {
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    const Color mover = game.position().sideToMove();
+    const float w = vp->Size.x;
+    const float h = vp->Size.y;
+    const view::OrbitCamera& cam = session.camera();
+    const float size = small != nullptr ? small->FontSize : ImGui::GetFontSize();
+    for (const view::Placement& pl : session.placements()) {
+      if (!session.boardVisible(pl.cell)) continue;
+      const std::string label = app::HotSeat::keysFor(mover, v.dims.toCoord(pl.cell));
+      if (label.empty()) continue;
+      const view::OrbitCamera::ScreenPoint sp =
+          cam.project(view::Vec3{pl.x, pl.y, pl.z}, w / h, w, h);
+      if (!sp.visible) continue;
+      const ImVec2 ts = small != nullptr
+                            ? small->CalcTextSizeA(size, FLT_MAX, 0.0f, label.c_str())
+                            : ImGui::CalcTextSize(label.c_str());
+      const ImVec2 at(sp.x - ts.x * 0.5f, sp.y - ts.y * 0.5f);
+      // A small chip behind the letters keeps them legible on a light or a dark square.
+      dl->AddRectFilled(ImVec2(at.x - px(3.0f), at.y - px(1.0f)),
+                        ImVec2(at.x + ts.x + px(3.0f), at.y + ts.y + px(1.0f)),
+                        u32(t.soot, 0.72f), px(3.0f));
+      if (small != nullptr) {
+        dl->AddText(small, size, at, u32(t.bone), label.c_str());
+      } else {
+        dl->AddText(at, u32(t.bone), label.c_str());
       }
     }
   }
