@@ -89,6 +89,27 @@ TEST_CASE("an overture cycles out and back", "[unit]") {
   CHECK(p.current() == Overture::Standard);
 }
 
+TEST_CASE("the playback speed scales the whole cycle", "[unit]") {
+  OverturePlayer p;
+  REQUIRE(p.speed() == 1.0f);
+  p.setSpeed(2.0f);
+  REQUIRE(p.speed() == 2.0f);
+  // Twice the speed, half the wall time for the same progress.
+  p.advance(OverturePlayer::kSweep * 0.25f);
+  CHECK(p.phase() == OverturePlayer::Phase::Forward);
+  CHECK_THAT(p.progress(), WithinAbs(0.5f, 1e-4f));
+
+  // The dwell scales too, so "faster" is not "skips the formed shape".
+  runTo(p, OverturePlayer::Phase::Held);
+  p.setSpeed(2.0f);
+  p.advance(OverturePlayer::kHoldFormed * 0.6f);  // 1.2x the hold at speed 2
+  CHECK(p.phase() != OverturePlayer::Phase::Held);
+
+  // A nonsensical speed is ignored rather than freezing the cycle.
+  p.setSpeed(0.0f);
+  REQUIRE(p.speed() == 1.0f);
+}
+
 TEST_CASE("progress never leaves zero to one", "[unit]") {
   OverturePlayer p;
   // A frame far longer than a whole sweep - a stalled machine, or a debugger step -

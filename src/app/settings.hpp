@@ -48,6 +48,10 @@ struct Settings {
   bool animateMoves{true};
   /// Multiplier on how fast that happens. Higher is faster.
   float animationSpeed{1.0f};
+  /// Multiplier on how fast the library screen's overtures play: their forward and
+  /// reverse sweeps and their dwells. Higher is faster. Independent of `animationSpeed`,
+  /// which is about moves during a game, not the New Game screen.
+  float overtureSpeed{1.0f};
 
   // ---- camera -------------------------------------------------------------
   float orbitSensitivity{1.0f};

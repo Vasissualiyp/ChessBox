@@ -108,6 +108,9 @@ void OverturePlayer::select(Overture o) {
 
 void OverturePlayer::advance(float dt) {
   if (pinned_ || !(dt > 0.0f)) return;
+  // Speed scales the whole cycle - sweeps and dwells together - so a faster setting does
+  // not make the formed shape flash past unread.
+  dt *= speed_;
   switch (phase_) {
     case Phase::Forward:
       t_ += dt / kSweep;

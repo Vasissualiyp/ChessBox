@@ -862,6 +862,14 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::TextUnformatted("higher is faster; a wrapping move opens a portal on the edge");
   ImGui::PopStyleColor();
   ImGui::PopFont();
+
+  // The New Game screen's overtures run on their own clock, so they get their own speed.
+  ImGui::SliderFloat("Library animation speed", &s.overtureSpeed, 0.25f, 4.0f, "%.2fx");
+  ImGui::PushFont(small);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::TextUnformatted("the variant animations on the New Game screen");
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
   ImGui::Dummy(ImVec2(0, px(8)));
 
   heading("GAMEPLAY", t, small);
@@ -962,6 +970,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       before.pieceHeightScale != s.pieceHeightScale || before.flatView != s.flatView ||
       before.pieceIcons != s.pieceIcons || before.animateMoves != s.animateMoves ||
       before.theme != s.theme || before.animationSpeed != s.animationSpeed ||
+      before.overtureSpeed != s.overtureSpeed ||
       before.orbitSensitivity != s.orbitSensitivity ||
       before.zoomSensitivity != s.zoomSensitivity ||
       before.invertOrbitY != s.invertOrbitY || before.confirmMoves != s.confirmMoves ||

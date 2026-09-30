@@ -277,6 +277,7 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
     shell->settings().invertOrbitY = true;
     shell->settings().autoPromoteTo = "knight";
     shell->settings().volumeMusic = 0.25f;
+    shell->settings().overtureSpeed = 1.75f;
     REQUIRE(shell->startGame("klein").has_value());  // also records the last variant
     shell->applySettings();
   }
@@ -288,6 +289,9 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
     REQUIRE(shell->settings().autoPromoteTo == "knight");
     REQUIRE(shell->settings().volumeMusic == 0.25f);
     REQUIRE(shell->currentVariant() == "klein");
+    // The library overture's speed is a setting, and it reaches its player on apply.
+    REQUIRE(shell->settings().overtureSpeed == 1.75f);
+    REQUIRE(shell->overtures().speed() == 1.75f);
   }
 }
 

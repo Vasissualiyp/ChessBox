@@ -93,8 +93,14 @@ class OverturePlayer {
   void select(std::string_view variantName);
   void select(Overture o);
 
-  /// Move the cycle on. `dt` is seconds.
+  /// Move the cycle on. `dt` is seconds, scaled by the playback speed.
   void advance(float dt);
+
+  /// Multiplier on playback: the forward and reverse sweeps and the dwells all scale
+  /// together, so "faster" keeps the shape legible rather than skipping it. A value of
+  /// zero or less is ignored - the cycle always runs, only its rate is a setting.
+  void setSpeed(float speed) noexcept { speed_ = speed > 0.0f ? speed : 1.0f; }
+  [[nodiscard]] float speed() const noexcept { return speed_; }
 
   /// Switch outright, with no unwind.
   ///
@@ -123,6 +129,7 @@ class OverturePlayer {
   Phase phase_{Phase::Forward};
   float t_{0.0f};
   float dwell_{0.0f};
+  float speed_{1.0f};
   bool intro_{true};
   bool pinned_{false};
 };

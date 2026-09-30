@@ -62,6 +62,10 @@ std::unique_ptr<Shell> Shell::create(std::vector<std::string> library,
       settingsPath.empty() ? Settings::defaultPath() : std::move(settingsPath);
   shell->settings_ = Settings::load(shell->settingsPath_);
   shell->currentVariant_ = shell->settings_.lastVariant;
+  // A loaded setting should take effect immediately; the library overtures have their own
+  // clock and are not waiting for `applySettings` (which a fresh shell has no reason to
+  // call). `applySettings` keeps it in step once the player moves a control.
+  shell->overtures_.setSpeed(shell->settings_.overtureSpeed);
   return shell;
 }
 
@@ -255,6 +259,9 @@ void Shell::resume() {
 
 void Shell::applySettings() {
   settings_.sanitize();
+  // The library overtures have their own clock, so their speed is applied to the player
+  // rather than to the session - and it applies whether or not a game is loaded.
+  overtures_.setSpeed(settings_.overtureSpeed);
   if (session_ != nullptr) {
     session_->setFlatView(settings_.flatView);
     session_->setHotSeat(settings_.hotSeat);

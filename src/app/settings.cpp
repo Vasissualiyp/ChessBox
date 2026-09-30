@@ -89,6 +89,8 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.animateMoves = asBool(value);
     else if (key == "animation_speed")
       s.animationSpeed = asFloat(value, s.animationSpeed);
+    else if (key == "overture_speed")
+      s.overtureSpeed = asFloat(value, s.overtureSpeed);
     else if (key == "orbit_sensitivity")
       s.orbitSensitivity = asFloat(value, s.orbitSensitivity);
     else if (key == "zoom_sensitivity")
@@ -137,6 +139,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "flat_view = " << boolText(flatView) << '\n';
   out << "animate_moves = " << boolText(animateMoves) << '\n';
   out << "animation_speed = " << animationSpeed << '\n';
+  out << "overture_speed = " << overtureSpeed << '\n';
   out << "orbit_sensitivity = " << orbitSensitivity << '\n';
   out << "zoom_sensitivity = " << zoomSensitivity << '\n';
   out << "invert_orbit_y = " << boolText(invertOrbitY) << '\n';
@@ -155,6 +158,7 @@ void Settings::sanitize() {
   guiScale = std::clamp(guiScale, 0.6f, 3.0f);
   pieceHeightScale = std::clamp(pieceHeightScale, 0.0f, 2.0f);
   animationSpeed = std::clamp(animationSpeed, 0.25f, 4.0f);
+  overtureSpeed = std::clamp(overtureSpeed, 0.25f, 4.0f);
   orbitSensitivity = std::clamp(orbitSensitivity, 0.1f, 4.0f);
   zoomSensitivity = std::clamp(zoomSensitivity, 0.1f, 4.0f);
   volumeMaster = std::clamp(volumeMaster, 0.0f, 1.0f);
