@@ -30,6 +30,10 @@ class Client {
   [[nodiscard]] std::uint32_t ply() const noexcept { return ply_; }
   [[nodiscard]] std::uint64_t positionHash() const noexcept { return hash_; }
   [[nodiscard]] const std::string& lastRefusal() const noexcept { return refusal_; }
+  /// The variant's source, if the server sent one because we did not have it.
+  [[nodiscard]] const std::string& variantSource() const noexcept {
+    return variantSource_;
+  }
 
  private:
   explicit Client(Transport& transport) : transport_(&transport) {}
@@ -38,6 +42,7 @@ class Client {
   std::uint32_t ply_{0};
   std::uint64_t hash_{0};
   std::string refusal_;
+  std::string variantSource_;
   bool synced_{false};
 };
 

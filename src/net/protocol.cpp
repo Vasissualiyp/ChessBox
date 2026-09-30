@@ -97,6 +97,9 @@ std::string encodeFrame(const Message& m) {
     case MessageKind::Refusal:
       putString(body, m.reason);
       break;
+    case MessageKind::VariantSource:
+      putString(body, m.source);
+      break;
   }
   std::string frame;
   putU32(frame, static_cast<std::uint32_t>(body.size()));
@@ -145,6 +148,10 @@ Result<Message> decodeFrame(std::string_view frame) {
     case MessageKind::Refusal:
       m.kind = MessageKind::Refusal;
       if (!r.str(m.reason)) return fail(ErrorCode::ParseError, "truncated Refusal");
+      break;
+    case MessageKind::VariantSource:
+      m.kind = MessageKind::VariantSource;
+      if (!r.str(m.source)) return fail(ErrorCode::ParseError, "truncated VariantSource");
       break;
     default:
       return fail(ErrorCode::ParseError, "unknown message kind " + std::to_string(tag));

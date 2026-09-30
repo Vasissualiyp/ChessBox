@@ -34,6 +34,10 @@ class Server {
   /// Add a link. It must say hello before any intent is accepted.
   void addClient(Transport& transport);
 
+  /// Give the server the variant's source text, so a client whose hello names a variant
+  /// it does not have can be sent it rather than turned away.
+  void setVariantSource(std::string source) { source_ = std::move(source); }
+
   /// Read and answer everything waiting on every link. Returns false when no live link
   /// remains - every peer has been turned away.
   bool poll();
@@ -56,6 +60,7 @@ class Server {
   static void sendRefusal(Transport& to, const std::string& reason);
 
   VariantSpec variant_;
+  std::string source_;
   Game game_;
   std::vector<Link> links_;
 };

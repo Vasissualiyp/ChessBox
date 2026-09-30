@@ -64,6 +64,16 @@ bool Server::poll() {
       }
       if (message->kind == MessageKind::Hello) {
         if (!acceptsHello(*message, variant_.variantId())) {
+          if (!source_.empty()) {
+            // The client does not have this variant. Send the file so it can load it and
+            // ask again; the link stays open but is not a player of this game until then.
+            Message variant;
+            variant.kind = MessageKind::VariantSource;
+            variant.source = source_;
+            it->transport->send(encodeFrame(variant));
+            it->helloed = false;
+            continue;
+          }
           sendRefusal(*it->transport, "variant or protocol mismatch");
           drop = true;  // this link is not for this game
           break;

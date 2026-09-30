@@ -124,3 +124,42 @@ TEST_CASE("a client joining mid-game is resynced to the current position",
   CHECK((*cl)->ply() == 1);
   CHECK((*cl)->positionHash() == (*server)->positionHash());
 }
+
+TEST_CASE("a client that lacks the variant is sent its source", "[unit][net]") {
+  Loopback l = makeLoopback();
+  auto server = Server::create(test::loadVariant("standard"), *l.b);
+  REQUIRE(server.has_value());
+  (*server)->setVariantSource("name = \"from-the-server\"\n");
+  auto client = Client::create(*l.a, /*a variant it does not have*/ 0xBEEF);
+  REQUIRE(client.has_value());
+
+  REQUIRE((*server)->poll());
+  REQUIRE((*client)->poll());
+  CHECK((*client)->variantSource() == "name = \"from-the-server\"\n");
+  CHECK_FALSE((*client)->synced());  // not a player of this game yet
+}
+
+TEST_CASE("a spectator receives the moves without ever sending any", "[unit][net]") {
+  const VariantSpec v = test::loadVariant("standard");
+  Loopback player = makeLoopback();
+  Loopback watcher = makeLoopback();
+  auto server = Server::create(test::loadVariant("standard"));
+  REQUIRE(server.has_value());
+  (*server)->addClient(*player.b);
+  (*server)->addClient(*watcher.b);
+
+  auto p = Client::create(*player.a, v.variantId());
+  auto w = Client::create(*watcher.a, v.variantId());
+  REQUIRE(p.has_value());
+  REQUIRE(w.has_value());
+  REQUIRE((*server)->poll());
+  REQUIRE((*p)->poll());
+  REQUIRE((*w)->poll());
+
+  (*p)->sendIntent(coord(v, 4, 1), coord(v, 4, 3));  // e2-e4
+  REQUIRE((*server)->poll());
+  REQUIRE((*p)->poll());
+  REQUIRE((*w)->poll());
+  CHECK((*w)->ply() == 1);  // saw it, sent nothing
+  CHECK((*w)->positionHash() == (*server)->positionHash());
+}

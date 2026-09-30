@@ -37,6 +37,9 @@ bool Client::poll() {
       case MessageKind::Refusal:
         refusal_ = message->reason;
         return false;
+      case MessageKind::VariantSource:
+        variantSource_ = message->source;
+        break;
       default:
         break;
     }

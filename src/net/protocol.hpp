@@ -15,10 +15,12 @@ namespace cb::net {
 inline constexpr std::uint16_t kProtocolVersion = 1;
 
 enum class MessageKind : std::uint8_t {
-  Hello,    ///< client -> server: my protocol version and the variant hash I expect
-  Intent,   ///< client -> server: I want to play this move
-  State,    ///< server -> client: the accepted position, by ply, side and hash
-  Refusal,  ///< server -> client: why an intent was not played
+  Hello,          ///< client -> server: my protocol version and the variant hash I expect
+  Intent,         ///< client -> server: I want to play this move
+  State,          ///< server -> client: the accepted position, by ply, side and hash
+  Refusal,        ///< server -> client: why an intent was not played
+  VariantSource,  ///< server -> client: the variant's TOML, so a client that lacks it can
+                  ///< load and ask again
 };
 
 /// One protocol message. A tagged union, small enough to pass by value: the wire is a
@@ -37,6 +39,7 @@ struct Message {
   std::uint64_t positionHash{0};  // State
 
   std::string reason;  // Refusal
+  std::string source;  // VariantSource: the variant file's text
 };
 
 /// Frame a message: a 4-byte length, then the message's own bytes.
