@@ -305,7 +305,8 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
       std::clamp(wantH, px(140.0f), ImGui::GetContentRegionAvail().y - footerH);
   ImGui::PushStyleColor(ImGuiCol_ChildBg, col(t.ink, 0.45f));
   ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
-  ImGui::BeginChild("##library", ImVec2(listW, listH), ImGuiChildFlags_Border);
+  ImGui::BeginChild("##library", ImVec2(listW, listH), ImGuiChildFlags_Border,
+                    ImGuiWindowFlags_NavFlattened);
   for (const std::string& name : shell.library()) {
     const bool active = name == pickedVariant_;
     // The difficulty is a property of the variant, resolved once by the shell; the
@@ -342,7 +343,7 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   ImGui::PopStyleColor();
 
   ImGui::SameLine();
-  ImGui::BeginChild("##details", ImVec2(0, listH));
+  ImGui::BeginChild("##details", ImVec2(0, listH), 0, ImGuiWindowFlags_NavFlattened);
   ImGui::PushFont(display);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.bone));
   ImGui::TextUnformatted(upper(pickedVariant_).c_str());
@@ -932,7 +933,8 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   const float footerH = controlHeight() + px(14.0f);
   ImGui::BeginChild("##settingsbody",
                     ImVec2(0, std::max(px(120.0f), ImGui::GetContentRegionAvail().y -
-                                                       footerH - px(8.0f))));
+                                                       footerH - px(8.0f))),
+                    0, ImGuiWindowFlags_NavFlattened);
   ImGui::PushItemWidth(px(220));
 
   heading("DISPLAY", t, small);
@@ -1070,7 +1072,8 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   // keeps the buttons whole as the scale grows: the body gives up the room instead, and
   // scrolls if it must. The border is the box the buttons live in.
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(8.0f), px(4.0f)));
-  ImGui::BeginChild("##settingsfooter", ImVec2(0, footerH), ImGuiChildFlags_Border);
+  ImGui::BeginChild("##settingsfooter", ImVec2(0, footerH), ImGuiChildFlags_Border,
+                    ImGuiWindowFlags_NavFlattened);
   if (button("BACK", t, px(120), true, false, true, display)) shell.back();
   ImGui::SameLine();
   if (button("RESET TO DEFAULTS", t, px(200), false, false, true, display)) {
@@ -1137,7 +1140,8 @@ UiRequest Ui::buildGameInfo(app::Shell& shell) {
   const float footerH = controlHeight() + px(14.0f);
   ImGui::BeginChild("##infobody",
                     ImVec2(0, std::max(px(120.0f), ImGui::GetContentRegionAvail().y -
-                                                       footerH - px(8.0f))));
+                                                       footerH - px(8.0f))),
+                    0, ImGuiWindowFlags_NavFlattened);
   heading("BOARD", t, small);
   ImGui::PushFont(small);
   for (std::uint8_t a = 0; a < v.dims.dims(); ++a) {
@@ -1191,7 +1195,8 @@ UiRequest Ui::buildGameInfo(app::Shell& shell) {
   ImGui::EndChild();
 
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(8.0f), px(4.0f)));
-  ImGui::BeginChild("##infofooter", ImVec2(0, footerH), ImGuiChildFlags_Border);
+  ImGui::BeginChild("##infofooter", ImVec2(0, footerH), ImGuiChildFlags_Border,
+                    ImGuiWindowFlags_NavFlattened);
   if (button("BACK", t, px(120), true, false, true, display)) shell.back();
   ImGui::EndChild();
   ImGui::PopStyleVar();
@@ -1286,7 +1291,8 @@ UiRequest Ui::buildPieceMoves(app::Shell& shell) {
   const float footerH = controlHeight() + px(14.0f);
   ImGui::BeginChild("##piecebody",
                     ImVec2(0, std::max(px(120.0f), ImGui::GetContentRegionAvail().y -
-                                                       footerH - px(8.0f))));
+                                                       footerH - px(8.0f))),
+                    0, ImGuiWindowFlags_NavFlattened);
   for (std::size_t i = 1; i < v.pieces.size(); ++i) {
     const PieceTypeDef& piece = v.pieces[i];
     const bool selected = static_cast<int>(i) == pieceMovesPick_;
@@ -1320,7 +1326,8 @@ UiRequest Ui::buildPieceMoves(app::Shell& shell) {
   ImGui::EndChild();
 
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(8.0f), px(4.0f)));
-  ImGui::BeginChild("##piecesfooter", ImVec2(0, footerH), ImGuiChildFlags_Border);
+  ImGui::BeginChild("##piecesfooter", ImVec2(0, footerH), ImGuiChildFlags_Border,
+                    ImGuiWindowFlags_NavFlattened);
   if (button("BACK", t, px(120), true, false, true, display)) shell.back();
   ImGui::EndChild();
   ImGui::PopStyleVar();
