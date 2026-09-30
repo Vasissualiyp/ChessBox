@@ -46,6 +46,12 @@ for the generated ones, and the closure arithmetic that caught the original Klei
 formed surface as `t` runs, draws the seams each identification closed, and settles back
 onto the shared opening pose. It is pure in `t`, like the authored scenes.
 
+It also plays the variant's own **demo move** (M13.3): a real piece from the start
+position, a real route traced by `view::tracePath`, preferring one that leaves through a
+seam, drawn as the route and the arriving piece. Nothing about the move is scripted. For
+now it is drawn for a 2-D 8×8 board; a higher-D or non-8×8 derived variant shows the
+surface alone.
+
 ## The camera arc (M13.4)
 
 The derived scene owns a mini-camera (`OvCamera {yaw, elev, reach, persp}`), not

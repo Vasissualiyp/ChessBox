@@ -16,10 +16,14 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <unordered_map>
 
+#include "position/position.hpp"
 #include "render/quintic.hpp"
 #include "render/ui_widgets.hpp"
+#include "variant/variant.hpp"
+#include "view/move_anim.hpp"
 #include "view/seams.hpp"
 
 namespace cb::render {
@@ -2370,6 +2374,56 @@ OvertureScene sceneT6(const view::Theme& th, float t) {
   return s;
 }
 
+/// A move that shows the variant, for the derived overture: a real piece of the variant's
+/// own start position, taking a real route the engine traced, preferring one that leaves
+/// through a seam. Returns nothing for a board the 8x8 canvas cannot show - a higher-D or
+/// non-8x8 board gets the surface alone for now.
+struct DemoMove {
+  view::MovePath path;
+  PieceTypeId type{kNoPiece};
+  Color color{Color::White};
+};
+
+std::optional<DemoMove> demoMoveFor(const VariantSpec& v, const Position& pos) {
+  if (v.dims.dims() != 2 || v.dims.extent(0) != 8 || v.dims.extent(1) != 8) {
+    return std::nullopt;
+  }
+  std::optional<DemoMove> fallback;
+  int traces = 0;  // bound the scan: a wrapped route is usually found in the first few
+  for (const StartPiece& sp : v.start) {
+    if (sp.type == kNoPiece || sp.type >= v.pieces.size()) continue;
+    if (v.pieces[sp.type].royal || v.pieces[sp.type].atoms.empty()) continue;
+    const auto c = static_cast<std::size_t>(sp.color);
+    const CellId from = v.dims.toCell(sp.at);
+    for (const MoveAtom& atom : v.pieces[sp.type].atoms) {
+      if (atom.mode == MoveMode::Hop) continue;
+      const std::uint32_t limit =
+          atom.maxK == kUnlimited ? 8u : std::min<std::uint32_t>(atom.maxK, 8u);
+      for (std::uint32_t di = atom.dirBegin[c]; di < atom.dirEnd[c] && traces < 400;
+           ++di) {
+        if (di >= v.dirTable.size()) break;
+        Walker w = v.geom.start(from, v.dirTable[di]);
+        for (std::uint32_t k = 1; k <= limit; ++k) {
+          if (!v.geom.step(w)) break;
+          if (w.cell == from) break;
+          Move m;
+          m.from = from;
+          m.to = w.cell;
+          ++traces;
+          const view::MovePath path = view::tracePath(v, pos, sp.type, sp.color, m);
+          if (path.unexplained || path.steps.empty()) continue;
+          for (const view::PathStep& st : path.steps) {
+            if (st.kind == view::StepKind::Portal)
+              return DemoMove{path, sp.type, sp.color};
+          }
+          if (!fallback.has_value()) fallback = DemoMove{path, sp.type, sp.color};
+        }
+      }
+    }
+  }
+  return fallback;
+}
+
 }  // namespace
 
 OvVec3 overtureSurfaceAt(app::Overture which, float u, float v) {
@@ -2451,9 +2505,34 @@ OvertureScene derivedOvertureScene(const VariantSpec& variant, float t,
   GridOpt g;
   g.sub = 4;
   addGrid(s, pos, g);
-  // The opening army, on the flat board every overture opens on, leaving as the surface
-  // forms - a variant that fields no pawns still opens on the same 8x8 as the rest.
-  addArmy(s, pos, 1.0f - ease(clampf(form * 1.4f, 0.0f, 1.0f)));
+  const float armyFade = 1.0f - ease(clampf(form * 1.4f, 0.0f, 1.0f));
+  const bool alignedBoard =
+      sig.dims == 2 && variant.dims.extent(0) == 8 && variant.dims.extent(1) == 8;
+  if (alignedBoard) {
+    // The variant's own army, not the standard one: a data-only variant opens on its own
+    // start position, which is the point of showing *it* rather than the reference board.
+    for (const StartPiece& sp : variant.start) {
+      if (sp.type == kNoPiece || sp.type >= variant.pieces.size()) continue;
+      if (sp.at.c[0] < 0 || sp.at.c[0] >= 8 || sp.at.c[1] < 0 || sp.at.c[1] >= 8) {
+        continue;
+      }
+      const float u = (fi(sp.at.c[0]) + 0.5f) / 8.0f;
+      const float v = (fi(sp.at.c[1]) + 0.5f) / 8.0f;
+      TokenOpt o;
+      o.at = true;
+      o.where = pos(u, v);
+      o.hasNormal = true;
+      o.normal = normalAt(pos, u, v);
+      // The variant's own army rides the forming surface; it does not step aside the way
+      // the reference army does, because for this scene it *is* the army.
+      o.fade = 1.0f;
+      addToken(s, pos, 0, 0, variant.pieces[sp.type].symbol, sp.color == Color::White, o);
+    }
+  } else {
+    // A board the 8x8 canvas cannot lay out exactly opens on the reference army, so the
+    // hand-over in and out still reads.
+    addArmy(s, pos, armyFade);
+  }
   addRim(s, pos, th.rule, 1.4f, 0.5f + 0.4f * form);
 
   // The seams the surface closed, each periodic pair in one hue off the ramp: the two
@@ -2484,6 +2563,55 @@ OvertureScene derivedOvertureScene(const VariantSpec& variant, float t,
       tr.fade = settle * form;
       for (int i = 0; i <= 16; ++i) tr.pts.push_back(pos(fi(i) / 16.0f, e));
       s.trails.push_back(tr);
+    }
+  }
+
+  // A real move of a real piece, traced by the engine, so a derived scene shows the
+  // variant's own route - a torus variant's rook wrapping, a Klein variant's bishop
+  // coming back reversed - rather than a path the scene invented (M13.3).
+  if (alignedBoard) {
+    const Position startPos = Position::startPosition(variant);
+    const std::optional<DemoMove> demo = demoMoveFor(variant, startPos);
+    const float moveFade = settle * seg(t, 0.4f, 0.65f);
+    if (demo.has_value() && !demo->path.steps.empty() && moveFade > 0.01f) {
+      const auto point = [&](CellId cell) {
+        const Coord cc = variant.dims.toCoord(cell);
+        const float u = (fi(cc.c[0]) + 0.5f) / 8.0f;
+        const float v = (fi(cc.c[1]) + 0.5f) / 8.0f;
+        return add(pos(u, v), mul(normalAt(pos, u, v), 0.28f));
+      };
+      // One polyline per straight run, so the seam crossing is a gap rather than a chord
+      // straight across the board.
+      const auto emit = [&](std::vector<OvVec3>& seg) {
+        if (seg.size() < 2) return;
+        OvTrail tr;
+        tr.colour = th.ember;
+        tr.width = 2.8f;
+        tr.fade = moveFade;
+        tr.pts = seg;
+        s.trails.push_back(tr);
+      };
+      std::vector<OvVec3> seg;
+      seg.push_back(point(demo->path.from));
+      for (const view::PathStep& st : demo->path.steps) {
+        seg.push_back(point(st.to));
+        if (st.kind != view::StepKind::Interior) {
+          emit(seg);
+          seg.clear();
+          seg.push_back(point(st.to));
+        }
+      }
+      emit(seg);
+      TokenOpt o;
+      o.at = true;
+      o.where = point(demo->path.to);
+      o.hasNormal = true;
+      const Coord end = variant.dims.toCoord(demo->path.to);
+      o.normal =
+          normalAt(pos, (fi(end.c[0]) + 0.5f) / 8.0f, (fi(end.c[1]) + 0.5f) / 8.0f);
+      o.fade = moveFade;
+      addToken(s, pos, 0, 0, variant.pieces[demo->type].symbol,
+               demo->color == Color::White, o);
     }
   }
 

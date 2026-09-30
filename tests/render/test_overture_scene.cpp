@@ -516,10 +516,12 @@ TEST_CASE("a data-only variant gets a derived overture", "[render]") {
       "[[axis]]\nname = \"rank\"\nextent = 8\n"
       "[[geometry.identify]]\naxis = \"file\"\nkind = \"periodic\"\n"
       "[[geometry.identify]]\naxis = \"rank\"\nkind = \"periodic\"\n"
+      "[[piece]]\nname = \"rook\"\nsymbol = \"R\"\n"
+      "[[piece.move]]\nvector = [1]\nmax = \"inf\"\nmode = \"slide\"\n"
       "[[piece]]\nname = \"king\"\nsymbol = \"K\"\nroyal = true\n"
       "[[piece.move]]\nvector = [1]\nmax = 1\nmode = \"leap\"\n"
       "[[piece.move]]\nvector = [1, 1]\nmax = 1\nmode = \"leap\"\n"
-      "[start]\nboard = \"4k3/8/8/8/8/8/8/4K3\"\n";
+      "[start]\nboard = \"4k3/8/8/8/8/8/8/R3K3\"\n";
   const auto v = loadVariantToml(toml, "<derived>");
   REQUIRE(v.has_value());
   CHECK_FALSE(app::hasBespokeOverture(v->name));
@@ -538,6 +540,13 @@ TEST_CASE("a data-only variant gets a derived overture", "[render]") {
       }
     }
   }
+
+  // The demo move (M13.3): the variant's own pieces, and a real traced route drawn as a
+  // trail plus the arriving token. Two kings and a rook on the board, and the rook's
+  // route adds at least one more token than the start position alone.
+  const OvertureScene formed = derivedOvertureScene(*v, 0.7f, th);
+  CHECK(formed.tokens.size() >= 4);
+  CHECK(formed.trails.size() > 4);  // four seam rims, plus the move
 }
 
 TEST_CASE("an overture at alpha zero leaves no geometry behind", "[render]") {
