@@ -11,6 +11,7 @@
 #include "app/shell.hpp"
 #include "assets/piece_model.hpp"
 #include "render/deco.hpp"
+#include "render/overture_scene.hpp"
 #include "render/piece_icon.hpp"
 #include "render/vulkan_context.hpp"
 #include "view/theme.hpp"
@@ -91,7 +92,11 @@ class Ui {
   void setPreviewDims(int dims) noexcept { previewDims_ = dims; }
   /// Swap the palette. The theme is read every frame, so a change is immediate - and a
   /// retheme never touches the renderer.
-  void setTheme(const view::Theme& t) noexcept { theme_ = t; }
+  void setTheme(const view::Theme& t) noexcept {
+    theme_ = t;
+    // The cached scene has the old theme's seam and event colours baked into it.
+    overtureCacheValid_ = false;
+  }
   /// Finish the frame and record its draw commands into the board's render pass.
   void endFrame();
   void record(VkCommandBuffer cmd);
@@ -253,6 +258,14 @@ class Ui {
   float objectYaw_{0.0f};
   float objectElev_{0.0f};
   bool objectDrag_{false};
+  /// The last overture scene built, and the inputs it was built from. A scene is a pure
+  /// function of `(which, t, intro, theme)`, so caching it is exact: it skips rebuilding
+  /// identical geometry, above all across the 700 ms held dwell. `setTheme` clears it.
+  app::Overture overtureCacheWhich_{app::Overture::None};
+  float overtureCacheT_{0.0f};
+  bool overtureCacheIntro_{false};
+  bool overtureCacheValid_{false};
+  OvertureScene overtureCache_{};
   /// The decoration of the screen being left, and which way the camera is going. One
   /// clock (`enter_`) drives the arriving object, the leaving ghost, the menu pane and
   /// the field, so none of them can disagree about where the camera is.

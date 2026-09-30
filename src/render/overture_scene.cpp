@@ -11,8 +11,12 @@
 #include "render/overture_scene.hpp"
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cmath>
+#include <cstdint>
 #include <functional>
+#include <unordered_map>
 
 #include "render/quintic.hpp"
 #include "render/ui_widgets.hpp"
@@ -523,16 +527,40 @@ Pos blendPos(const Pos& a, const Pos& b, float m) {
   return [a, b, m](float u, float v) -> OvVec3 { return mix(a(u, v), b(u, v), m); };
 }
 
+/// The exact bits of a `(u, v)` sample, as a cache key. Exact rather than quantised: the
+/// sample lattice is deterministic, so the same corner recomputes the same floats every
+/// frame and a hit is exact, not an approximation.
+std::uint64_t uvBits(float u, float v) {
+  const std::uint64_t hi = std::bit_cast<std::uint32_t>(u);
+  const std::uint64_t lo = std::bit_cast<std::uint32_t>(v);
+  return (hi << 32) | lo;
+}
+
 /// Patch (k1, k2) of the Calabi-Yau quintic as a surface in the overture's world units.
 /// The mixed imaginary part is the vertical, which is the orientation the standard
 /// picture is always shown in. Same formula as the main menu - `render/quintic.hpp` - so
 /// the T6 overture lands on the object the player has been looking at since the game
 /// started.
+///
+/// Memoised (M4.9). A patch is a fixed function of `(k1, k2, u, v)`; the samples repeat
+/// across sub-quads within a frame and across frames, so the second evaluation of a point
+/// is a lookup instead of two `pow` and two `atan2`. The cache cannot change a frame - it
+/// returns the value the formula returns - which is why it is safe under the purity rule.
 constexpr float kQuinticScale = 5.2f;
 Pos quinPatch(int k1, int k2) {
-  return [k1, k2](float u, float v) -> OvVec3 {
+  // One cache per patch, shared by every copy of the returned surface. Bounded by the
+  // patch count and the fixed sample lattice `grid` walks.
+  static std::array<std::unordered_map<std::uint64_t, OvVec3>, kQuinticN * kQuinticN>
+      caches;
+  auto& cache = caches[static_cast<std::size_t>(k1 * kQuinticN + k2)];
+  return [&cache, k1, k2](float u, float v) -> OvVec3 {
+    const std::uint64_t key = uvBits(u, v);
+    const auto it = cache.find(key);
+    if (it != cache.end()) return it->second;
     const std::array<float, 3> q = quinticPoint(k1, k2, u * kPi * 0.5f, -1.0f + 2.0f * v);
-    return {q[0] * kQuinticScale, q[2] * kQuinticScale, q[1] * kQuinticScale};
+    const OvVec3 p{q[0] * kQuinticScale, q[2] * kQuinticScale, q[1] * kQuinticScale};
+    cache.emplace(key, p);
+    return p;
   };
 }
 
