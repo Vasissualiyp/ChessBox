@@ -34,6 +34,8 @@ directory. Read `docs/ARCHITECTURE.md` first.
 | M8 | Client–server multiplayer | authoritative server, lockstep-verified replay | not started | [M8](M8-net.md) |
 | M9 | Steam Workshop + packaging | variant packages, validation, signing, distribution | not started | [M9](M9-workshop.md) |
 | M10 | Trainable per-variant AI | search + learned eval, self-play harness | not started | [M10](M10-ai.md) |
+| M11 | The move camera | follow a move through any geometry: seams, mirrors, grid axes, 4-D+ | not started | [M11](M11-move-camera.md) |
+| M12 | Spectator, replay and the clip | cinema view, deterministic clip export, shared camera presets, live spectating | not started, optional | [M12](M12-broadcast.md) |
 
 Each completed milestone's plan file ends with a **Status** section recording what was
 built, what was deferred, and why - including the places where the plan turned out to
@@ -59,6 +61,13 @@ be wrong. Read those before trusting the plan text above them.
   someone can make a game without touching C++; the Workshop (M9) exists to move
   that authored content, so the editors have to exist first. Multiplayer (M8) is
   independent and could swap with M7 without loss.
+- **The camera is appended, not sequenced (M11-M12).** Making a move *watchable*
+  depends only on M4 and M6, both done, and on nothing in M7-M10. It is numbered last
+  because the plan is append-only, not because it is late: M11 can be pulled forward to
+  immediately after M6 with no loss. It is listed after M10 so the numbered promises
+  already made keep their numbers, and because a camera that shows off a variant is
+  worth more once there are good variants (M7/M9) and an opponent (M8/M10) to show.
+  M12 is optional and sits on top of M11.
 - **Escape hatch:** if visible progress is needed sooner than M4, M2 ends with a
   terminal (TUI) multi-slice viewer — cheap, testable, and enough to play 3D/4D
   boards by hand. The Vulkan work stays where it is.
@@ -94,6 +103,9 @@ checked by `nix flake check`, which is the single source of truth. **[INVARIANT]
 | Quantum chess may not fit the model | M5 | scoped as a design study with an interface hook, not promised as delivered |
 | Canonical variant serialization drifts from `VariantId` | M7 | pin a load→save→load round-trip with an unchanged `VariantId` before any writer ships |
 | User-defined piece geometry is open-ended | M7 | ship the radial revolve + mirror subset first; the primitive fallback keeps any piece playable |
+| Camera-induced motion sickness / unreadable high-D view | M11 | safe-zone oracle, lead/pull bounds, shot deadline, cut on grid axes; watchable wins over faithful |
+| Picking desynchronises from an animating camera | M11 | interaction is locked while a shot is in flight; picking resumes from the settled pose; explicit test |
+| Clip export drags a codec into the deterministic core | M12 | guaranteed output is a frame sequence; muxing is external and best-effort |
 
 ## Definition of "generalizable" used throughout
 

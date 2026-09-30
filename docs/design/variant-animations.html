@@ -34,6 +34,7 @@
   --d-easy:     #3FB950;
   --d-medium:   #E3B341;
   --d-hard:     #E5534B;
+  --d-impossible:#A371F7;
   --d-other:    #2DD4BF;
 
   --shadow: 0 1px 2px rgba(14,18,26,.06), 0 8px 24px -12px rgba(14,18,26,.18);
@@ -301,7 +302,7 @@ footer p { font-size: 13px; color: var(--bone-faint); }
 <header class="top">
   <span class="eyebrow">ChessBox · M7 · New Game screen</span>
   <h1>Variant Overtures</h1>
-  <p class="lede">Twelve short animations, one per variant. Each opens on the same
+  <p class="lede">Fourteen short animations, one per variant. Each opens on the same
   8&nbsp;×&nbsp;8 board every player already knows, then becomes the thing that makes
   its variant different — and then takes it all back, because the only way out of one
   overture is the way in.</p>
@@ -309,7 +310,7 @@ footer p { font-size: 13px; color: var(--bone-faint); }
     <span><b>Status</b> specification · for approval</span>
     <span><b>Lands in</b> <code>src/render/deco.cpp</code></span>
     <span><b>Palette</b> <code>view::Theme</code>, unmodified</span>
-    <span><b>Excluded</b> torus3d · t6 · charged</span>
+    <span><b>Excluded</b> charged</span>
   </div>
 </header>
 
@@ -441,7 +442,7 @@ atSettled():
 
 <!-- ------------------------------------------------------------- the cards -->
 <section id="cards">
-  <h2>The twelve</h2>
+  <h2>The fourteen</h2>
   <p class="sub">Ordered as the library orders them — difficulty, then name. Keyframes are
   rendered by the same scene function that drives the stage above, at fixed
   <code>t</code>, so they cannot drift from it.</p>
@@ -495,6 +496,24 @@ atSettled():
     the geometry count. This prototype rebuilds SVG each frame and draws
     <code>5d</code>'s boards at reduced cell resolution purely to stay smooth in a
     browser — the shipped version has no reason to.</span></div>
+    <div><span class="k">Two new enumerators</span><span class="v"><code>app::Overture</code>
+    gains <code>Torus3d</code> and <code>T6</code>, and <code>overtureFor</code> stops
+    borrowing: the map in <code>src/app/overture.cpp</code> currently sends both
+    <code>torus3d</code> and <code>t6</code> to <code>Overture::Torus</code>, and the
+    header's comment saying they "borrow the torus" has to go with it. <code>charged</code>
+    keeps borrowing <code>Standard</code>.</span></div>
+    <div><span class="k">quintic() moves, or is shared</span><span class="v">The T6
+    overture needs the exact function the main menu draws with. It is
+    <code>static</code>-local to <code>src/render/deco.cpp</code> today; the overture
+    scene lives in <code>src/render/overture_scene.cpp</code>, so either it is promoted
+    to a small shared header at L100 or the overture calls into <code>deco</code>.
+    Copying it is the one option that is not open — the whole claim of the overture is
+    that it is the <em>same</em> object, and two copies of a formula drift.</span></div>
+    <div><span class="k">Cost, honestly</span><span class="v">T6 at full spread is 25
+    patches × 16 cells × 4 sub-quads = 1600 quads, the heaviest scene in the library by
+    some way, and torus3d's lattice beat adds about 150 wire segments. Both are still one
+    instanced draw call in the real renderer; this prototype is the thing that will
+    struggle, not the game.</span></div>
     <div><span class="k">prefers-reduced-motion</span><span class="v">There is no
     equivalent setting in the game yet. Worth one: an overture is decorative, and the
     screen must stay usable held at <code>t = 0</code>. It would sit beside
@@ -563,7 +582,7 @@ atSettled():
 
 <script>
 /* ===========================================================================
-   Geometry, projection and the twelve scene functions.
+   Geometry, projection and the fourteen scene functions.
 
    In the shipped renderer this is a vertex transform. Here it is arithmetic in
    JS feeding SVG polygons, which buys exact depth sorting and removes every CSS
@@ -778,6 +797,104 @@ function kleinSurf(u, v, o) {
   return [cr, ca, zl];
 }
 
+/* Deterministic pseudo-random. A still at a given t has to be the same still every
+   time it is taken, so the drifting pieces on the quintic cannot use a clock or a
+   running seed. `deco.cpp` already does the equivalent with `nextFloat(seed)`. */
+const rnd = i => { const x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+
+/* `tube`, for a 4 x 4 board and with a thickness: one extra parameter, `shell`, which
+   is a level's HEIGHT above the board while the board is flat and its RADIUS once the
+   board is rolled. One function, therefore, for the whole of TORUS3D - no blending
+   between two embeddings, and the flat box falls out of it as th = ph = 0.
+
+   T^3 does not embed in three dimensions, and this is exactly how far it gets: two of
+   the three gluings give T^2, the level axis becomes the radial direction, and the
+   four levels come out as four *nested* shells about one core circle. The third gluing
+   would have to join the outermost shell to the innermost, which is not a thing space
+   can do - and that failure is the point of the beat, in the grammar MOBIUS and KLEIN
+   already established. */
+function shellTube(u, v, o) {
+  const E = 4;                                 /* a 4 x 4 board */
+  const xl = (u - 0.5) * E, zl = (v - 0.5) * E;
+  const th = o.th || 0, ph = o.ph || 0, d = o.shell || 0;
+  const open = o.open === undefined ? 1 : o.open;
+  let a, b;                                    /* cross-section: a -> radial, b -> axial */
+  if (th > 1e-4) { const R = E / th, q = xl / R; a = (R + d) * Math.sin(q); b = (R + d) * Math.cos(q) - R; }
+  else { a = xl; b = d; }                      /* unrolled, `shell` is just a height */
+  if (ph > 1e-4) {
+    const base = E / ph, Rr = base * open, p = zl / base;
+    return [ Rr * (1 - Math.cos(p)) + a * Math.cos(p), b, Rr * Math.sin(p) - a * Math.sin(p) ];
+  }
+  return [a, b, zl];
+}
+/* A wire box as SIX polylines rather than twelve segments: two closed face loops and
+   four risers. It matters at T6's tangle, where sixty-odd boxes interpenetrate - drawn
+   as loose segments they read as a haze of parallel lines, and the one thing that
+   picture has to say is that these are boxes landing inside one another. */
+const BOX_LOOP_LO = [[0,0,0], [1,0,0], [1,0,1], [0,0,1], [0,0,0]];
+const BOX_LOOP_HI = [[0,1,0], [1,1,0], [1,1,1], [0,1,1], [0,1,0]];
+const BOX_RISERS = [[0,0], [1,0], [1,1], [0,1]];   /* (x, z) of each vertical */
+/* `emit(push, corner, o)` draws one wire box at offset `o`. `full` adds the top loop
+   and the risers; a faint copy gets the bottom loop alone. */
+function wireBox(out, corner, o, full, style) {
+  const at = c => add(corner(c), o);
+  out.trails.push(Object.assign({ pts: BOX_LOOP_LO.map(at) }, style));
+  if (!full) return;
+  out.trails.push(Object.assign({ pts: BOX_LOOP_HI.map(at) }, style));
+  for (const [x, z] of BOX_RISERS)
+    out.trails.push(Object.assign({ pts: [at([x, 0, z]), at([x, 1, z])] }, style));
+}
+
+/* ---- the Calabi-Yau quintic cross-section -------------------------------- */
+/* Transcribed from `quintic()` in src/render/deco.cpp, which is what the main menu
+   already draws behind the title. Same n, same alpha, same chart - so the shape the
+   T6 overture settles into is the shape the player has been looking at since the
+   game started, and not an impression of it.
+
+     z1 = e^(2 pi i k1/n) (cos a)^(2/n),  z2 = e^(2 pi i k2/n) (sin a)^(2/n),
+     a = x + iy,  drawn as (Re z1, Re z2, Im z1 cos alpha + Im z2 sin alpha).
+
+   25 patches, each a chart over x in [0, pi/2], y in [-1, 1]. */
+const QN = 5, QALPHA = 0.5, QS = 5.2;
+function cpow(re, im, p) {
+  const r = Math.hypot(re, im), th = Math.atan2(im, re), rp = Math.pow(r, p);
+  return [rp * Math.cos(th * p), rp * Math.sin(th * p)];
+}
+function quintic(k1, k2, x, y) {
+  const cRe = Math.cos(x) * Math.cosh(y), cIm = -Math.sin(x) * Math.sinh(y);
+  const sRe = Math.sin(x) * Math.cosh(y), sIm =  Math.cos(x) * Math.sinh(y);
+  const a = cpow(cRe, cIm, 2 / QN), b = cpow(sRe, sIm, 2 / QN);
+  const p1 = TAU * k1 / QN, p2 = TAU * k2 / QN;
+  const z1r = a[0] * Math.cos(p1) - a[1] * Math.sin(p1);
+  const z1i = a[0] * Math.sin(p1) + a[1] * Math.cos(p1);
+  const z2r = b[0] * Math.cos(p2) - b[1] * Math.sin(p2);
+  const z2i = b[0] * Math.sin(p2) + b[1] * Math.cos(p2);
+  return [z1r, z2r, z1i * Math.cos(QALPHA) + z2i * Math.sin(QALPHA)];
+}
+/* Patch (k1, k2) as a pos(u, v), in the same world units as a board. The mixed
+   imaginary part is the vertical, which is the orientation the standard picture is
+   always shown in. */
+/* Memoised, because `grid` samples the same (u, v) lattice on every frame and two
+   `pow`s and an `atan2` per corner over 1600 sub-quads is the whole cost of this
+   scene. The returned arrays are shared and must be treated as read-only; every
+   consumer here already builds a new vector rather than writing into one. */
+const QCACHE = new Map();
+const quinPatch = (k1, k2) => {
+  const pk = k1 * QN + k2;
+  let c = QCACHE.get(pk);
+  if (!c) { c = new Map(); QCACHE.set(pk, c); }
+  return (u, v) => {
+    const key = (u * 65536 | 0) * 131072 + (v * 65536 | 0);
+    let p = c.get(key);
+    if (p === undefined) {
+      const q = quintic(k1, k2, u * Math.PI / 2, -1 + 2 * v);
+      p = [q[0] * QS, q[2] * QS, q[1] * QS];
+      c.set(key, p);
+    }
+    return p;
+  };
+};
+
 const blend = (fa, fb, m) => (u, v) => {
   const A = fa(u, v), B = fb(u, v);
   return [lerp(A[0], B[0], m), lerp(A[1], B[1], m), lerp(A[2], B[2], m)];
@@ -860,7 +977,7 @@ function trailOn(pos, from, to, n, tone, lift) {
 const emptyScene = () => ({ quads: [], pieces: [], trails: [], bursts: [], caption: '' });
 
 /* ===========================================================================
-   The twelve overtures.
+   The fourteen overtures.
    =========================================================================== */
 const OV = {};
 
@@ -1648,6 +1765,422 @@ OV.hyper4 = {
   }
 };
 
+/* ----------------------------------------------------------------- torus3d */
+OV.torus3d = {
+  label: 'torus3d', diff: 'hard', dims: '4 × 4 × 4 · all three axes periodic',
+  blurb: 'A cube with all three pairs of faces glued. No edge, no corner, no special cell.',
+  thesis: 'The overture that <b>tries the obvious picture and is refused by it.</b> Two gluings give a torus, and the third has nowhere to go — T³ does not embed in three dimensions — so the shape falls back to the only honest picture there is: a box, its three pairs of faces named in three colours, sitting in the lattice of its own translates. That lattice <em>is</em> the 26 neighbours a king has here, which is the one number this variant exists for.',
+  cam: t => ({
+    yaw: lerp(0.05, 0.92, ease(t)),
+    /* Back up again for the box: a cube seen from too low reads as a tower, and the
+       one thing this shape may not look like is taller on one axis than another. */
+    elev: lerp(1.45, 0.50, ease(t)) + lerp(0, 0.30, ease(seg(t, 0.72, 1))),
+    dist: lerp(22, 30, ease(seg(t, 0.15, 0.55)))
+        - lerp(0, 5, ease(seg(t, 0.62, 0.78)))
+        + lerp(0, 10, ease(seg(t, 0.78, 0.90)))
+        - lerp(0, 17, ease(seg(t, 0.90, 1))),
+    fov: 560
+  }),
+  phases: [
+    ['0.00 – 0.10', 'Cut', 'Four files and four ranks fall away, leaving the a1 corner 4 × 4. The same cut grammar as <code>cube5</code>, <code>hyper4</code> and <code>5d</code>: cells keep their size, so the board loses rows rather than shrinking.'],
+    ['0.10 – 0.15', 'Recentre', 'What survived slides to the middle of the pane.'],
+    ['0.15 – 0.26', 'Extrude', 'Four levels rise out of the board into a 4 × 4 × 4 box. Nothing is glued yet.'],
+    ['0.26 – 0.52', 'Two axes close', 'File first, then rank — the same two beats in the same order as <code>torus</code>, and through the same function. On a solid the level axis becomes the radial one, so the four levels come out as four <em>nested</em> tori about one core circle, outer shells drawn down in opacity so the nesting is seen rather than inferred.'],
+    ['0.52 – 0.62', 'The third refuses', 'The outermost and innermost shells have already been named in the level axis\'s own hue while the ring was closing, so the pair that is about to fail is the pair the player has been watching. It fails: they are nested, not adjacent, and space has no way to join them. Marked in <code>blood</code>, radially, at six points round the ring. <b>T³ has no embedding in R³</b>, and this is the frame that says so.'],
+    ['0.62 – 0.78', 'Three hues, six faces', 'The shells unroll back into the box, which closes up to a true cube, and each glued pair of faces takes one hue off the seam ramp — file, rank, level. This is not a compromise picture: it is <em>what the geometry layer actually stores</em>, three periodic identifications over a flat lattice, drawn.'],
+    ['0.78 – 0.90', 'The lattice of copies', 'The box\'s 26 translates bloom around it in wireframe — the six face-neighbours in their axis hues, the twenty edge- and corner-neighbours reduced to one faint face loop apiece. A rook slides off one face: one straight line through the copies, and the same line cut in two inside the box. The rhyme with <code>mirrorbox</code>\'s unfolding is deliberate — a wrap and a bounce are both the straight line, read in the fundamental domain.'],
+    ['0.90 – 1.00', 'Twenty-six', 'The copies fade, the levels open out again so nothing hides inside a solid block, and a king in the middle lights all 26 destinations at once: 6 in the first hue, 12 in the second, 8 in the third, by how many axes each step uses. Not one of them is clipped, which is the difference between this board and every bounded one in the library.']
+  ],
+  note: ['cold', 'The nested-tori beat is a cheat that is there <em>to fail</em>, and its ring radius is opened far wider than the honest 1 : 1 — further than <code>torus</code> opens its own, because a solid four shells thick has to clear its own hole. Four shells of a solid torus really are a T² × interval and the picture is exact right up to the moment the interval has to close; a spec that cut straight to the coloured box would be correct and would teach nothing. The alternative first draft — three donuts side by side, one per axis — was rejected outright: three tori are three different 2-manifolds, and this variant is one 3-manifold. Nothing on screen may suggest otherwise.'],
+  scene(t) {
+    const S = emptyScene();
+    const N = 4;
+    const cut   = ease(seg(t, 0, 0.10));
+    const shift = ease(seg(t, 0.10, 0.15));
+    const ext   = ease(seg(t, 0.15, 0.26));
+    const rollF = ease(seg(t, 0.26, 0.38));          /* files close  */
+    const rollR = ease(seg(t, 0.38, 0.52));          /* ranks close  */
+    const undo  = ease(seg(t, 0.62, 0.72));          /* and both open again */
+    const faces = ease(seg(t, 0.68, 0.78));
+    const cop   = seg(t, 0.78, 0.90);
+    const show  = seg(t, 0.90, 1);
+    const off = (4 - N / 2) * shift;
+    /* Level spacing. It opens so the extrusion reads, closes to exactly one cell so
+       the lattice of copies has the same period on all three axes - it must, the
+       manifold is a cube - and opens again at the end so the 26 destinations are not
+       buried inside a solid block. */
+    const gap = lerp(lerp(0, 1.6, ext), 1.0, ease(seg(t, 0.68, 0.78)))
+              + lerp(0, 0.7, ease(seg(t, 0.90, 1)));
+    const th = rollF * (1 - undo) * TAU;
+    const ph = rollR * (1 - undo) * TAU;
+    const curl = Math.max(rollF, rollR) * (1 - undo);
+    /* A level is a height above the board when the box is flat, and a shell radius
+       when it is rolled. Both are the same parameter to `shellTube`, which is why the
+       whole overture is one surface function rather than a blend between two. */
+    const shellOf = L => lerp((L - 1.5) * gap, 0.62 + L * 0.82, curl);
+    const posOf = L => (u, v) => {
+      const p = shellTube(u, v, { th, ph, shell: shellOf(L), open: lerp(1, 10.5, rollR * (1 - undo)) });
+      return [p[0] + off - 2, p[1], p[2] + off - 2];
+    };
+    const SHELL = [1, 0.70, 0.52, 0.40];
+
+    cutGrid(S, N, cut);
+    for (let L = 0; L < N; L++) {
+      const alive = L === 0 ? 1 : clamp(ext * 1.7 - (L - 1) * 0.20, 0, 1);
+      if (alive <= 0.01) continue;
+      grid(S, posOf(L), {
+        nx: N, nz: N, inset: 0.04, sub: curl > 0.02 ? 3 : 1,
+        fade: alive * lerp(1, SHELL[L], curl),
+        tone: (f, r) => ((f + r + L) % 2 ? 'dark' : 'light')
+      });
+    }
+    /* the 8 x 8 army goes with its cells, then leaves with the extrusion */
+    if (ext < 0.6) for (let f = 0; f < 8; f++) for (const r of [0, 1, 6, 7]) {
+      const doomed = !(f < N && r < N);
+      const k = doomed ? cutFraction(N, f, r, cut) : 1 - ease(clamp(ext * 1.8, 0, 1));
+      if (k <= 0.02) continue;
+      const g = (r === 1 || r === 6) ? 'P' : BACK[f];
+      const side = r <= 1 ? 'white' : 'black';
+      if (doomed) piece(S, (u, v) => [u * 8 - 4, 0, v * 8 - 4], f, r, g, side, { fade: k });
+      else piece(S, posOf(0), f, r, g, side, { nx: N, nz: N, fade: k });
+    }
+    /* Name the pair that is going to fail before it fails: the level axis glues the
+       outermost shell to the innermost, so both get its hue while the ring closes. */
+    const named = ease(seg(t, 0.38, 0.50)) * (1 - ease(seg(t, 0.60, 0.70)));
+    if (named > 0.02) for (const L of [0, 3]) {
+      const pts = [];
+      for (let i = 0; i <= 40; i++) pts.push(posOf(L)(0.75, i / 40));
+      S.trails.push({ pts, tone: seamColor(2, 3), w: 2.6, fade: named });
+    }
+    /* the refusal: outermost shell to innermost, which is not a step space can take */
+    const bad = seg(t, 0.52, 0.62) * (1 - ease(seg(t, 0.62, 0.70)));
+    if (bad > 0.02) {
+      for (let i = 0; i < 6; i++) {
+        const v = (i + 0.5) / 6;
+        const a = posOf(3)(0.75, v), b = posOf(0)(0.75, v);
+        S.trails.push({ pts: [a, b], tone: P.blood, w: 2.6, fade: bad * 0.9, dash: '3 4' });
+        S.bursts.push({ at: a, r: 0.55, fade: bad, tone: P.blood, cross: true });
+      }
+    }
+    /* The box. Its cells span [-4+off, off] on file and rank - the cut block's own
+       coordinates, slid by `off` - and 4 x gap on level. */
+    const cellAt = (f, r, L) => [ f + 0.5 - 4 + off, (L - 1.5) * gap, r + 0.5 - 4 + off ];
+    const lo = [-4 + off, -2 * gap, -4 + off], hi = [off, 2 * gap, off];
+    const corner = c => [ c[0] ? hi[0] : lo[0], c[1] ? hi[1] : lo[1], c[2] ? hi[2] : lo[2] ];
+    if (faces > 0.02) {
+      const FACES = [
+        [0, [[0,0,0],[0,0,1],[0,1,1],[0,1,0]]], [0, [[1,0,0],[1,0,1],[1,1,1],[1,1,0]]],
+        [1, [[0,0,0],[1,0,0],[1,0,1],[0,0,1]]], [1, [[0,1,0],[1,1,0],[1,1,1],[0,1,1]]],
+        [2, [[0,0,0],[1,0,0],[1,1,0],[0,1,0]]], [2, [[0,0,1],[1,0,1],[1,1,1],[0,1,1]]]
+      ];
+      for (const [k, cs] of FACES) {
+        const p = cs.map(corner), c = seamColor(k, 3);
+        S.quads.push({ p, tone: c, fade: faces * 0.14 * (1 - 0.7 * ease(show)) });
+        S.trails.push({ pts: p.concat([p[0]]), tone: c, w: 2.0,
+                        fade: faces * 0.9 * (1 - 0.45 * ease(show)) });
+      }
+    }
+    /* The 26 translates. A face-neighbour gets the whole wire box in its axis hue; an
+       edge or corner neighbour gets one face loop, which places it and keeps the draw
+       count near 60 polylines rather than over 300 segments. */
+    const ghost = ease(clamp(cop * 1.3, 0, 1)) * (1 - ease(clamp(show * 1.7, 0, 1)));
+    if (ghost > 0.02) {
+      const per = [4, 4 * gap, 4];
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+        const man = Math.abs(dx) + Math.abs(dy) + Math.abs(dz);
+        if (man === 0) continue;
+        const bornG = clamp(cop * 2.8 - (man - 1) * 0.26, 0, 1);
+        if (bornG <= 0.02) continue;
+        const d = [dx * per[0], dy * per[1], dz * per[2]];
+        const axis = man === 1 ? (dx ? 0 : dy ? 1 : 2) : -1;
+        const tone = axis < 0 ? P.boneFaint : seamColor(axis, 3);
+        const fade = ghost * bornG * (axis < 0 ? 0.24 : 0.60);
+        wireBox(S, corner, d, axis >= 0, { tone, w: axis < 0 ? 0.8 : 1.3, fade });
+      }
+    }
+    /* a rook off one face and back in at the other: one straight line, cut in two */
+    if (cop > 0.24 && show < 0.85) {
+      const s = ease(clamp((cop - 0.24) / 0.66, 0, 1));
+      /* on the top level, so the ember line is not buried inside the block */
+      const home = cellAt(0, 1, 3), run = s * 7.6;
+      const wrap = q => ((q - lo[0]) % 4 + 4) % 4 + lo[0];
+      S.trails.push({ pts: [[home[0], home[1] + 0.32, home[2]],
+                            [home[0] + run, home[1] + 0.32, home[2]]],
+                      tone: seamColor(0, 3), w: 1.5, fade: 0.6 * ghost, dash: '4 5' });
+      const parts = [[]];
+      let prev = null;
+      for (let i = 0; i <= 48; i++) {
+        const q = wrap(home[0] + run * i / 48);
+        if (prev !== null && q < prev - 1e-3) parts.push([]);
+        parts[parts.length - 1].push([q, home[1] + 0.32, home[2]]);
+        prev = q;
+      }
+      for (const pl of parts) if (pl.length > 1)
+        S.trails.push({ pts: pl, tone: P.ember, w: 2.6, fade: 1 - ease(show) });
+      piece(S, posOf(3), 0, 0, 'R', 'white',
+            { nx: N, nz: N, at: [wrap(home[0] + run), home[1], home[2]], normal: [0, 1, 0],
+              fade: 1 - ease(clamp(show * 2.2, 0, 1)) });
+    }
+    /* twenty-six, and not one of them clipped */
+    if (show > 0) {
+      const s = ease(show);
+      piece(S, posOf(1), 0, 0, 'K', 'white',
+            { nx: N, nz: N, at: cellAt(1, 1, 1), normal: [0, 1, 0] });
+      let k = 0;
+      for (let df = -1; df <= 1; df++) for (let dr = -1; dr <= 1; dr++) for (let dl = -1; dl <= 1; dl++) {
+        const used = (df ? 1 : 0) + (dr ? 1 : 0) + (dl ? 1 : 0);
+        if (used === 0) continue;
+        k++;
+        S.bursts.push({
+          at: cellAt((1 + df + 4) % 4, (1 + dr + 4) % 4, (1 + dl + 4) % 4), r: 0.34,
+          fade: clamp(s * 2 - k / 44, 0, 1) * 0.95, tone: seamColor(used - 1, 3)
+        });
+      }
+    }
+    S.caption = t < 0.10 ? 'four files and four ranks go'
+      : t < 0.15 ? 'and what is left moves in'
+      : t < 0.26 ? 'a third axis, four levels deep'
+      : t < 0.38 ? 'the files close, as ever'
+      : t < 0.52 ? 'the ranks close, and the levels nest'
+      : t < 0.62 ? 'the third has nowhere to go'
+      : t < 0.78 ? 'so the box keeps the gluing as colour'
+      : t < 0.90 ? 'leave a face, arrive at the opposite one'
+      : 'twenty-six neighbours, and no cell without them';
+    return S;
+  }
+};
+
+/* ---------------------------------------------------------------------- t6 */
+OV.t6 = {
+  label: 't6', diff: 'impossible', dims: '4⁶ · 4096 cells · every axis periodic',
+  blurb: 'Six glued axes. Three of them have nowhere in space to go.',
+  thesis: 'The overture that <b>overflows on purpose, and is then resolved.</b> It builds <code>torus3d</code>\'s box and its lattice of copies — three axes, three pairs of faces, three directions to translate in — and then asks for three more. R³ has exactly three independent translation directions and no fourth, so axes x₄, x₅ and x₆ arrive skew, their copies interpenetrating the ones already there, until the lattice is a tangle nobody could read a move on. <b>That illegibility is the honest picture of six axes in three dimensions</b>, and it is the thing the quintic then absorbs: the tangle collapses onto the manifold from the main menu, one copy per sheet, and comes out smooth.',
+  cam: t => ({
+    yaw: lerp(-0.05, 1.32, ease(t)),
+    elev: lerp(1.45, 0.60, ease(t)),
+    /* Out for the lattice, further out for the tangle - it has to be seen entire to
+       be seen as too much - and back in as the quintic gathers it up. */
+    dist: lerp(22, 34, ease(seg(t, 0.20, 0.36)))
+        + lerp(0, 9, ease(seg(t, 0.36, 0.56)))
+        - lerp(0, 15, ease(seg(t, 0.58, 0.76))),
+    fov: 560
+  }),
+  phases: [
+    ['0.00 – 0.08', 'Cut', 'Four files and four ranks fall away. Every axis here is four cells long, so the 4 × 4 left behind is a genuine slice of this board and not a legibility compromise.'],
+    ['0.08 – 0.13', 'Recentre', 'The survivors slide to the middle.'],
+    ['0.13 – 0.24', 'Three axes', 'Four levels extrude into the 4 × 4 × 4 box, and its three pairs of faces take the first three hues off the seam ramp. This is <code>torus3d</code>\'s vocabulary quoted outright, at pace and without its nested-tori detour — that beat belongs to that overture, and repeating it here would make the two hardest entries in the library the same animation.'],
+    ['0.24 – 0.36', 'The lattice', 'The 26 translates bloom, as they do in <code>torus3d</code>. Caption: a glued box is already a Calabi-Yau — the flat one. The claim the variant doc makes in words, made here by the shape, and made <em>before</em> anything goes wrong.'],
+    ['0.36 – 0.58', 'Three more, and no room', 'x₄, x₅ and x₆ ask for three more translation directions. <b>R³ has three and there is no fourth.</b> They arrive skew and incommensurate: their copies land part-way through the copies already there, in hues 4, 5 and 6, until the lattice is a tangle of interpenetrating boxes. Collisions marked in <code>blood</code>. Nothing here is decoration — every box on screen is a cell of this board, and the illegibility is the measurement.'],
+    ['0.58 – 0.76', 'Resolved', 'The tangle gathers. Each copy collapses to a single 4 × 4 sheet and flies to its patch of the Calabi-Yau quintic — 25 of them, the same <code>quintic()</code> that is behind the title screen, not an impression of it. What could not be held as a lattice is held as a manifold, and the chequer is <code>(f + r + k₁ + k₂) % 2</code>, the menu\'s own parity to the character.'],
+    ['0.76 – 0.88', 'The figures walk', 'Fourteen pieces drift along the surface\'s parameter lines, both colours, the same count and drift as <code>drawManifold</code>. A rook runs its line of four and comes home — on a 4-cell periodic axis a rook\'s line is a closed loop, and the fourth step is drawn as a bright link rather than an edge that meets, because the quintic is not this board\'s own space.'],
+    ['0.88 – 1.00', 'A hundred and twenty', 'The knight\'s whole atom at once: {1,2} on any ordered pair of six axes, both signs — 120 directions, every one legal, none clipped.']
+  ],
+  note: ['warm', 'The tangle is the one frame in the library that is <em>meant</em> to be unreadable, and that has to be said in the code or the next person will optimise it away as a bug. It earns the licence by being exact: the three skew basis vectors are incommensurate with the cubic ones on purpose, so copies land part-way through their neighbours rather than on top of them, and every box drawn is a real translate of the fundamental domain. A tangle assembled from arbitrary noise would look identical and mean nothing, which is the whole difference.'],
+  note2: ['cold', 'Two things this overture is <b>not</b> claiming. First, 25 ≠ 4⁴: the quintic\'s patch lattice is the quintic\'s, not this board\'s, and the copies are <em>addressed</em> onto it, not projected — no faithful projection of T⁶ into three dimensions exists, which is exactly what the previous beat spent its whole runtime demonstrating. Second, the smoothed quintic is not a quotient of a box by face identifications and so cannot be declared as a variant; <code>docs/variants/t6.md</code> records that gap and this must not paper over it. What is true, and is why this is the right shape to land on: a torus <em>is</em> a Calabi-Yau, and this board is a torus.'],
+  note3: ['', 'The 120 directions land on <b>60 distinct cells</b>, and the animation draws 60 pips while the caption says 120. On an axis of extent 4, +2 and −2 are the same step, so the two signs of the magnitude-2 leg coincide. That is a real fact about this variant that nothing else in the library surfaces, and a pip count that silently disagreed with the spoken number would be the worst of both.'],
+  scene(t) {
+    const S = emptyScene();
+    const N = 4;
+    const cut    = ease(seg(t, 0, 0.08));
+    const shift  = ease(seg(t, 0.08, 0.13));
+    const ext    = ease(seg(t, 0.13, 0.24));
+    const lat    = seg(t, 0.24, 0.36);
+    const skew   = seg(t, 0.36, 0.58);
+    const gather = seg(t, 0.58, 0.76);
+    const settle = ease(seg(t, 0.68, 0.80));
+    const walk   = seg(t, 0.76, 0.88);
+    const fan    = seg(t, 0.88, 1);
+    const off = (4 - N / 2) * shift;
+    const gap = ext;                       /* a true cube the moment it exists */
+
+    /* The fundamental domain, and a copy of it at an arbitrary offset. */
+    const boxAt = (L, o) => (u, v) => [ u * N - 4 + off + o[0],
+                                        (L - 1.5) * gap + o[1],
+                                        v * N - 4 + off + o[2] ];
+    const ORIGIN = [0, 0, 0];
+    const lo = [-4 + off, -2 * gap, -4 + off], hi = [off, 2 * gap, off];
+    const corner = c => [ c[0] ? hi[0] : lo[0], c[1] ? hi[1] : lo[1], c[2] ? hi[2] : lo[2] ];
+
+    /* The three axes that get a direction, and the three that do not.
+       E_SKEW is incommensurate with the cubic lattice on purpose: a copy offset by
+       one of these lands PART-WAY THROUGH its neighbours instead of beside them,
+       which is the whole visual argument. */
+    const E_SKEW = [[2.7, 2.3, -1.5], [-1.9, 2.7, 2.5], [2.3, -2.5, 2.1]];
+    const COPIES = [];
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let c = -1; c <= 1; c++) {
+      if (!a && !b && !c) continue;
+      const man = Math.abs(a) + Math.abs(b) + Math.abs(c);
+      COPIES.push({ p: [a * 4, b * 4 * gap, c * 4], man,
+                    axis: man === 1 ? (a ? 0 : b ? 1 : 2) : -1, skew: false });
+    }
+    const SEEDS = [[0,0,0], [1,0,0], [-1,0,0], [0,1,0], [0,-1,0], [0,0,1], [0,0,-1]];
+    for (let j = 0; j < 3; j++) for (const s of [-1, 1]) for (let q = 0; q < SEEDS.length; q++) {
+      const sd = SEEDS[q];
+      COPIES.push({ p: [ sd[0] * 4 + s * E_SKEW[j][0],
+                         sd[1] * 4 * gap + s * E_SKEW[j][1],
+                         sd[2] * 4 + s * E_SKEW[j][2] ],
+                    man: 1 + q, axis: 3 + j, skew: true });
+    }
+
+    /* Which copy becomes which sheet of the quintic. Spread over the list so the
+       twenty-five that survive are not all from one corner of the tangle. */
+    const srcOf = (k1, k2) => COPIES[((k1 * QN + k2) * 11) % COPIES.length].p;
+    const born = (k1, k2) => ease(clamp((gather - (k1 + k2) / 8 * 0.5) / 0.5, 0, 1));
+
+    cutGrid(S, N, cut);
+    /* the fundamental domain's own cells, until the sheets take over */
+    const boxFade = 1 - ease(clamp(gather * 1.6, 0, 1));
+    if (boxFade > 0.02) for (let L = 0; L < N; L++) {
+      const alive = L === 0 ? 1 : clamp(ext * 1.7 - (L - 1) * 0.20, 0, 1);
+      if (alive <= 0.01) continue;
+      grid(S, boxAt(L, ORIGIN), {
+        nx: N, nz: N, inset: 0.04, fade: alive * boxFade,
+        tone: (f, r) => ((f + r + L) % 2 ? 'dark' : 'light')
+      });
+    }
+    /* the 8 x 8 army goes with its cells, then leaves with the extrusion */
+    if (ext < 0.6) for (let f = 0; f < 8; f++) for (const r of [0, 1, 6, 7]) {
+      const doomed = !(f < N && r < N);
+      const k = doomed ? cutFraction(N, f, r, cut) : 1 - ease(clamp(ext * 1.8, 0, 1));
+      if (k <= 0.02) continue;
+      const g = (r === 1 || r === 6) ? 'P' : BACK[f];
+      const side = r <= 1 ? 'white' : 'black';
+      if (doomed) piece(S, (u, v) => [u * 8 - 4, 0, v * 8 - 4], f, r, g, side, { fade: k });
+      else piece(S, boxAt(0, ORIGIN), f, r, g, side, { nx: N, nz: N, fade: k });
+    }
+    /* three axes, three pairs of faces */
+    const faces = ease(seg(t, 0.18, 0.26)) * (1 - ease(clamp(gather * 1.6, 0, 1)));
+    if (faces > 0.02) {
+      const FACES = [
+        [0, [[0,0,0],[0,0,1],[0,1,1],[0,1,0]]], [0, [[1,0,0],[1,0,1],[1,1,1],[1,1,0]]],
+        [1, [[0,0,0],[1,0,0],[1,0,1],[0,0,1]]], [1, [[0,1,0],[1,1,0],[1,1,1],[0,1,1]]],
+        [2, [[0,0,0],[1,0,0],[1,1,0],[0,1,0]]], [2, [[0,0,1],[1,0,1],[1,1,1],[0,1,1]]]
+      ];
+      for (const [k, cs] of FACES) {
+        const p = cs.map(corner), c = seamColor(k, 6);
+        S.quads.push({ p, tone: c, fade: faces * 0.14 });
+        S.trails.push({ pts: p.concat([p[0]]), tone: c, w: 2.0, fade: faces * 0.9 });
+      }
+    }
+    /* The lattice, and then the tangle. Every skew copy is drawn as a whole wire box,
+       because a box landing part-way through another box is the entire argument and a
+       few loose rails would read as haze. The faint cubic diagonals keep one loop. */
+    const shown = ease(clamp(lat * 1.3, 0, 1));
+    const messy = ease(clamp(skew * 1.2, 0, 1));
+    const fadeOut = 1 - ease(clamp(gather * 1.5, 0, 1));
+    if (shown > 0.02 && fadeOut > 0.02) for (const cp of COPIES) {
+      const arrive = cp.skew
+        ? clamp(messy * 2.4 - (cp.man - 1) * 0.22 - (cp.axis - 3) * 0.20, 0, 1)
+        : clamp(shown * 2.6 - (cp.man - 1) * 0.26, 0, 1);
+      if (arrive <= 0.02) continue;
+      const tone = cp.axis < 0 ? P.boneFaint : seamColor(cp.axis, 6);
+      const w = cp.axis < 0 ? 0.8 : cp.skew ? 1.0 : 1.3;
+      const fade = arrive * fadeOut * (cp.axis < 0 ? 0.22 : cp.skew ? 0.40 : 0.58);
+      wireBox(S, corner, cp.p, cp.skew || cp.axis >= 0, { tone, w, fade });
+    }
+    /* where a skew copy lands inside one already there */
+    const clash = ease(clamp((skew - 0.30) / 0.45, 0, 1)) * fadeOut;
+    if (clash > 0.02) {
+      const mid = [ (lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2 ];
+      let n = 0;
+      for (let j = 0; j < 3; j++) for (const s of [-1, 1]) for (const g of [0.5, 1]) {
+        const e = E_SKEW[j];
+        n++;
+        S.bursts.push({ at: [ mid[0] + s * e[0] * g, mid[1] + s * e[1] * g, mid[2] + s * e[2] * g ],
+                        r: 0.95, fade: clamp(clash * 1.8 - n / 14, 0, 1) * 0.9,
+                        tone: P.blood, cross: true });
+      }
+    }
+    /* Resolved: every surviving copy collapses to one sheet and flies to its patch. */
+    for (let k1 = 0; k1 < QN; k1++) for (let k2 = 0; k2 < QN; k2++) {
+      const m = born(k1, k2);
+      if (m <= 0.005) continue;
+      const src = boxAt(1, srcOf(k1, k2));
+      grid(S, blend(src, quinPatch(k1, k2), m), {
+        nx: N, nz: N, inset: lerp(0.04, 0.015, m), sub: m > 0.02 ? 2 : 1,
+        /* Opaque almost at once: the sheet is not arriving, it IS the copy that was
+           already on screen, now flattened. Fading it in would read as a new object. */
+        fade: clamp(m * 5, 0, 1) * lerp(1, 0.55, m),
+        tone: (f, r) => ((f + r + k1 + k2) % 2 ? 'dark' : 'light')
+      });
+    }
+    /* fourteen figures, walking the parameter lines. `t` is the clock, so they drift
+       forwards on the way out and backwards on the way home, for free. */
+    if (settle > 0.02) {
+      for (let i = 0; i < 14; i++) {
+        const k1 = i % QN, k2 = (i * 2 + 1) % QN;
+        if (born(k1, k2) < 0.9) continue;
+        const du = (rnd(i * 5 + 1) - 0.5) * 1.1, dv = (rnd(i * 5 + 2) - 0.5) * 1.1;
+        let u = rnd(i * 5 + 3) + t * du;
+        u = ((u % 1) + 1) % 1;
+        const v = 0.5 + 0.44 * Math.sin((rnd(i * 5 + 4) + t * dv) * TAU);
+        const p = quinPatch(k1, k2);
+        piece(S, p, 0, 0, 'RNBQKP'[i % 6], i % 2 ? 'black' : 'white',
+              { at: p(u, v), normal: normalAt(p, u, v), h: 1.0, fade: settle });
+      }
+    }
+    /* the rook's line of four: three steps drawn on the sheet, the fourth as a link */
+    if (walk > 0) {
+      const s = ease(walk), p = quinPatch(1, 2), v0 = 1.5 / N;
+      const u0 = 0.5 / N, span = Math.min(s * 4, 3) / N;
+      S.trails.push(Object.assign(trailOn(p, [u0, v0], [u0 + span, v0], 28, P.ember, 0.22),
+                                  { w: 2.6, fade: 1 }));
+      const close = clamp(s * 4 - 3, 0, 1);
+      if (close > 0) {
+        const a = p(u0 + 3 / N, v0), b = p(u0, v0), pts = [];
+        for (let i = 0; i <= 18; i++) {
+          const q = i / 18 * close, lift = Math.sin(q * Math.PI) * 2.0;
+          pts.push([ lerp(a[0], b[0], q), lerp(a[1], b[1], q) + lift, lerp(a[2], b[2], q) ]);
+        }
+        S.trails.push({ pts, tone: seamColor(0, 6), w: 2.2, fade: 1, dash: '5 4' });
+      }
+      const uNow = close > 0.99 ? u0 : u0 + span;
+      piece(S, p, 0, 0, 'R', 'white', { at: p(uNow, v0), normal: normalAt(p, uNow, v0) });
+    }
+    /* the knight's atom: {1,2} on every ordered pair of six axes, both signs. 120
+       vectors; 60 cells, because +2 and -2 coincide on an axis of extent 4. */
+    if (fan > 0) {
+      const s = ease(fan);
+      /* The address: the four axes with no sheet of their own, read as a base-4
+         number and spread over the 25 patches by a multiplier coprime to 25. A
+         labelling for the eye - distinct cells get distinct places - and emphatically
+         not a projection. The tangle is what a projection would have cost. */
+      const addr = c => {
+        const k = (c[2] + 4 * c[3] + 16 * c[4] + 64 * c[5]) * 7 % (QN * QN);
+        return quinPatch(k % QN, (k / QN) | 0)((c[0] + 0.5) / N, (c[1] + 0.5) / N);
+      };
+      const base = [1, 1, 1, 1, 1, 1];
+      const seen = new Set();
+      let drawn = 0;
+      for (let i = 0; i < 6; i++) for (let j = 0; j < 6; j++) {
+        if (i === j) continue;
+        for (const si of [-1, 1]) for (const sj of [-1, 1]) {
+          const c = base.slice();
+          c[i] = (c[i] + si + 4) % 4;
+          c[j] = (c[j] + sj * 2 + 4) % 4;
+          const key = c.join('');
+          if (seen.has(key)) continue;
+          seen.add(key);
+          drawn++;
+          S.bursts.push({ at: addr(c), r: 0.26,
+                          fade: clamp(s * 2 - drawn / 100, 0, 1) * 0.9,
+                          tone: seamColor(Math.min(i, j), 6) });
+        }
+      }
+      piece(S, quinPatch(0, 0), 0, 0, 'N', 'white', { at: addr(base), nx: N, nz: N });
+    }
+    S.caption = t < 0.08 ? 'four files and four ranks go'
+      : t < 0.13 ? 'and what is left moves in'
+      : t < 0.24 ? 'three axes, three pairs of faces'
+      : t < 0.36 ? 'a glued box is already a Calabi-Yau: the flat one'
+      : t < 0.58 ? 'three more axes, and space has no directions left'
+      : t < 0.76 ? 'what a lattice could not hold, a manifold can'
+      : t < 0.88 ? 'a rook\'s line of four is a closed loop'
+      : 'one knight, a hundred and twenty directions';
+    return S;
+  }
+};
+
 /* ===========================================================================
    Renderer: world scene -> sorted SVG.
    =========================================================================== */
@@ -1715,9 +2248,11 @@ function render(sc, cam) {
    The hero: library, transport, and the queue state machine.
    =========================================================================== */
 const ORDER = ['atomic', 'cylinder', 'mirrorbox', 'mustcapture', 'standard',
-               'atomic_torus', 'cube5', 'klein', 'mobius', 'torus', '5d', 'hyper4'];
-const GROUPS = [['Easy', 0, 5], ['Medium', 5, 10], ['Hard', 10, 12]];
-const DIFFVAR = { easy: 'var(--d-easy)', medium: 'var(--d-medium)', hard: 'var(--d-hard)' };
+               'atomic_torus', 'cube5', 'klein', 'mobius', 'torus',
+               '5d', 'hyper4', 'torus3d', 't6'];
+const GROUPS = [['Easy', 0, 5], ['Medium', 5, 10], ['Hard', 10, 13], ['Impossible', 13, 14]];
+const DIFFVAR = { easy: 'var(--d-easy)', medium: 'var(--d-medium)',
+                  hard: 'var(--d-hard)', impossible: 'var(--d-impossible)' };
 
 const FWD = 2.4, REV = 2.4, HOLD1 = 0.7, HOLD0 = 0.25;
 let current = 'standard', pending = null, state = 'forward', t = 0, dwell = 0;
@@ -1857,6 +2392,8 @@ for (const key of ORDER) {
     + o.phases.map(([r, l, d]) => `<tr><td class="t">${r}</td><td class="lb">${esc(l)}</td><td class="ds">${d}</td></tr>`).join('')
     + `</tbody></table>`
     + (o.note ? `<div class="note ${o.note[0]}"><b>Note</b> — ${o.note[1]}</div>` : '')
+    + (o.note2 ? `<div class="note ${o.note2[0]}"><b>Note</b> — ${o.note2[1]}</div>` : '')
+    + (o.note3 ? `<div class="note ${o.note3[0]}"><b>Note</b> — ${o.note3[1]}</div>` : '')
     + `</div>`
     + `<div class="frames">`
     + STILLS.map((s, i) => `<figure><div class="box"><svg viewBox="-320 -260 640 520" data-still="${key}" data-t="${s}"><g></g></svg></div><figcaption>t = ${s.toFixed(2)}</figcaption></figure>`).join('')
