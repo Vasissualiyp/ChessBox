@@ -225,6 +225,16 @@ Result<void> Window::present(const OffscreenTarget& source) {
            VK_ACCESS_2_TRANSFER_WRITE_BIT, 0);
   vkEndCommandBuffer(cmd);
 
+  // A fence, not `vkQueueWaitIdle`. The full-queue idle waits for everything the queue
+  // has ever been given to finish; all this submission needs is its own completion before
+  // the command buffer is freed. That is a stall per frame that a fence expresses better
+  // (M4.8, "no redundant full-queue wait"). The present semaphore already orders the
+  // acquisition and the presentation; the fence is only so the CPU can reuse the buffer.
+  VkFenceCreateInfo fci{};
+  fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+  VkFence fence = VK_NULL_HANDLE;
+  vkCreateFence(ctx_->device(), &fci, nullptr, &fence);
+
   const VkPipelineStageFlags wait = VK_PIPELINE_STAGE_TRANSFER_BIT;
   VkSubmitInfo si{};
   si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -235,7 +245,7 @@ Result<void> Window::present(const OffscreenTarget& source) {
   si.pCommandBuffers = &cmd;
   si.signalSemaphoreCount = 1;
   si.pSignalSemaphores = &rendered_;
-  vkQueueSubmit(ctx_->queue(), 1, &si, VK_NULL_HANDLE);
+  vkQueueSubmit(ctx_->queue(), 1, &si, fence);
 
   VkPresentInfoKHR pi{};
   pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -246,9 +256,8 @@ Result<void> Window::present(const OffscreenTarget& source) {
   pi.pImageIndices = &index;
   const VkResult presented = vkQueuePresentKHR(ctx_->queue(), &pi);
 
-  // One submission in flight, waited on before the buffer is reused. A turn-based game
-  // redraws on input, so pipelining would add complexity for no benefit.
-  vkQueueWaitIdle(ctx_->queue());
+  vkWaitForFences(ctx_->device(), 1, &fence, VK_TRUE, UINT64_MAX);
+  vkDestroyFence(ctx_->device(), fence, nullptr);
   vkFreeCommandBuffers(ctx_->device(), ctx_->commandPool(), 1, &cmd);
 
   if (presented == VK_ERROR_OUT_OF_DATE_KHR || presented == VK_SUBOPTIMAL_KHR) {
