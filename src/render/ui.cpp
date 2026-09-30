@@ -406,15 +406,23 @@ void Ui::drawOvertureObject(app::Shell& shell, const ImVec2& min, const ImVec2& 
   const app::Overture which = p.current();
   const float progress = p.progress();
   const bool intro = p.intro();
+  // A variant with a hand-authored scene uses it; anything else - a Workshop package, a
+  // variant added as data - animates with the scene derived from its own spec (M13).
+  const VariantSpec* spec = shell.preview(pickedVariant_);
+  const bool derived = !app::hasBespokeOverture(pickedVariant_) && spec != nullptr;
   // Rebuild only when the inputs changed. The held dwell pins `t` at 1 for 700 ms, so
   // this is the difference between rebuilding 1600 quads every frame and building them
   // once; a scene is pure, so the cache is exact rather than approximate.
   if (!overtureCacheValid_ || overtureCacheWhich_ != which ||
-      overtureCacheT_ != progress || overtureCacheIntro_ != intro) {
-    overtureCache_ = overtureScene(which, progress, intro, theme_);
+      overtureCacheT_ != progress || overtureCacheIntro_ != intro ||
+      overtureCacheVariant_ != pickedVariant_ || overtureCacheDerived_ != derived) {
+    overtureCache_ = derived ? derivedOvertureScene(*spec, progress, theme_)
+                             : overtureScene(which, progress, intro, theme_);
     overtureCacheWhich_ = which;
     overtureCacheT_ = progress;
     overtureCacheIntro_ = intro;
+    overtureCacheVariant_ = pickedVariant_;
+    overtureCacheDerived_ = derived;
     overtureCacheValid_ = true;
   }
   // A copy, because the player's turn below is this frame's camera, not the scene's.

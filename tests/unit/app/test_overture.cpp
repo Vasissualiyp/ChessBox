@@ -7,6 +7,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "app/overture.hpp"
+#include "support/variants.hpp"
 
 using namespace cb;
 using namespace cb::app;
@@ -61,6 +62,33 @@ TEST_CASE("every shipped variant asks for an overture", "[unit]") {
   // And so does a name nobody has seen - a Workshop package, eventually.
   CHECK(overtureFor("something-nobody-shipped") == Overture::Standard);
   CHECK(overtureFor("") == Overture::Standard);
+}
+
+TEST_CASE("every shipped variant derives the surface its geometry implies", "[unit]") {
+  // M13.1: the derived overture keys off the identifications, not the name. A variant
+  // that glues two axes gets the torus whatever it is called; a box gets the flat grid.
+  struct Row {
+    const char* name;
+    SurfaceKind surface;
+  };
+  const Row rows[] = {
+      {"standard", SurfaceKind::FlatGrid},  {"cylinder", SurfaceKind::Tube},
+      {"torus", SurfaceKind::Torus},        {"mobius", SurfaceKind::Band},
+      {"klein", SurfaceKind::Klein},        {"mirrorbox", SurfaceKind::MirrorBox},
+      {"cube5", SurfaceKind::FlatGrid},     {"torus3d", SurfaceKind::Torus},
+      {"t6", SurfaceKind::Torus},           {"5d", SurfaceKind::FlatGrid},
+      {"atomic", SurfaceKind::FlatGrid},    {"charged", SurfaceKind::FlatGrid},
+      {"atomic_torus", SurfaceKind::Torus},
+  };
+  for (const Row& r : rows) {
+    CAPTURE(r.name);
+    const VariantSpec v = test::loadVariant(r.name);
+    CHECK(overtureSignature(v).surface == r.surface);
+  }
+  // A name with a hand-authored scene uses it; anything else - a Workshop package - takes
+  // the derived path.
+  CHECK(hasBespokeOverture("torus"));
+  CHECK_FALSE(hasBespokeOverture("a-variant-someone-uploaded"));
 }
 
 TEST_CASE("an overture cycles out and back", "[unit]") {

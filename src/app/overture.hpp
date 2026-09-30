@@ -4,7 +4,40 @@
 #include <cstdint>
 #include <string_view>
 
+namespace cb {
+struct VariantSpec;
+}  // namespace cb
+
 namespace cb::app {
+
+/// What a variant's geometry looks like to an overture - the derived scene's key.
+///
+/// A small, finite catalogue selected from the variant's own identifications, never from
+/// its name: two variants with the same gluing get the same surface, and a variant that
+/// did not exist when this build was made still gets one (M13).
+enum class SurfaceKind : std::uint8_t {
+  FlatGrid,   ///< no gluing: the board extruded into its own grid
+  Tube,       ///< one periodic axis: the files roll into a cylinder
+  Torus,      ///< two or more periodic axes
+  Band,       ///< a periodic axis with a sign flip: a Moebius band
+  Klein,      ///< a flip on one axis plus a periodic axis: the figure-eight
+  MirrorBox,  ///< a reflecting wall somewhere, so nothing is glued
+};
+
+/// The facts an overture needs, derived from the resolved spec.
+struct OvertureSignature {
+  SurfaceKind surface{SurfaceKind::FlatGrid};
+  std::uint8_t dims{2};
+  bool temporal{false};  ///< a turn or multiverse axis exists
+};
+
+/// Derive the signature from the identifications. Pure, and a pure function of the
+/// geometry: a table test pins every shipped variant's surface.
+[[nodiscard]] OvertureSignature overtureSignature(const VariantSpec& v) noexcept;
+
+/// True when the variant's name has a hand-authored scene. Everything else - a Workshop
+/// package, a variant added as data - animates with the derived scene instead.
+[[nodiscard]] bool hasBespokeOverture(std::string_view variantName) noexcept;
 
 /// The animation the library screen plays for a variant.
 ///

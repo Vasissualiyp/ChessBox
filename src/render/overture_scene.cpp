@@ -2400,6 +2400,108 @@ OvVec3 overtureSurfaceAt(app::Overture which, float u, float v) {
   }
 }
 
+OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v) {
+  switch (kind) {
+    case app::SurfaceKind::Tube: {
+      TubeOpt o;
+      o.th = kTau;
+      return tube(u, v, o);
+    }
+    case app::SurfaceKind::Torus: {
+      TubeOpt o;
+      o.th = kTau;
+      o.ph = kTau;
+      o.open = 2.2f;
+      return tube(u, v, o);
+    }
+    case app::SurfaceKind::Band:
+      return kMobiusStrip ? stripSurface(u, v, kW * kMobiusStretch, kH / kMobiusStretch,
+                                         kTau, 1.0f)
+                          : band(u, v, kTau, 1.0f);
+    case app::SurfaceKind::Klein:
+      return kleinSurf(u, v, kTau, 1.0f, kTau, 1.0f, 2.05f);
+    case app::SurfaceKind::FlatGrid:
+    case app::SurfaceKind::MirrorBox:
+      return flatBoard()(u, v);
+  }
+  return flatBoard()(u, v);
+}
+
+OvertureScene derivedOvertureScene(const VariantSpec& variant, float t,
+                                   const view::Theme& th) {
+  const app::OvertureSignature sig = app::overtureSignature(variant);
+  OvertureScene s;
+  const float form = ease(t);
+  const float settle = ease(seg(t, 0.0f, 0.12f));
+
+  // One arc for all of them: the camera starts on the shared opening pose and eases back
+  // as the surface forms, so the hand-over in and out is the same for every variant
+  // (M13).
+  s.cam = {lerpf(kOpenCam.yaw, 0.62f, ease(t)), lerpf(kOpenCam.elev, 0.58f, ease(t)),
+           lerpf(kOpenCam.reach, 7.4f, ease(t)), kOpenCam.persp};
+
+  const Pos flat = flatBoard();
+  const Pos formed = [sig](float u, float v) {
+    return derivedSurfaceAt(sig.surface, u, v);
+  };
+  const Pos pos = [flat, formed, form](float u, float v) {
+    return mix(flat(u, v), formed(u, v), form);
+  };
+
+  GridOpt g;
+  g.sub = 4;
+  addGrid(s, pos, g);
+  // The opening army, on the flat board every overture opens on, leaving as the surface
+  // forms - a variant that fields no pawns still opens on the same 8x8 as the rest.
+  addArmy(s, pos, 1.0f - ease(clampf(form * 1.4f, 0.0f, 1.0f)));
+  addRim(s, pos, th.rule, 1.4f, 0.5f + 0.4f * form);
+
+  // The seams the surface closed, each periodic pair in one hue off the ramp: the two
+  // ends of one identification share a colour, which is the grammar the hand-authored
+  // scenes established.
+  const bool filePeriodic =
+      sig.surface == app::SurfaceKind::Tube || sig.surface == app::SurfaceKind::Band ||
+      sig.surface == app::SurfaceKind::Torus || sig.surface == app::SurfaceKind::Klein;
+  const bool rankPeriodic =
+      sig.surface == app::SurfaceKind::Torus || sig.surface == app::SurfaceKind::Klein;
+  if (filePeriodic) {
+    const view::Rgba c = seamColour(th, 0, 2);
+    for (const float e : {0.0005f, 0.9995f}) {
+      OvTrail tr;
+      tr.colour = c;
+      tr.width = 3.0f;
+      tr.fade = settle * form;
+      for (int i = 0; i <= 16; ++i) tr.pts.push_back(pos(e, fi(i) / 16.0f));
+      s.trails.push_back(tr);
+    }
+  }
+  if (rankPeriodic) {
+    const view::Rgba c = seamColour(th, 1, 2);
+    for (const float e : {0.0005f, 0.9995f}) {
+      OvTrail tr;
+      tr.colour = c;
+      tr.width = 3.0f;
+      tr.fade = settle * form;
+      for (int i = 0; i <= 16; ++i) tr.pts.push_back(pos(fi(i) / 16.0f, e));
+      s.trails.push_back(tr);
+    }
+  }
+
+  // Settle onto the shared opening pose and hide everything drawn on it, the same rule
+  // the hand-authored scenes obey centrally.
+  for (OvTrail& tr : s.trails) tr.fade *= settle;
+  for (OvBurst& b : s.bursts) b.fade *= settle;
+  s.cam.yaw = lerpf(kOpenCam.yaw, s.cam.yaw, settle);
+  s.cam.elev = lerpf(kOpenCam.elev, s.cam.elev, settle);
+  s.cam.reach = lerpf(kOpenCam.reach, s.cam.reach, settle);
+  s.cam.persp = lerpf(kOpenCam.persp, s.cam.persp, settle);
+
+  s.caption = t < 0.12f  ? "the board every overture starts on"
+              : t < 0.5f ? "becoming the surface its geometry describes"
+                         : "the shape this variant plays on";
+  return s;
+}
+
 OvertureScene overtureScene(app::Overture which, float t, bool intro,
                             const view::Theme& th) {
   const float p = clampf(t, 0.0f, 1.0f);

@@ -5,6 +5,8 @@
 #include <array>
 #include <utility>
 
+#include "variant/variant.hpp"
+
 namespace cb::app {
 namespace {
 
@@ -37,6 +39,52 @@ Overture overtureFor(std::string_view variantName) noexcept {
     if (name == variantName) return o;
   }
   return Overture::Standard;
+}
+
+bool hasBespokeOverture(std::string_view variantName) noexcept {
+  for (const auto& [name, o] : kTable) {
+    if (name == variantName) return true;
+  }
+  return false;
+}
+
+OvertureSignature overtureSignature(const VariantSpec& v) noexcept {
+  OvertureSignature sig;
+  sig.dims = v.dims.dims();
+  for (std::uint8_t a = 0; a < sig.dims; ++a) {
+    if (v.dims.kind(a) != AxisKind::Spatial) sig.temporal = true;
+  }
+
+  const Geometry& g = v.geom;
+  if (g.isBox()) {
+    sig.surface = SurfaceKind::FlatGrid;
+    return sig;
+  }
+
+  bool mirror = false;
+  bool flip = false;
+  int periodic = 0;
+  for (std::uint8_t a = 0; a < sig.dims; ++a) {
+    for (const Side side : {Side::Min, Side::Max}) {
+      if (g.boundaryKind(a, side) == BoundaryKind::Mirror) mirror = true;
+    }
+    if (g.boundaryKind(a, Side::Max) == BoundaryKind::Periodic) {
+      ++periodic;
+      const Transform* xf = g.faceTransform(a, Side::Max);
+      if (xf != nullptr && xf->reversesOrientation()) flip = true;
+    }
+  }
+
+  if (mirror) {
+    sig.surface = SurfaceKind::MirrorBox;
+  } else if (periodic == 0) {
+    sig.surface = SurfaceKind::FlatGrid;
+  } else if (periodic == 1) {
+    sig.surface = flip ? SurfaceKind::Band : SurfaceKind::Tube;
+  } else {
+    sig.surface = flip ? SurfaceKind::Klein : SurfaceKind::Torus;
+  }
+  return sig;
 }
 
 std::string_view overtureName(Overture o) noexcept {

@@ -19,6 +19,7 @@
 
 #include <imgui.h>
 
+#include "io/variant_toml.hpp"
 #include "render/overture_scene.hpp"
 
 using namespace cb;
@@ -472,6 +473,69 @@ TEST_CASE("each gluing overture closes the seams its variant declares", "[render
       CHECK_THAT(dist(at(app::Overture::AtomicTorus, q, 0.0f),
                       at(app::Overture::AtomicTorus, q, 1.0f)),
                  WithinAbs(0.0f, kMeet));
+    }
+  }
+}
+
+TEST_CASE("the derived surface equals the hand-authored one for its topology",
+          "[render]") {
+  // M13.2: deriving a surface is only safe if it agrees with the surfaces already
+  // authored. The shipped scenes are the oracle, so a generated cylinder/torus/band/klein
+  // has to land on exactly the same points.
+  struct Row {
+    app::SurfaceKind kind;
+    app::Overture authored;
+  };
+  const Row rows[]{
+      {app::SurfaceKind::Tube, app::Overture::Cylinder},
+      {app::SurfaceKind::Torus, app::Overture::Torus},
+      {app::SurfaceKind::Band, app::Overture::Mobius},
+      {app::SurfaceKind::Klein, app::Overture::Klein},
+  };
+  for (const Row& r : rows) {
+    for (int i = 0; i <= 8; ++i) {
+      for (int j = 0; j <= 8; ++j) {
+        const float u = static_cast<float>(i) / 8.0f;
+        const float v = static_cast<float>(j) / 8.0f;
+        INFO("kind " << static_cast<int>(r.kind) << " at " << u << "," << v);
+        CHECK_THAT(
+            dist(derivedSurfaceAt(r.kind, u, v), overtureSurfaceAt(r.authored, u, v)),
+            WithinAbs(0.0f, 1e-5f));
+      }
+    }
+  }
+}
+
+TEST_CASE("a data-only variant gets a derived overture", "[render]") {
+  // A torus built only as TOML text: its name is in no C++ table, so it animates with the
+  // derived scene and not a line of scene code written for it.
+  const std::string toml =
+      "name = \"workshop_torus\"\n"
+      "description = \"a torus nobody wrote an overture for\"\n"
+      "[[axis]]\nname = \"file\"\nextent = 8\n"
+      "[[axis]]\nname = \"rank\"\nextent = 8\n"
+      "[[geometry.identify]]\naxis = \"file\"\nkind = \"periodic\"\n"
+      "[[geometry.identify]]\naxis = \"rank\"\nkind = \"periodic\"\n"
+      "[[piece]]\nname = \"king\"\nsymbol = \"K\"\nroyal = true\n"
+      "[[piece.move]]\nvector = [1]\nmax = 1\nmode = \"leap\"\n"
+      "[[piece.move]]\nvector = [1, 1]\nmax = 1\nmode = \"leap\"\n"
+      "[start]\nboard = \"4k3/8/8/8/8/8/8/4K3\"\n";
+  const auto v = loadVariantToml(toml, "<derived>");
+  REQUIRE(v.has_value());
+  CHECK_FALSE(app::hasBespokeOverture(v->name));
+
+  const view::Theme th = view::Theme::manifold();
+  for (const float t : {0.0f, 0.5f, 1.0f}) {
+    const OvertureScene a = derivedOvertureScene(*v, t, th);
+    const OvertureScene b = derivedOvertureScene(*v, t, th);
+    // Pure, and never blank.
+    CHECK(a.quads.size() >= 64);
+    REQUIRE(a.quads.size() == b.quads.size());
+    for (std::size_t i = 0; i < a.quads.size(); ++i) {
+      for (int j = 0; j < 4; ++j) {
+        CHECK_THAT(dist(a.quads[i].p[j], b.quads[i].p[j]), WithinAbs(0.0f, 1e-9f));
+        CHECK(std::isfinite(a.quads[i].p[j].x));
+      }
     }
   }
 }

@@ -105,6 +105,20 @@ struct OvertureScene {
 [[nodiscard]] OvertureScene overtureScene(app::Overture which, float t, bool intro,
                                           const view::Theme& theme);
 
+/// The scene for a variant with no hand-authored overture, derived from its spec (M13).
+///
+/// Pure in `t`, like its sibling: it opens on the flat board, forms the surface the
+/// variant's identifications imply, and unwinds. A data-only variant animates without a
+/// line of scene code written for it.
+[[nodiscard]] OvertureScene derivedOvertureScene(const VariantSpec& v, float t,
+                                                 const view::Theme& theme);
+
+/// Where a lattice point lands on a derived overture's fully-formed surface, keyed by the
+/// surface the geometry implies. Exposed so the differential test can assert it equals
+/// the hand-authored surface for the same topology - the shipped scenes are the oracle
+/// the generated ones are checked against.
+[[nodiscard]] OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v);
+
 /// Where a lattice point lands on an overture's fully-formed surface.
 ///
 /// Exposed for one reason: seam closure is the property these warps exist to satisfy and

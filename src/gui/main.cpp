@@ -299,6 +299,9 @@ int captureFrame(const std::string& variantName, const std::string& path,
   if (screen == "body") (*ui)->openEditorPage(1, 1);
   if (screen == "flat") (*ui)->openEditorPage(1, 2);
   (*ui)->setPreviewDims(previewDims);
+  // Point the library at the named variant, so a capture of a variant with a derived
+  // overture shows *it* rather than the standard construction the first entry opens on.
+  if (screen == "newgame") (*ui)->pickVariant(variantName);
   // One frame, built and rendered at whatever `t` the caller has pinned. Split out from
   // writing so `--clip` can call it once per frame. `dt` is the interface's own clock:
   // the warm-up gives it enough to settle a screen transition, and the real frames give

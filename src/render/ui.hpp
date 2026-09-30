@@ -90,6 +90,10 @@ class Ui {
   /// How many dimensions the move preview shows. For `--shot`, so a 4-D preview is
   /// reviewable without a mouse.
   void setPreviewDims(int dims) noexcept { previewDims_ = dims; }
+
+  /// Point the library at a variant, for a capture that names one - the same forcing the
+  /// overture player gets from `jumpTo`. No effect once the player has picked.
+  void pickVariant(const std::string& name) { pickedVariant_ = name; }
   /// Swap the palette. The theme is read every frame, so a change is immediate - and a
   /// retheme never touches the renderer.
   void setTheme(const view::Theme& t) noexcept {
@@ -266,6 +270,11 @@ class Ui {
   bool overtureCacheIntro_{false};
   bool overtureCacheValid_{false};
   OvertureScene overtureCache_{};
+  /// The variant the cache was built for, and whether it used the derived scene. Needed
+  /// because two derived variants both map to the same fallback `Overture` value, so the
+  /// enum alone cannot tell them apart.
+  std::string overtureCacheVariant_;
+  bool overtureCacheDerived_{false};
   /// The decoration of the screen being left, and which way the camera is going. One
   /// clock (`enter_`) drives the arriving object, the leaving ghost, the menu pane and
   /// the field, so none of them can disagree about where the camera is.
