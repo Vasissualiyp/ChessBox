@@ -425,6 +425,7 @@ int main(int argc, char** argv) {
     (*ui)->setTheme(theme);
   }
 #endif
+  (void)window->setVsync(shell->settings().vsync);
   if (shell->settings().fullscreen) SDL_SetWindowFullscreen(window->handle(), true);
 
   render::BoardRect boardRect{0, 0, static_cast<float>(window->width()),
@@ -562,6 +563,22 @@ int main(int argc, char** argv) {
     lastFrame = now;
     if (dt > 0.0f) fps = fps * 0.9f + (1.0f / dt) * 0.1f;
 
+    // The title names the game: the variant, and whose move it is.
+    {
+      std::string title = "ChessBox";
+      if (!shell->currentVariant().empty()) title += " - " + shell->currentVariant();
+      if (shell->hasGame()) {
+        title += shell->session()->game().position().sideToMove() == Color::White
+                     ? " - White to move"
+                     : " - Black to move";
+      }
+      static std::string applied;
+      if (title != applied) {
+        SDL_SetWindowTitle(window->handle(), title.c_str());
+        applied = title;
+      }
+    }
+
     // Stepping back off the board, and coming back to it. Held on the session so the
     // board, the flat board's pieces and the picking ray cannot disagree about where
     // the camera is.
@@ -598,6 +615,7 @@ int main(int argc, char** argv) {
       const view::Theme theme = view::themeFromName(shell->settings().theme);
       renderer->setTheme(theme);
       (*ui)->setTheme(theme);
+      (void)window->setVsync(shell->settings().vsync);
     }
     if (request.toggleFullscreen) {
       SDL_SetWindowFullscreen(window->handle(), shell->settings().fullscreen);

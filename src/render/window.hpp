@@ -41,9 +41,14 @@ class Window {
   /// Rebuild the swapchain, e.g. after a resize.
   Result<void> recreate(std::uint32_t width, std::uint32_t height);
 
+  /// On: FIFO, no tearing. Off: MAILBOX (newest frame, no queue) if the surface offers
+  /// it, else IMMEDIATE, else FIFO - always a mode the surface actually supports.
+  Result<void> setVsync(bool on);
+
  private:
   Result<void> buildSwapchain();
   void destroySwapchain();
+  [[nodiscard]] VkPresentModeKHR choosePresentMode() const;
 
   std::unique_ptr<VulkanContext> ctx_;
   SDL_Window* window_{nullptr};
@@ -55,6 +60,7 @@ class Window {
   std::uint32_t height_{0};
   VkSemaphore acquired_{VK_NULL_HANDLE};
   VkSemaphore rendered_{VK_NULL_HANDLE};
+  bool vsync_{true};
 };
 
 }  // namespace cb::render

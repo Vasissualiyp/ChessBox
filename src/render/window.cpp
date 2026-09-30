@@ -59,6 +59,29 @@ Result<Window> Window::create(const char* title, std::uint32_t width,
   return w;
 }
 
+Result<void> Window::setVsync(bool on) {
+  if (on == vsync_) return {};
+  vsync_ = on;
+  return recreate(width_, height_);
+}
+
+VkPresentModeKHR Window::choosePresentMode() const {
+  if (vsync_) return VK_PRESENT_MODE_FIFO_KHR;
+  std::uint32_t count = 0;
+  vkGetPhysicalDeviceSurfacePresentModesKHR(ctx_->physicalDevice(), surface_, &count,
+                                            nullptr);
+  std::vector<VkPresentModeKHR> modes(count);
+  vkGetPhysicalDeviceSurfacePresentModesKHR(ctx_->physicalDevice(), surface_, &count,
+                                            modes.data());
+  for (const VkPresentModeKHR m : modes) {
+    if (m == VK_PRESENT_MODE_MAILBOX_KHR) return m;
+  }
+  for (const VkPresentModeKHR m : modes) {
+    if (m == VK_PRESENT_MODE_IMMEDIATE_KHR) return m;
+  }
+  return VK_PRESENT_MODE_FIFO_KHR;
+}
+
 Result<void> Window::buildSwapchain() {
   VkSurfaceCapabilitiesKHR caps{};
   vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx_->physicalDevice(), surface_, &caps);
@@ -98,8 +121,9 @@ Result<void> Window::buildSwapchain() {
   sci.preTransform = caps.currentTransform;
   sci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
   // FIFO is always supported and is exactly right for a turn-based game: no tearing, no
-  // spinning the GPU for frames nobody asked for.
-  sci.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+  // spinning the GPU for frames nobody asked for. With v-sync off, take the fastest mode
+  // the surface actually offers.
+  sci.presentMode = choosePresentMode();
   sci.clipped = VK_TRUE;
 
   if (const VkResult r = vkCreateSwapchainKHR(ctx_->device(), &sci, nullptr, &swapchain_);
