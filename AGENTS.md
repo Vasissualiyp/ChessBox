@@ -32,9 +32,11 @@ nix develop                      # core dev shell (no graphics deps)
 nix develop .#gfx                # adds SDL3 + Vulkan (M4+)
 cmake --preset dev && cmake --build build/dev
 ctest --preset dev               # fast suite; the slow label is excluded by the preset
-ctest --preset dev -L unit       # the tightest loop; labels: unit property golden perft arch
+ctest --preset dev -L unit       # the tightest loop; labels: unit property golden perft arch render
 ctest --preset release-slow      # deep perft + wide property sweep - RELEASE, it is ~10 min
                                  # (the same in Debug is over an hour: depth-5 perft at -O0)
+tools/test.sh --build view app   # ONLY the tests a change can touch; runs the tags directly
+                                 # (see "Testing what you touched" below) — prefer this while iterating
 tools/precommit.sh               # format + tidy + fast tests — run before every commit
 nix flake check                  # THE gate: both compilers, sanitizers, coverage, goldens, bench
 
@@ -63,6 +65,32 @@ is how the interface gets reviewed, and `ctest -R gui-frame` runs it.
 The CLI is the fastest way to inspect anything: `info` prints a variant's axes,
 geometry and canonicalised atoms; `board` renders N-D boards as labelled slices;
 `divide <n>` splits perft by first move.
+
+## Testing what you touched
+
+`ctest --preset dev` is the whole fast suite, but it rebuilds and runs the ~4-minute
+property sweep and the perft counts. Those are for engine changes; a colour or a camera
+should not wait on them. Run only the tags a change can reach:
+
+| Changed | Run |
+|---|---|
+| `src/view` (camera, layout, seams, move anim/camera) | `tools/test.sh --build view` |
+| `src/render` (deco, overtures, UI, board renderer) | `tools/test.sh --build render` |
+| `src/app` (shell, session, settings, overture player) | `tools/test.sh --build app` |
+| `src/io`, `src/game`, `src/rules`, `src/variant` | `tools/test.sh --build io game rules variant` |
+| `src/pieces`, `src/movegen`, `src/geometry`, `src/position` | `ctest --preset dev` (the property/perft sweep lives here) |
+| anything in `src/base`, `src/space`, `src/diag` | `ctest --preset dev`, then `nix flake check` |
+| a golden change | `ctest --preset dev -L golden` |
+
+`tools/test.sh --build <tag...>` builds first and then runs the Catch2 tags directly, so
+the binary tested is the one just compiled - a stale binary is how a wrong change looks
+green. `tools/test.sh quick` is every fast label (`unit render golden arch`);
+`tools/test.sh all` is exactly `ctest --preset dev`. The tags are `[base]`, `[space]`,
+`[geometry]`, `[pieces]`, `[variant]`, `[position]`, `[rules]`, `[movegen]`, `[view]`,
+`[temporal]`, `[game]`, `[io]`, `[app]`, `[net]`, `[render]`, plus `[dims]`, `[variants]`
+and `[golden]` for the cross-cutting N-D files. Before a commit, the format and arch
+checks still run (`tools/precommit.sh`); `nix flake check` is the release gate, never the
+inner loop.
 
 ## The rules (non-negotiable)
 
