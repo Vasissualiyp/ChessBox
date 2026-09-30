@@ -264,6 +264,11 @@ int captureFrame(const std::string& variantName, const std::string& path,
   // picture of what they would see.
   (void)(*ui)->setScale(shell->settings().guiScale);
   (*ui)->setIconStyle(render::iconStyleFromName(shell->settings().pieceIcons));
+  {
+    const view::Theme theme = view::themeFromName(shell->settings().theme);
+    renderer->setTheme(theme);
+    (*ui)->setTheme(theme);
+  }
   // Two frames: ImGui sizes some things from the previous frame, so the first can catch
   // a panel mid-layout.
   for (int frame = 0; frame < 2; ++frame) {
@@ -414,6 +419,11 @@ int main(int argc, char** argv) {
   }
   (void)(*ui)->setScale(shell->settings().guiScale);
   (*ui)->setIconStyle(render::iconStyleFromName(shell->settings().pieceIcons));
+  {
+    const view::Theme theme = view::themeFromName(shell->settings().theme);
+    renderer->setTheme(theme);
+    (*ui)->setTheme(theme);
+  }
 #endif
   if (shell->settings().fullscreen) SDL_SetWindowFullscreen(window->handle(), true);
 
@@ -585,6 +595,9 @@ int main(int argc, char** argv) {
       shell->applySettings();
       renderer->setOptions(optionsFrom(shell->settings()));
       (*ui)->setIconStyle(render::iconStyleFromName(shell->settings().pieceIcons));
+      const view::Theme theme = view::themeFromName(shell->settings().theme);
+      renderer->setTheme(theme);
+      (*ui)->setTheme(theme);
     }
     if (request.toggleFullscreen) {
       SDL_SetWindowFullscreen(window->handle(), shell->settings().fullscreen);

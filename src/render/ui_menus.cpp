@@ -951,6 +951,12 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       request.applyLooks = true;
     }
   }
+  {
+    // The two palettes, chosen by name for the same reason as the icon set.
+    const char* kThemes[]{"manifold", "console"};
+    int current = s.theme == "console" ? 1 : 0;
+    if (ImGui::Combo("Palette", &current, kThemes, 2)) s.theme = kThemes[current];
+  }
   ImGui::PushFont(small);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
   ImGui::TextUnformatted("faceted silhouettes, or a handful of flat shapes each");
@@ -1086,7 +1092,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       before.showSeams != s.showSeams || before.showCoordinates != s.showCoordinates ||
       before.pieceHeightScale != s.pieceHeightScale || before.flatView != s.flatView ||
       before.pieceIcons != s.pieceIcons || before.animateMoves != s.animateMoves ||
-      before.animationSpeed != s.animationSpeed ||
+      before.theme != s.theme || before.animationSpeed != s.animationSpeed ||
       before.orbitSensitivity != s.orbitSensitivity ||
       before.zoomSensitivity != s.zoomSensitivity ||
       before.invertOrbitY != s.invertOrbitY || before.confirmMoves != s.confirmMoves ||

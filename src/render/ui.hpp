@@ -79,6 +79,9 @@ class Ui {
   /// that produces blurry text is not worth having. Must not be called inside a frame.
   Result<void> setScale(float scale);
   void setIconStyle(IconStyle s) noexcept { iconStyle_ = s; }
+  /// Swap the palette. The theme is read every frame, so a change is immediate - and a
+  /// retheme never touches the renderer.
+  void setTheme(const view::Theme& t) noexcept { theme_ = t; }
   /// Finish the frame and record its draw commands into the board's render pass.
   void endFrame();
   void record(VkCommandBuffer cmd);

@@ -42,9 +42,9 @@ TEST_CASE("both piece colours read on both squares", "[unit][view]") {
 
 TEST_CASE("body text is legible on the ground it is drawn on", "[unit][view]") {
   for (const Theme& t : {Theme::manifold(), Theme::console()}) {
-    CHECK(contrast(t.bone, t.ink) > 7.0f);      // primary type
-    CHECK(contrast(t.boneDim, t.panel) > 4.5f); // secondary type on a plate
-    CHECK(contrast(t.ember, t.ink) > 3.0f);     // the accent, against the ground
+    CHECK(contrast(t.bone, t.ink) > 7.0f);       // primary type
+    CHECK(contrast(t.boneDim, t.panel) > 4.5f);  // secondary type on a plate
+    CHECK(contrast(t.ember, t.ink) > 3.0f);      // the accent, against the ground
   }
 }
 
@@ -63,4 +63,12 @@ TEST_CASE("the candlelit theme is still dark, and unchanged", "[unit][view]") {
   CHECK_FALSE(t.light);
   CHECK(luminance(t.ink) < 0.02f);
   CHECK(luminance(t.bone) > luminance(t.ink));
+}
+
+TEST_CASE("a palette is chosen by name, and an unknown name is the shipped one",
+          "[unit][view]") {
+  CHECK(themeFromName("manifold").light);
+  CHECK_FALSE(themeFromName("console").light);
+  // A settings file from a newer build, or a typo, still produces a usable palette.
+  CHECK(themeFromName("tesseract").light == themeFromName("manifold").light);
 }
