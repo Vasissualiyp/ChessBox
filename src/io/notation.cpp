@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "io/notation.hpp"
 
+#include <cctype>
 #include <charconv>
+
 #include <vector>
+#include "movegen/movegen.hpp"
 
 namespace cb {
 namespace {
@@ -92,6 +95,75 @@ std::string moveText(const VariantSpec& v, const Move& m) {
     s += static_cast<char>(std::tolower(v.pieces[m.promoteTo].symbol));
   }
   return s;
+}
+
+std::string sanText(const VariantSpec& v, const Position& pos, const Move& m,
+                    const MoveList& legal) {
+  const DimSpec& d = v.dims;
+  const bool algebraic = d.dims() == 2 && d.extent(0) <= 26 && d.extent(1) <= 9;
+
+  if (m.isCastle() && !v.castles.empty()) {
+    const CastleTemplate& ct = v.castles[m.castleIndex];
+    const bool kingSide = d.toCoord(ct.kingTo).c[0] > d.toCoord(ct.kingFrom).c[0];
+    return kingSide ? "O-O" : "O-O-O";
+  }
+  if (!algebraic) return moveText(v, m);
+
+  const Piece piece = pos.at(m.from);
+  const char symbol = static_cast<char>(std::toupper(v.pieces[piece.type].symbol));
+  const bool pawn = symbol == 'P';
+  const bool capture = m.isCapture();
+
+  std::string out;
+  if (pawn) {
+    if (capture) out += static_cast<char>('a' + d.toCoord(m.from).c[0]);
+  } else {
+    out += symbol;
+    bool other = false;
+    bool sameFile = false;
+    bool sameRank = false;
+    const Coord from = d.toCoord(m.from);
+    for (const Move& alt : legal) {
+      if (alt.to != m.to || alt.from == m.from) continue;
+      if (pos.at(alt.from).type != piece.type) continue;
+      other = true;
+      const Coord a = d.toCoord(alt.from);
+      if (a.c[0] == from.c[0]) sameFile = true;
+      if (a.c[1] == from.c[1]) sameRank = true;
+    }
+    if (other) {
+      if (!sameFile)
+        out += static_cast<char>('a' + from.c[0]);
+      else if (!sameRank)
+        out += static_cast<char>('1' + from.c[1]);
+      else
+        out += cellName(d, m.from);
+    }
+  }
+  if (capture) out += 'x';
+  out += cellName(d, m.to);
+  if (m.promoteTo != kNoPiece) {
+    out += '=';
+    out += static_cast<char>(std::toupper(v.pieces[m.promoteTo].symbol));
+  }
+
+  // The check suffix, on a board where "the position after this move" means something.
+  bool temporal = false;
+  for (std::uint8_t a = 0; a < d.dims(); ++a) {
+    if (d.kind(a) != AxisKind::Spatial) temporal = true;
+  }
+  if (!temporal) {
+    Position after = pos;
+    Undo u;
+    after.make(m, u);
+    MoveGen gen(v);
+    if (gen.inCheck(after, opponent(pos.sideToMove()))) {
+      MoveList replies(v.moveUpperBound());
+      gen.generateLegal(after, replies);
+      out += replies.empty() ? '#' : '+';
+    }
+  }
+  return out;
 }
 
 }  // namespace cb
