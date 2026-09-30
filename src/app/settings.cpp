@@ -97,6 +97,10 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.zoomSensitivity = asFloat(value, s.zoomSensitivity);
     else if (key == "invert_orbit_y")
       s.invertOrbitY = asBool(value);
+    else if (key == "camera_mode")
+      s.cameraMode = value;
+    else if (key == "follow_strength")
+      s.followStrength = asFloat(value, s.followStrength);
     else if (key == "confirm_moves")
       s.confirmMoves = asBool(value);
     else if (key == "hot_seat")
@@ -143,6 +147,8 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "orbit_sensitivity = " << orbitSensitivity << '\n';
   out << "zoom_sensitivity = " << zoomSensitivity << '\n';
   out << "invert_orbit_y = " << boolText(invertOrbitY) << '\n';
+  out << "camera_mode = " << cameraMode << '\n';
+  out << "follow_strength = " << followStrength << '\n';
   out << "confirm_moves = " << boolText(confirmMoves) << '\n';
   out << "hot_seat = " << boolText(hotSeat) << '\n';
   out << "auto_promote_to = " << autoPromoteTo << '\n';
@@ -164,6 +170,10 @@ void Settings::sanitize() {
   volumeMaster = std::clamp(volumeMaster, 0.0f, 1.0f);
   volumeMusic = std::clamp(volumeMusic, 0.0f, 1.0f);
   volumeEffects = std::clamp(volumeEffects, 0.0f, 1.0f);
+  followStrength = std::clamp(followStrength, 0.0f, 1.0f);
+  if (cameraMode != "off" && cameraMode != "piece" && cameraMode != "route") {
+    cameraMode = "off";
+  }
   if (lastVariant.empty()) lastVariant = "standard";
   if (pieceIcons != "faceted" && pieceIcons != "primitive") pieceIcons = "faceted";
   if (theme != "manifold" && theme != "console") theme = "manifold";

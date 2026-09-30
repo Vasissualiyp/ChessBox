@@ -102,6 +102,11 @@ class MoveAnimation {
 
   void advance(float dt);
   [[nodiscard]] bool active() const noexcept { return active_; }
+  /// How far through the move, 0 to 1. The clock both the animation and the move camera
+  /// read, so they cannot disagree about where the piece is.
+  [[nodiscard]] float progress() const noexcept {
+    return duration_ > 0.0f && elapsed_ < duration_ ? elapsed_ / duration_ : 1.0f;
+  }
   [[nodiscard]] CellId travellingTo() const noexcept { return to_; }
   [[nodiscard]] Sample sample() const;
   /// Portals with any intensity left this frame, for the renderer to draw.

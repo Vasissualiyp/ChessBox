@@ -6,6 +6,9 @@
 // ordinary assertions rather than by someone clicking around (M4.6).
 #include "app/session.hpp"
 
+#include <cmath>
+#include <utility>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include "io/notation.hpp"
@@ -153,6 +156,57 @@ TEST_CASE("promotion asks rather than guessing", "[unit][app]") {
     }
     REQUIRE(landing == 4);
   }
+}
+
+TEST_CASE("the move camera leads the view only when asked, and locks picking",
+          "[unit][app]") {
+  // M11.5: the move camera is folded into Session::camera(), so the board, the pick ray
+  // and everything drawn over it agree. Off by default; when on, a shot owns the view for
+  // the move and the board is locked so a click cannot resolve against where it was.
+  auto s = open("standard");
+  s->setAnimationSeconds(0.2f);
+  constexpr float kW = 800.0f;
+  constexpr float kH = 600.0f;
+  const auto projectToPixel = [&](CellId c) {
+    view::Vec3 at{};
+    for (const view::Placement& p : s->placements()) {
+      if (p.cell == c) at = view::Vec3{p.x, p.y, p.z};
+    }
+    const view::Mat4 vp = s->camera().viewProj(kW / kH);
+    const float x = vp[0] * at.x + vp[4] * at.y + vp[8] * at.z + vp[12];
+    const float y = vp[1] * at.x + vp[5] * at.y + vp[9] * at.z + vp[13];
+    const float w = vp[3] * at.x + vp[7] * at.y + vp[11] * at.z + vp[15];
+    return std::pair{(x / w * 0.5f + 0.5f) * kW - 0.5f,
+                     (y / w * 0.5f + 0.5f) * kH - 0.5f};
+  };
+
+  // Default: a move animates but no shot owns the view, so a pixel still resolves.
+  REQUIRE(s->applyScript("click e2\nclick e4").has_value());
+  REQUIRE_FALSE(s->shotInFlight());
+  const CellId a1 = cell(*s, "a1");
+  const auto [px, py] = projectToPixel(a1);
+  REQUIRE(s->clickPixel(px, py, kW, kH) == a1);
+
+  // Ask the camera to follow, play a move: a shot is in flight and the board locks.
+  s->setCameraMode("route");
+  s->setFollowStrength(1.0f);
+  REQUIRE(s->applyScript("click d7\nclick d5").has_value());
+  REQUIRE(s->shotInFlight());
+  REQUIRE(s->advanceAnimation(0.12f));  // into the body of the move
+  REQUIRE(s->shotInFlight());
+  const auto [qx, qy] = projectToPixel(a1);
+  REQUIRE(s->clickPixel(qx, qy, kW, kH) == kInvalidCell);
+
+  // With the shot leading, the effective camera has moved; when it settles, it returns.
+  const view::OrbitCamera during = s->camera();
+  while (s->advanceAnimation(0.05f)) {
+  }
+  REQUIRE_FALSE(s->shotInFlight());
+  const view::OrbitCamera after = s->camera();
+  const float moved = std::abs(during.target.x - after.target.x) +
+                      std::abs(during.target.y - after.target.y) +
+                      std::abs(during.target.z - after.target.z);
+  CHECK(moved > 1e-3f);
 }
 
 TEST_CASE("a click resolved from a pixel reaches the right cell", "[unit][app]") {

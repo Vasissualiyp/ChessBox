@@ -8,6 +8,29 @@
 #include "io/notation.hpp"
 
 namespace cb::app {
+namespace {
+
+/// Ease the shot in and out at the ends of a move, so a camera that only leads for the
+/// middle of the move does not snap onto the piece at the first frame or back off at the
+/// last. 1 through the body of the move, 0 at both ends.
+float shotEnvelope(float progress) noexcept {
+  const float in = std::clamp(progress / 0.15f, 0.0f, 1.0f);
+  const float out = std::clamp((1.0f - progress) / 0.15f, 0.0f, 1.0f);
+  const float e = std::min(in, out);
+  return e * e * (3.0f - 2.0f * e);
+}
+
+/// Shortest signed difference between two angles, so a shot offset that wraps from just
+/// under pi to just over it does not spin the camera the long way round.
+float wrapAngle(float a) noexcept {
+  constexpr float kPi = 3.14159265358979f;
+  constexpr float kTwoPi = 2.0f * kPi;
+  while (a > kPi) a -= kTwoPi;
+  while (a < -kPi) a += kTwoPi;
+  return a;
+}
+
+}  // namespace
 
 Result<Action> parseAction(const VariantSpec& v, std::string_view line) {
   std::istringstream in{std::string(line)};
@@ -230,12 +253,49 @@ void Session::applyViewMode() {
 view::OrbitCamera Session::camera() const noexcept {
   view::OrbitCamera out = camera_;
   out.distance *= 1.0f + 0.18f * pullBack_;
+  if (!shotInFlight()) return out;
+
+  // The move camera is a time-varying contribution to this one accessor, so the board,
+  // the picking ray and every label drawn over it agree by construction - which is why it
+  // is folded in here rather than kept as a second camera elsewhere.
+  //
+  // The shot is applied as an **offset in its own frame**: the pose it would use with
+  // following off is subtracted first, so the player's own orbit, pan and zoom survive
+  // and the move camera only leads them. A player who turned the board keeps that turn.
+  const view::Bounds scene = view::boundsOf(placements_);
+  view::CameraPolicy off = cameraPolicy_;
+  off.follow = view::FollowMode::Off;
+  const view::CameraPose settled =
+      view::moveCamera(lastPath_, placements_, viewCfg_, scene, off, 1.0f);
+  const view::CameraPose shot = view::moveCamera(lastPath_, placements_, viewCfg_, scene,
+                                                 cameraPolicy_, anim_.progress());
+  const float k = followStrength_ * shotEnvelope(anim_.progress());
+  out.target = out.target + (shot.target - settled.target) * k;
+  out.yaw = out.yaw + wrapAngle(shot.yaw - settled.yaw) * k;
+  out.pitch = std::clamp(out.pitch + (shot.pitch - settled.pitch) * k, 0.10f, 1.53f);
+  out.distance = std::max(1.0f, out.distance + (shot.distance - settled.distance) * k);
   return out;
 }
 
 bool Session::advanceAnimation(float dt) {
   anim_.advance(dt);
+  if (!anim_.active()) pathValid_ = false;
   return anim_.active();
+}
+
+void Session::setCameraMode(std::string_view mode) noexcept {
+  if (mode == "piece") {
+    cameraPolicy_.follow = view::FollowMode::Piece;
+  } else if (mode == "route") {
+    cameraPolicy_.follow = view::FollowMode::Route;
+  } else {
+    cameraPolicy_.follow = view::FollowMode::Off;  // the default, and the pre-M11 look
+  }
+}
+
+bool Session::shotInFlight() const noexcept {
+  return pathValid_ && anim_.active() && cameraPolicy_.follow != view::FollowMode::Off &&
+         followStrength_ > 0.0f;
 }
 
 void Session::setBoardAspect(float aspect) {
@@ -307,8 +367,13 @@ Result<void> Session::playChecked(const Move& m) {
   }
   if (animating) {
     anim_.start(viewCfg_, placements_, seams_, theme_, path, animSeconds_);
+    // The camera reads the same route the animation draws, so the two cannot disagree
+    // about which way round a glued board the piece went.
+    lastPath_ = path;
+    pathValid_ = true;
   } else {
     anim_.clear();
+    pathValid_ = false;
   }
   message_ = moveText(*variant_, chosen);
   selected_ = kInvalidCell;
@@ -555,7 +620,13 @@ Result<void> Session::loadFen(std::string_view fen) {
 }
 
 CellId Session::clickPixel(float px, float py, float width, float height) {
-  const auto ray = camera_.pickRay(px, py, width, height);
+  // While a shot owns the view the board is locked: the pose is moving, so a pixel would
+  // resolve against where the board *was* and select the wrong cell. When the shot
+  // settles, picking resumes from the settled pose - no invisible drift.
+  if (shotInFlight()) return kInvalidCell;
+  // The effective camera, not the raw member: the pause pull-back moves the board, and
+  // the ray has to move with it or a click lands beside the cell under the cursor.
+  const auto ray = camera().pickRay(px, py, width, height);
   const int hit = view::pickBox(ray, placements_, view::Vec3{0.45f, 0.45f, 0.06f});
   if (hit < 0) {
     selected_ = kInvalidCell;

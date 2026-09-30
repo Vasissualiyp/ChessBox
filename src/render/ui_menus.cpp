@@ -850,6 +850,23 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::SliderFloat("Orbit sensitivity", &s.orbitSensitivity, 0.1f, 4.0f, "%.2f");
   ImGui::SliderFloat("Zoom sensitivity", &s.zoomSensitivity, 0.1f, 4.0f, "%.2f");
   ImGui::Checkbox("Invert vertical orbit", &s.invertOrbitY);
+  {
+    // The move camera: off keeps the player's own view; the other two let the shot lead
+    // it.
+    const char* kModes[]{"off", "follow the piece", "follow the route"};
+    int mode = s.cameraMode == "piece" ? 1 : (s.cameraMode == "route" ? 2 : 0);
+    if (ImGui::Combo("Move camera", &mode, kModes, 3)) {
+      s.cameraMode = mode == 1 ? "piece" : (mode == 2 ? "route" : "off");
+    }
+  }
+  ImGui::BeginDisabled(s.cameraMode == "off");
+  ImGui::SliderFloat("Follow strength", &s.followStrength, 0.0f, 1.0f, "%.2f");
+  ImGui::EndDisabled();
+  ImGui::PushFont(small);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::TextUnformatted("how far the camera leads your own orbit while a move plays");
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
   ImGui::Dummy(ImVec2(0, px(8)));
 
   heading("ANIMATION", t, small);
@@ -973,9 +990,11 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       before.overtureSpeed != s.overtureSpeed ||
       before.orbitSensitivity != s.orbitSensitivity ||
       before.zoomSensitivity != s.zoomSensitivity ||
-      before.invertOrbitY != s.invertOrbitY || before.confirmMoves != s.confirmMoves ||
-      before.autoPromoteTo != s.autoPromoteTo || before.volumeMaster != s.volumeMaster ||
-      before.volumeMusic != s.volumeMusic || before.volumeEffects != s.volumeEffects;
+      before.invertOrbitY != s.invertOrbitY || before.cameraMode != s.cameraMode ||
+      before.followStrength != s.followStrength ||
+      before.confirmMoves != s.confirmMoves || before.autoPromoteTo != s.autoPromoteTo ||
+      before.volumeMaster != s.volumeMaster || before.volumeMusic != s.volumeMusic ||
+      before.volumeEffects != s.volumeEffects;
   if (moved) request.settingsChanged = true;
   return request;
 }

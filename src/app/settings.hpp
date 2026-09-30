@@ -57,6 +57,11 @@ struct Settings {
   float orbitSensitivity{1.0f};
   float zoomSensitivity{1.0f};
   bool invertOrbitY{false};
+  /// How the camera follows a move: "off", "piece" or "route". Off is the default and the
+  /// pre-M11 behaviour. A name rather than an enum because this layer is below the view.
+  std::string cameraMode{"off"};
+  /// How strongly the move camera leads the player's own orbit, 0 to 1.
+  float followStrength{0.6f};
 
   // ---- gameplay -----------------------------------------------------------
   /// Ask before playing a move rather than playing it on the second click.

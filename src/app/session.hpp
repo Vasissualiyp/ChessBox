@@ -10,6 +10,7 @@
 #include "view/camera.hpp"
 #include "view/layout.hpp"
 #include "view/move_anim.hpp"
+#include "view/move_camera.hpp"
 #include "view/seams.hpp"
 #include "view/snapshot.hpp"
 
@@ -83,6 +84,19 @@ class Session {
   void setTheme(const view::Theme& t);
   /// The move currently being drawn, if any.
   [[nodiscard]] const view::MoveAnimation& animation() const noexcept { return anim_; }
+
+  /// How the camera follows a move: "off" (the player's own orbit), "piece" or "route".
+  /// Set from `Settings::cameraMode`; anything unrecognised means "off", which is the
+  /// shipped behaviour and keeps every pre-M11 pose.
+  void setCameraMode(std::string_view mode) noexcept;
+  /// 0..1 how strongly the move camera leads the player's orbit. Zero is a no-op.
+  void setFollowStrength(float strength) noexcept {
+    followStrength_ = strength < 0.0f ? 0.0f : (strength > 1.0f ? 1.0f : strength);
+  }
+  [[nodiscard]] float followStrength() const noexcept { return followStrength_; }
+  /// True while a move's camera shot owns the view, which is exactly when the board is
+  /// interaction-locked.
+  [[nodiscard]] bool shotInFlight() const noexcept;
   /// Move the animation on. Returns true while something is still moving, which is how
   /// the front end knows to keep drawing frames.
   bool advanceAnimation(float dt);
@@ -193,6 +207,16 @@ class Session {
   view::SeamMap seams_;
   view::Theme theme_{view::Theme::manifold()};
   view::MoveAnimation anim_;
+  /// The route the running animation is following, kept so `camera()` can plan a shot
+  /// from the same trace the animation draws. Valid only while `anim_` is active.
+  view::MovePath lastPath_;
+  bool pathValid_{false};
+  /// Off until a setting says otherwise: `CameraPolicy`'s own default follows the route,
+  /// but the shipped look is the player's own camera, so the session starts there and
+  /// `Shell::applySettings` moves it. Aggregate init keeps the rest of the record's
+  /// defaults.
+  view::CameraPolicy cameraPolicy_{view::FollowMode::Off};
+  float followStrength_{0.6f};
   float animSeconds_{0.085f};
   bool flat_{false};
   bool hotSeatEnabled_{false};
