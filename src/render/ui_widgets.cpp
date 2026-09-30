@@ -282,7 +282,16 @@ void beginPane(const char* id, ImVec2 min, ImVec2 max, float scale, float alpha,
   // anchors the type to the top-left corner, which reads as a slide rather than a zoom.
   const ImVec2 size(max.x - min.x - pad * 2.0f, max.y - min.y - pad * 2.0f);
 
-  ImGui::SetNextWindowPos(centre, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  // Centre the content by moving the whole window, never the cursor inside it. A cursor
+  // offset would change how much room a scrolling body has left, so its measured height
+  // would depend on where the pane had been centred - and the two would chase each other,
+  // creeping for a few frames or jittering. Offsetting the window leaves the measurement
+  // alone, so the pane is in its final place from the second frame, under the fade.
+  const auto it = paneHeights().find(id);
+  const float prevH = it != paneHeights().end() ? it->second : size.y;
+  const float top = std::max(0.0f, (size.y - prevH) * 0.5f);
+  ImGui::SetNextWindowPos(ImVec2(centre.x, centre.y + top), ImGuiCond_Always,
+                          ImVec2(0.5f, 0.5f));
   ImGui::SetNextWindowSize(size);
   ImGui::PushStyleVar(ImGuiStyleVar_Alpha, a);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
@@ -305,11 +314,6 @@ void beginPane(const char* id, ImVec2 min, ImVec2 max, float scale, float alpha,
   currentPane() = id;
   currentPaneRemember() = remember;
   currentPaneTop() = ImGui::GetCursorPosY();
-  const auto it = paneHeights().find(id);
-  if (it != paneHeights().end() && it->second < size.y) {
-    currentPaneTop() = (size.y - it->second) * 0.5f;
-    ImGui::SetCursorPosY(currentPaneTop());
-  }
 }
 
 void endPane() {
