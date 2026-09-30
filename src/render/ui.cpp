@@ -172,10 +172,9 @@ Result<std::unique_ptr<Ui>> Ui::create(const VulkanContext& ctx, SDL_Window* win
   ImGui::CreateContext();
   ImGuiIO& io = ImGui::GetIO();
   io.IniFilename = nullptr;  // no stray imgui.ini beside the binary
-  // Keyboard navigation draws a focus ring that is larger than the item it surrounds,
-  // which makes a menu look like its rows are different heights. The game is driven by
-  // the mouse, so it is off until the ring can be styled to match the rest.
-  io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
+  // Keyboard navigation is on: the whole menu tree is reachable without a mouse, and the
+  // focus ring is drawn in the accent so it matches the rest (see applyStyle).
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
   if (auto r = ui->loadFonts(); !r.has_value()) {
     return fail(r.error().code, r.error().message);
@@ -303,6 +302,10 @@ void Ui::applyStyle() {
   c[ImGuiCol_SliderGrabActive] = col(t.emberDeep);
   c[ImGuiCol_TextSelectedBg] = col(t.emberDeep, 0.5f);
   c[ImGuiCol_ModalWindowDimBg] = col(t.ink, 0.72f);
+  // The keyboard-navigation ring, in the accent, so a nav-driven menu reads like the
+  // rest.
+  c[ImGuiCol_NavCursor] = col(t.ember);
+  c[ImGuiCol_NavWindowingHighlight] = col(t.ember, 0.7f);
 
   // Sizes scale with the interface; colours do not.
   s.ScaleAllSizes(scale_);
