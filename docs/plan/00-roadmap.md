@@ -27,7 +27,7 @@ directory. Read `docs/ARCHITECTURE.md` first.
 | M1 | 2D generalized core engine, headless | standard chess, perft-exact to depth 6, ASCII CLI | **done** | [M1](M1-core-2d.md) |
 | M2 | N-dimensional generalization | 3D/4D boards, dimension-lift invariance | **done**, dim dispatch deliberately not built | [M2](M2-nd-generalization.md) |
 | M3 | Boundary geometry | cylinder, torus, Möbius, Klein, mirrors, N-D analogues | **done**, two gaps recorded | [M3](M3-geometry.md) |
-| M4 | Vulkan renderer + interaction | playable 2D/3D/4D+ board on screen | **done**, three deviations recorded | [M4](M4-renderer.md) |
+| M4 | Vulkan renderer + interaction | playable 2D/3D/4D+ board on screen | **done**, three deviations recorded; M4.8/M4.9 follow-ups (frame pacing, animation budget) | [M4](M4-renderer.md) |
 | M5 | Variant VM + custom fields | explosive, checkers, regional variants; quantum design | **done**, variant catalogue partial | [M5](M5-variant-vm.md) |
 | M6 | Temporal / multiverse (5D chess) | faithful 5D chess, generalized extra axes | **done**; two axis generalizations planned, not required | [M6](M6-temporal.md) |
 | M7 | GUI authoring: piece editor, then game editor | author pieces and whole variants in the GUI: vector moves, fields, rules, 3-D and 2-D models | in progress | [M7](M7-editors.md) |
@@ -59,6 +59,14 @@ make a clip, then the things that make the clip convert, then the things that ma
 game.
 
 **Wave 1 — clippable (the marketing hook).**
+
+*Before the camera and the clip, land M4.8/M4.9 (frame pacing and the animation
+budget).* A camera and a clip are only as good as the frame they are drawn in, both are
+renderer/app work with no new feature surface, and the shipped loop is still fully
+serialised with CPU-built menu geometry (M4). They are small, they unblock M11's frame
+budget and M12's export cost, and nothing else in Wave 1 depends on them - so they go
+first and can ship on their own.
+
 1. **M11 — the move camera.** Depends only on M4/M6, both done. This is the single most
    clippable feature and the pitch itself: a piece wrapping a Möbius seam, a Klein turn, a
    6-D move. Nothing else adds as much store-page value, and nothing blocks it.
@@ -169,6 +177,7 @@ checked by `nix flake check`, which is the single source of truth. **[INVARIANT]
 | Rule VM expressiveness insufficient for a target variant | M5 | primitive-extension process documented; each target variant is an acceptance test, so gaps surface early |
 | 5D chess rules subtly wrong | M6 | golden test corpus transcribed from the reference game's known positions/puzzles before implementing |
 | Vulkan complexity delaying everything | M4 | strict scope: one pipeline, instanced quads/cubes, no PBR, no shadows in M4 |
+| The GPU is idle while the CPU rebuilds every menu/overture each frame, and the frame is fully serialised | M4/M11/M12/M13 | pipeline the frame and render to the swapchain (M4.8); memoise/adaptively subdivide the overtures and move them to the instanced path (M4.9/M13); record a frame-time bench; watchable wins over a larger scene |
 | Determinism drift (float, iteration order, hash) | all | no floats in engine core **[INVARIANT]**; canonical iteration orders; replay corpus in CI |
 | Quantum chess may not fit the model | M5 | scoped as a design study with an interface hook, not promised as delivered |
 | Canonical variant serialization drifts from `VariantId` | M7 | pin a load→save→load round-trip with an unchanged `VariantId` before any writer ships |

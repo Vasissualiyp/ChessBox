@@ -305,6 +305,12 @@ is the part that makes it watchable, and every element of it is a testable invar
   so a clip shows the board and the move and nothing else. The renderer already takes a
   `boardRect` and an overlay (`src/render/board_renderer.hpp:122`); this is a UI policy
   over that seam.
+- **The frame budget is a precondition, not a detail.** A shot animates during play, so
+  every frame it is drawn is a frame the board and the interface are drawn in too. The
+  shipped loop is fully CPU/GPU-serialised and the library overtures are CPU geometry
+  (M4.8/M4.9), so a camera that lands on top of them is the wrong place to discover a
+  frame-time problem. M11 assumes M4.8's pipelining and M4.9's (or M13's) cheaper menu
+  geometry; if those slip, the move camera is where a slow frame shows first.
 
 ---
 
@@ -381,6 +387,9 @@ Each step is committed separately with its tests green; `ctest --preset dev` and
    matches the settled pose.
 8. A short move is one shot and a long multi-portal move is several shots, each within
    the `deadline`; no single take travels further than the policy permits.
+9. A recorded move plays at the display rate on `klein`, `cube5`, `hyper4` and `t6`, with
+   the board and the camera in the same frame, and `--shot --move-t` stays reproducible -
+   backed by the M4.8 frame-time benchmark, not by eye.
 
 ## Risks and non-goals
 

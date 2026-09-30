@@ -28,6 +28,23 @@ constexpr float kTau = 2.0f * kPi;
 constexpr float kW = 8.0f;
 constexpr float kH = 8.0f;
 
+/// Which Mobius overture plays, and how hard the strip version stretches the board.
+///
+/// `true`  the board becomes a long ribbon that is bent and given a half-turn into the
+///         classical strip: the shape reads as one.
+/// `false` the original: the files first roll into a tube, the tube fails to close the
+///         rank flip, and it opens out into a band. The band's loop is only as wide as
+///         the board, so it reads as a fat ring rather than a ribbon.
+///
+/// Both are topologically the same gluing. Flip and rebuild to compare them.
+constexpr bool kMobiusStrip = true;
+/// How much longer than wide the ribbon becomes. Area is preserved - the file axis is
+/// multiplied by this and the rank axis divided by it - so the cells become long
+/// rectangles, which is the price of a legible strip and is paid deliberately. Not larger
+/// than this: the loop radius is `8 * kMobiusStretch / (2 pi)`, and once the ribbon is
+/// much narrower than that the twist stops being visible from any camera.
+constexpr float kMobiusStretch = 3.0f;
+
 float clampf(float v, float a, float b) {
   return v < a ? a : (v > b ? b : v);
 }
@@ -150,6 +167,31 @@ OvVec3 band(float u, float v, float th, float tau) {
   const float psi = tau * t * 0.5f;
   return {R * std::sin(t) + zl * std::cos(psi) * std::sin(t), zl * std::sin(psi),
           R * std::cos(t) - R * sinc(th * 0.5f) + zl * std::cos(psi) * std::cos(t)};
+}
+
+/// The classical Mobius strip, as a long ribbon.
+///
+/// `band` is the same family, but its loop radius is fixed at `kW / th` while its width
+/// stays `kH`, so on an 8 x 8 board the loop is no wider than the board and the result
+/// reads as a fat ring. Here the two axes are given their own extents: `len` is the file
+/// axis, stretched into the ribbon's length, and `wid` is the rank axis, narrowed into
+/// its width. The ribbon is then bent (`th` sweeps 0 to 2pi) and given a distributed
+/// half-turn
+/// (`tau` sweeps 0 to 1), which is how a paper strip is made.
+///
+/// At `th = 2pi, tau = 1` the two ends meet with the width reversed - `stripSurface(0,
+/// v)` and `stripSurface(1, 1 - v)` are the same point - which is this variant's gluing
+/// exactly: the files periodic, the ranks flipped.
+OvVec3 stripSurface(float u, float v, float len, float wid, float th, float tau) {
+  const float s = (u - 0.5f) * len;
+  const float w = (v - 0.5f) * wid;
+  if (th <= 1e-4f) return {s, 0.0f, w};  // still flat, before the bend
+  const float R = len / th;
+  const float t = s / R;
+  const float psi = tau * t * 0.5f;
+  const float cw = std::cos(psi);
+  return {R * std::sin(t) + w * cw * std::sin(t), w * std::sin(psi),
+          R * std::cos(t) - R * sinc(th * 0.5f) + w * cw * std::cos(t)};
 }
 
 /// The Klein bottle, as the figure-eight immersion.
@@ -775,7 +817,9 @@ OvertureScene sceneTorus(const view::Theme& th, float t) {
   return s;
 }
 
-OvertureScene sceneMobius(const view::Theme& th, float t) {
+/// The original: a tube that cannot close the rank flip, so it opens into a band that
+/// can.
+OvertureScene sceneMobiusBand(const view::Theme& th, float t) {
   OvertureScene s;
   s.cam = {lerpf(-0.05f, 0.74f, ease(t)), lerpf(1.42f, 0.55f, ease(t)),
            lerpf(8.2f, 7.2f, ease(t)), 0.12f};
@@ -839,6 +883,115 @@ OvertureScene sceneMobius(const view::Theme& th, float t) {
               : t < 0.84f ? "and takes a half-turn"
                           : "home, and mirrored";
   return s;
+}
+
+/// The second Mobius option: the board stretched into a long ribbon, then bent and given
+/// one half-turn into the classical strip. It exists because the band's loop is only as
+/// wide as the board, so on an 8 x 8 it reads as a fat ring - "a circle, stretched a
+/// little" - even though the topology was never in question. The price is long
+/// rectangular cells, and it is paid deliberately: a legible ribbon is worth more here
+/// than square cells, and the surface is subdivided so the bend and twist stay smooth.
+OvertureScene sceneMobiusStrip(const view::Theme& th, float t) {
+  OvertureScene s;
+  const float stretch = ease(seg(t, 0.05f, 0.28f));
+  const float bend = ease(seg(t, 0.28f, 0.70f));
+  const float twist = ease(seg(t, 0.50f, 0.86f));
+  const float ride = seg(t, 0.86f, 1.0f);
+  const float len = kW * lerpf(1.0f, kMobiusStretch, stretch);
+  const float wid = kH * lerpf(1.0f, 1.0f / kMobiusStretch, stretch);
+  const float theta = bend * kTau;
+  const Pos pos = [len, wid, theta, twist](float u, float v) {
+    return stripSurface(u, v, len, wid, theta, twist);
+  };
+  // The shared opening pose, then round so the ring is seen from above and the twist,
+  // which stands the ribbon on edge at the seam, is legible rather than edge-on.
+  s.cam = {lerpf(-0.05f, 0.78f, ease(t)), lerpf(1.42f, 1.02f, ease(seg(t, 0.25f, 1.0f))),
+           lerpf(8.2f, 12.0f, ease(seg(t, 0.2f, 1.0f))), 0.11f};
+  GridOpt g;
+  g.sub = 6;  // a bending, twisting ribbon facets badly out of one quad per cell
+  addGrid(s, pos, g);
+  // The army belongs to the square, not to the ribbon, so it steps aside as the board is
+  // stretched - the same way the cube overtures' army leaves with its cells.
+  addArmy(s, pos, 1.0f - ease(seg(t, 0.05f, 0.24f)));
+
+  // The two long edges, a hue each. On a Mobius strip they are one edge, so the two hues
+  // meet where the ends join - the single fact the whole variant turns on.
+  const float edges = ease(seg(t, 0.18f, 0.45f));
+  if (edges > 0.02f) {
+    for (int e = 0; e < 2; ++e) {
+      OvTrail tr;
+      tr.colour = seamColour(th, e, 2);
+      tr.width = 2.4f;
+      tr.fade = edges;
+      const float v = e == 0 ? 0.0015f : 0.9985f;
+      for (int i = 0; i <= 64; ++i) tr.pts.push_back(pos(fi(i) / 64.0f, v));
+      s.trails.push_back(tr);
+    }
+  }
+  // The two short ends are one portal, so one hue. They are named while apart and fade as
+  // they meet, because the join is a flip and not a straight meeting.
+  const float ends = ease(seg(t, 0.42f, 0.62f)) * (1.0f - ease(seg(t, 0.80f, 0.90f)));
+  if (ends > 0.02f) {
+    for (const float u : {0.0005f, 0.9995f}) {
+      OvTrail tr;
+      tr.colour = seamColour(th, 0, 1);
+      tr.width = 3.2f;
+      tr.fade = ends;
+      for (int i = 0; i <= 8; ++i) tr.pts.push_back(pos(u, fi(i) / 8.0f));
+      s.trails.push_back(tr);
+    }
+  }
+  // A bishop rides the ribbon once round. It goes in on one long edge and comes back on
+  // the other, mirrored, because there is only one edge to come back on.
+  if (ride > 0.0f) {
+    const float q = ease(ride);
+    constexpr float kStart = 0.12f;
+    constexpr float kV0 = 0.25f;
+    OvTrail tr;
+    tr.colour = th.ember;
+    tr.width = 2.6f;
+    for (int i = 0; i <= 56; ++i) {
+      float uu = kStart + fi(i) / 56.0f * q;
+      float vv = kV0;
+      // Crossing the seam keeps the piece on the same strip: the width reverses, which is
+      // exactly what the half-turn does.
+      if (uu > 1.0f) {
+        uu -= 1.0f;
+        vv = 1.0f - vv;
+      }
+      tr.pts.push_back(pos(uu, vv));
+    }
+    s.trails.push_back(tr);
+    float uu = kStart + q;
+    float vv = kV0;
+    bool flipped = false;
+    if (uu > 1.0f) {
+      uu -= 1.0f;
+      vv = 1.0f - vv;
+      flipped = true;
+    }
+    TokenOpt tk;
+    tk.at = true;
+    tk.where = pos(uu, vv);
+    tk.hasNormal = true;
+    tk.normal = normalAt(pos, uu, vv);
+    tk.mirrored = flipped;
+    addToken(s, pos, 0, 0, 'B', true, tk);
+  }
+  s.caption = t < 0.05f   ? "the board is the reference"
+              : t < 0.28f ? "stretched into a ribbon"
+              : t < 0.50f ? "the ribbon curls into a ring"
+              : t < 0.86f ? "and takes one half-turn, so its ends meet reversed"
+                          : "one edge, ridden once, home mirrored";
+  return s;
+}
+
+/// Which Mobius plays. Flipping `kMobiusStrip` and rebuilding is the whole switch.
+OvertureScene sceneMobius(const view::Theme& th, float t) {
+  if constexpr (kMobiusStrip) {
+    return sceneMobiusStrip(th, t);
+  }
+  return sceneMobiusBand(th, t);
 }
 
 OvertureScene sceneKlein(const view::Theme& th, float t) {
@@ -2207,7 +2360,11 @@ OvVec3 overtureSurfaceAt(app::Overture which, float u, float v) {
       return tube(u, v, o);
     }
     case app::Overture::Mobius:
-      return band(u, v, kTau, 1.0f);
+      // The formed surface the active Mobius option settles into, so the seam-closure
+      // test pins whichever one is compiled in.
+      return kMobiusStrip ? stripSurface(u, v, kW * kMobiusStretch, kH / kMobiusStretch,
+                                         kTau, 1.0f)
+                          : band(u, v, kTau, 1.0f);
     case app::Overture::Klein:
       return kleinSurf(u, v, kTau, 1.0f, kTau, 1.0f, 2.05f);
     default:

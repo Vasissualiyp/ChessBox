@@ -137,4 +137,18 @@ std::vector<Direction> expandAtomOriented(const SmallVec<std::int16_t, kMaxDims>
 std::uint64_t expectedDirectionCount(const SmallVec<std::int16_t, kMaxDims>& mags,
                                      std::uint8_t dims);
 
+/// The atoms of a *line* mover: `maxK` steps along one axis (a rook), or along two axes
+/// (a bishop). This is the queen with `maxK = kUnlimited` and the king with `maxK = 1`,
+/// in any number of dimensions.
+///
+/// A line mover uses one or two axes and never three or more. On a 3-D board that is 6
+/// rook directions plus 12 face diagonals, 18 in all, and **no cube diagonal**;
+/// `[1,1,1]` is the Raumschach unicorn, a different and much stronger piece. Folding the
+/// unicorn into the queen is the mistake this function exists to prevent: it is invisible
+/// in two dimensions, where `[1,1,1]` expands to nothing, and only shows up once the
+/// board has a third axis.
+///
+/// Tests assert the result has no direction of support three or more at any dimension.
+[[nodiscard]] std::vector<MoveAtom> straightLineAtoms(std::uint32_t maxK);
+
 }  // namespace cb

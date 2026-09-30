@@ -421,32 +421,34 @@ UiRequest Ui::buildPause(app::Shell& shell) {
 
   const float width = ImGui::GetContentRegionAvail().x;
   if (menuEntry("Continue", 1, t, display, width, true, scale_)) shell.resume();
-  if (menuEntry("Game mode", 2, t, display, width, true, scale_)) {
-    shell.go(app::Screen::GameInfo);
-  }
-  if (menuEntry("Piece moves", 3, t, display, width, true, scale_)) {
-    shell.go(app::Screen::PieceMoves);
-  }
-  if (menuEntry("Settings", 4, t, display, width, true, scale_)) {
-    shell.go(app::Screen::Settings);
-  }
-  if (menuEntry("Main menu", 5, t, display, width, true, scale_)) {
-    shell.go(app::Screen::MainMenu);
-  }
-  // Resigning or agreeing a draw only means anything while the game is unfinished.
+  // Resigning or agreeing a draw only means anything while the game is unfinished, and
+  // they sit right under Continue because ending the game is the decision a pause is
+  // most often opened for.
   if (shell.session()->game().result() == GameResult::InProgress) {
-    if (menuEntry("Resign", 6, t, display, width, true, scale_)) {
+    if (menuEntry("Resign", 2, t, display, width, true, scale_)) {
       app::Action a;
       a.kind = app::ActionKind::Resign;
       (void)shell.session()->apply(a);
       shell.resume();
     }
-    if (menuEntry("Offer draw", 7, t, display, width, true, scale_)) {
+    if (menuEntry("Offer draw", 3, t, display, width, true, scale_)) {
       app::Action a;
       a.kind = app::ActionKind::AgreeDraw;
       (void)shell.session()->apply(a);
       shell.resume();
     }
+  }
+  if (menuEntry("Game mode", 4, t, display, width, true, scale_)) {
+    shell.go(app::Screen::GameInfo);
+  }
+  if (menuEntry("Piece moves", 5, t, display, width, true, scale_)) {
+    shell.go(app::Screen::PieceMoves);
+  }
+  if (menuEntry("Settings", 6, t, display, width, true, scale_)) {
+    shell.go(app::Screen::Settings);
+  }
+  if (menuEntry("Main menu", 7, t, display, width, true, scale_)) {
+    shell.go(app::Screen::MainMenu);
   }
   // A pause-specific confirmation, so quitting from the game keeps the pause section's
   // own look and step rather than jumping to the main menu's prompt.

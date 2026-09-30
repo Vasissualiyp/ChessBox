@@ -155,6 +155,39 @@ TEST_CASE("atoms compare equal after canonicalization", "[unit][pieces]") {
   REQUIRE(MoveAtom::canonicalize(a).value() == MoveAtom::canonicalize(b).value());
 }
 
+TEST_CASE("a straight-line mover never uses a third axis", "[unit][pieces]") {
+  // The queen and the king are line movers: any number of steps along one axis (a
+  // rook) or two (a bishop), and never three. On a cube that is 18 directions, not
+  // the 26 a queen would have if she also inherited the unicorn's [1,1,1]. The
+  // mistake is invisible in two dimensions, where [1,1,1] expands to nothing.
+  const std::vector<MoveAtom> queen = straightLineAtoms(kUnlimited);
+  REQUIRE(queen.size() == 2);
+  CHECK(queen[0].mags == mags({1}));
+  CHECK(queen[0].maxK == kUnlimited);
+  CHECK(queen[0].mode == MoveMode::Slide);
+  CHECK(queen[1].mags == mags({1, 1}));
+  CHECK(queen[1].maxK == kUnlimited);
+  CHECK(queen[1].mode == MoveMode::Slide);
+
+  const std::vector<MoveAtom> king = straightLineAtoms(1);
+  REQUIRE(king.size() == 2);
+  CHECK(king[0].maxK == 1);
+  CHECK(king[0].mode == MoveMode::Leap);
+  CHECK(king[1].maxK == 1);
+  CHECK(king[1].mode == MoveMode::Leap);
+
+  CHECK(expandAtom(queen[0].mags, 3).size() == 6);   // rook
+  CHECK(expandAtom(queen[1].mags, 3).size() == 12);  // bishop
+  for (std::uint8_t dims = 1; dims <= 6; ++dims) {
+    for (const MoveAtom& a : queen) {
+      for (const Direction& d : expandAtom(a.mags, dims)) CHECK(d.nsup <= 2);
+    }
+    for (const MoveAtom& a : king) {
+      for (const Direction& d : expandAtom(a.mags, dims)) CHECK(d.nsup <= 2);
+    }
+  }
+}
+
 TEST_CASE("oriented expansion gives a pawn its direction in any dimension",
           "[unit][pieces]") {
   SECTION("2-D push") {

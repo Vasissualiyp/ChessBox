@@ -228,3 +228,69 @@ the interface needs and the same offscreen target the headless tests use. It exi
 nonzero if the validation layers said anything, and `ctest -R gui-frame` runs it. That
 makes the whole screen reviewable, and regressions in it catchable, on a machine with no
 compositor.
+
+---
+
+## M4.8 - Frame pacing and renderer performance (follow-up to M4.1)
+
+Recorded 2026-09-30, after the library overtures made the per-frame cost visible. **M4.1
+promised "Frames-in-flight = 2, per-frame descriptor and staging arenas, timeline
+semaphores"; what shipped is one frame in flight, fully serialised.** The GPU is
+otherwise idle - the board is a handful of instanced draws and there is no compute work
+anywhere - so the wins are pacing, the composite, and the menu geometry, not more GPU
+work.
+
+- **Pipeline the frame.** `VulkanContext::submitAndWait` waits on a fence after every
+  render (`src/render/vulkan_context.cpp:323`) and `Window::present` then calls
+  `vkQueueWaitIdle` on top of it (`src/render/window.cpp:251`), so the CPU records and
+  the GPU draws strictly in turn and never overlap. Two frames in flight with per-frame
+  fences and acquire/render/present semaphores, and no `vkQueueWaitIdle` that a
+  semaphore can express, removes a stall per frame and the input-to-photon latency it
+  costs. Under FIFO vsync it does not raise the frame rate. **[INVARIANT: no redundant
+  full-queue wait]**
+- **Render straight into the swapchain image** on the interactive path. Every frame is
+  drawn into the offscreen target and then blitted to the swapchain with a full-screen
+  linear filter (`src/render/window.cpp:157`) - a wasted full-frame copy now that the
+  window and the target are the same size. Keep the offscreen target for `--shot` and
+  `readPixels`; dynamic-render the interactive frame into the acquired image. The
+  `boardRect`/overlay seam (`src/render/board_renderer.hpp:122`) is unchanged.
+- **MSAA.** Everything is `VK_SAMPLE_COUNT_1_BIT` (`src/render/offscreen_target.cpp:18`,
+  `src/render/board_renderer.cpp:168,326,440`). The GPU has the headroom, so 4x MSAA
+  with a resolve attachment in the dynamic-rendering path is close to free and visibly
+  better on the board's edges and seams.
+- **A frame-time benchmark, and the missing 1e6-cell one.** Acceptance fact 2 ("60 fps
+  at 1e6 cells") was recorded as *not measured*. Add a `bench/` entry (or
+  `--bench-frame`) that reports per-frame CPU and GPU time, so a regression is a number
+  rather than an opinion.
+- **A frame cap / "freeze decorations" setting.** The depth field and every overture
+  animate forever, so the loop never idles on a screen that is otherwise static. A
+  setting beside `app::Settings::vsync` to cap or freeze it is cheap and saves power.
+- **The library screen is CPU geometry, not GPU work.** `overtureScene` is rebuilt every
+  frame and `drawOverture` projects it into an `ImDrawList` (`src/render/ui.cpp:403`,
+  `src/render/overture_scene.cpp`); `deco.cpp` is the same. The GPU rasterises it, but
+  the vertices come from the CPU, which is where the animation cost lives - see M4.9.
+
+## M4.9 - The animation budget (follow-up to M4.5)
+
+The hand-authored overtures are the heaviest CPU work in the frame. The worst case is
+`t6`: 25 patches x 16 cells x 4 sub-quads = 1600 quads, plus 68 wire boxes and 60 pips,
+all rebuilt and re-emitted every frame. Cheapest wins first:
+
+- **Memoise the quintic.** `src/render/quintic.hpp` is called per grid corner and does
+  two `pow` and two `atan2`; the design prototype memoised it on the fixed `(k1, k2, u, v)`
+  lattice and the C++ does not. A per-patch sample table (or a quantised cache) makes the
+  gather and the knight fan's 60 addresses cheap.
+- **Make `Pos` concrete.** It is a `std::function<OvVec3(float, float)>`
+  (`src/render/overture_scene.cpp:86`), so every corner of every sub-quad is an indirect
+  call, and `blendPos` wraps two of them. A small variant or template that `addGrid` can
+  inline removes the indirection from the hottest loop.
+- **Adaptive subdivision.** `sub` is a constant per scene; use the high value only while
+  a surface is actually bending, and 1 when it is flat or fully formed.
+- **Cache the scene for an unchanged `t`.** A scene is a pure function of `t`, so the
+  700 ms formed-shape dwell (and a pinned `--shot`) can reuse one build.
+- **The long-term fix: the same instanced path the board uses.** `board.vert` already
+  does a per-instance transform, and M4.3's draw-call count is independent of board size.
+  An overture is one more instance set, uploaded once per frame with the surface in the
+  shader: per-pixel depth removes the painter's-sort artefacts the translucent glued
+  surfaces show today, and MSAA applies to it. This is the shape M13's generic overtures
+  should be built on, rather than a larger `ImDrawList`.

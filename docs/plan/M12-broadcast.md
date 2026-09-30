@@ -51,6 +51,12 @@ validation-layer message (`src/gui/main.cpp`). A clip is that, repeated at a fix
 - **Determinism is the contract:** the same `(variant, position, move, t-range, step)`
   yields byte-identical frames, because `moveCamera` is pure (M11.2). The clip is a
   golden test.
+- **Export cost is per-frame CPU, not GPU.** Every exported frame draws the board and
+  the interface once, so wall time is dominated by the same instance building and CPU
+  menu geometry that play pays (M4.8/M4.9); the GPU is idle throughout. The exporter
+  should report frames/second so a long clip is a known duration rather than a surprise,
+  and it benefits directly from M4.8's pipelining and M4.9/M13's cheaper or instanced
+  menu objects.
 
 ## M12.3 Replay and highlight
 

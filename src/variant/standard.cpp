@@ -96,18 +96,20 @@ Result<VariantSpec> makeStandardChessLifted(int extraDims) {
   rook.atoms = {atom({1}, kUnlimited, MoveMode::Slide)};
   v.pieces.push_back(rook);
 
+  // A line mover, for both: any number of steps along one axis or two - never three.
+  // Building the queen as "rook, bishop and then also the cube diagonals" is the
+  // mistake `straightLineAtoms` exists to prevent; see src/pieces/atom.hpp.
   PieceTypeDef queen;
   queen.name = "queen";
   queen.symbol = 'Q';
-  queen.atoms = {atom({1}, kUnlimited, MoveMode::Slide),
-                 atom({1, 1}, kUnlimited, MoveMode::Slide)};
+  queen.atoms = straightLineAtoms(kUnlimited);
   v.pieces.push_back(queen);
 
   PieceTypeDef king;
   king.name = "king";
   king.symbol = 'K';
   king.royal = true;
-  king.atoms = {atom({1}, 1, MoveMode::Leap), atom({1, 1}, 1, MoveMode::Leap)};
+  king.atoms = straightLineAtoms(1);
   v.pieces.push_back(king);
 
   const PieceTypeId kPawn = 1, kKnight = 2, kBishop = 3, kRook = 4, kQueen = 5, kKing = 6;
