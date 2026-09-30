@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -40,6 +41,11 @@ class HotSeat {
   /// The coordinates typed so far by a player, for the on-screen readout. Empty when
   /// nothing is half-entered.
   [[nodiscard]] std::vector<std::int16_t> partial(Color who) const;
+
+  /// The keys a player types to name a cell, one per axis in entry order. Empty when any
+  /// coordinate is past that player's half of the keyboard. This is what the two-player
+  /// board hint draws on each square.
+  [[nodiscard]] static std::string keysFor(Color who, const Coord& coord);
 
  private:
   struct Entry {

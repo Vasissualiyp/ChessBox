@@ -79,6 +79,21 @@ TEST_CASE("a key past the board's edge is ignored", "[unit][app]") {
   CHECK(hs.partial(Color::White).empty());
 }
 
+TEST_CASE("a cell's key label is one key per axis", "[unit][app]") {
+  // This is what the two-player board hint draws on each square.
+  const VariantSpec v = test::loadVariant("standard");
+  Coord c(v.dims.dims());
+  c.c[0] = 4;  // file e
+  c.c[1] = 3;  // rank 4
+  CHECK(HotSeat::keysFor(Color::White, c) == "tr");
+  CHECK(HotSeat::keysFor(Color::Black, c) == "po");
+
+  // A coordinate past the keyboard half has no label - the square cannot be typed.
+  Coord far = c;
+  far.c[0] = 20;
+  CHECK(HotSeat::keysFor(Color::White, far).empty());
+}
+
 TEST_CASE("keys are attributed to a half", "[unit][app]") {
   CHECK(HotSeat::ownerOf('q') == Color::White);
   CHECK(HotSeat::ownerOf('b') == Color::White);

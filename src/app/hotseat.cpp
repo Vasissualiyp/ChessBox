@@ -61,4 +61,16 @@ std::vector<std::int16_t> HotSeat::partial(Color who) const {
   return {entry.coords.begin(), entry.coords.begin() + entry.axis};
 }
 
+std::string HotSeat::keysFor(Color who, const Coord& coord) {
+  const std::string_view keys = who == Color::White ? whiteKeys() : blackKeys();
+  std::string out;
+  out.reserve(coord.dims());
+  for (std::uint8_t a = 0; a < coord.dims(); ++a) {
+    const int idx = coord.c[a];
+    if (idx < 0 || idx >= static_cast<int>(keys.size())) return {};
+    out += keys[static_cast<std::size_t>(idx)];
+  }
+  return out;
+}
+
 }  // namespace cb::app
