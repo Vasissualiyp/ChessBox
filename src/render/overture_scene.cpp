@@ -739,7 +739,7 @@ OvertureScene sceneCylinder(const view::Theme& th, float t) {
   o.th = roll * kTau;
   const Pos pos = [o](float u, float v) { return tube(u, v, o); };
   GridOpt g;
-  g.sub = 4;
+  g.sub = roll > 0.02f ? 4 : 1;
   addGrid(s, pos, g);
   addArmy(s, pos, 1.0f);
 
@@ -799,7 +799,7 @@ OvertureScene sceneTorus(const view::Theme& th, float t) {
   o.open = lerpf(1.0f, 2.2f, pr);
   const Pos pos = [o](float u, float v) { return tube(u, v, o); };
   GridOpt g;
-  g.sub = 4;
+  g.sub = std::max(ease(seg(t, 0.12f, 0.48f)), pr) > 0.02f ? 4 : 1;
   addGrid(s, pos, g);
   addArmy(s, pos, 1.0f);
 
@@ -868,7 +868,7 @@ OvertureScene sceneMobiusBand(const view::Theme& th, float t) {
     return mix(tube(u, v, o), band(u, v, th_, tw), openOut);
   };
   GridOpt g;
-  g.sub = 4;
+  g.sub = std::max(roll, openOut) > 0.02f ? 4 : 1;
   addGrid(s, pos, g);
   addArmy(s, pos, 1.0f);
 
@@ -1039,7 +1039,7 @@ OvertureScene sceneKlein(const view::Theme& th, float t) {
     return kleinSurf(u, v, roll * kTau, pinch, pr * kTau, pr, lerpf(1.0f, 3.6f, pr));
   };
   GridOpt g;
-  g.sub = 4;
+  g.sub = std::max(pinch, pr) > 0.02f ? 4 : 1;
   // Only the two cells the bishop leaves and arrives on. Lighting every light square on
   // the surface says "half of these are the same colour", which is true of any board;
   // lighting two says "it started on one of these and finished on the other", which is
@@ -1581,7 +1581,7 @@ OvertureScene sceneAtomicTorus(const view::Theme& th, float t) {
     return df <= 1 && dr <= 1;
   };
   GridOpt g;
-  g.sub = 4;
+  g.sub = shape > 0.02f ? 4 : 1;
   g.tone = [&, mark, boom](int f, int r) {
     if (!inNb(f, r)) return ((f + r) % 2 != 0) ? OvTone::Dark : OvTone::Light;
     if (boom > 0.04f) return OvTone::Scorch;
@@ -2503,7 +2503,7 @@ OvertureScene derivedOvertureScene(const VariantSpec& variant, float t,
   };
 
   GridOpt g;
-  g.sub = 4;
+  g.sub = form > 0.02f ? 4 : 1;
   addGrid(s, pos, g);
   const float armyFade = 1.0f - ease(clampf(form * 1.4f, 0.0f, 1.0f));
   const bool alignedBoard =
