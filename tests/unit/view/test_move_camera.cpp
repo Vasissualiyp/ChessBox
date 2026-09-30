@@ -140,6 +140,44 @@ TEST_CASE("the camera frames the piece exactly under the identity policy",
   CHECK_THAT(dist(mid.target, half), WithinAbs(0.0f, 1e-4f));
 }
 
+TEST_CASE("a followed move keeps the piece in the board on every clippable variant",
+          "[unit][view]") {
+  // M11.7's safe zone, on the geometry-general path: for every legal move of the four
+  // clippable variants, the followed target stays inside the drawn scene by no more than
+  // the lead it is granted, the dolly never goes inside the floor, and every pose is a
+  // number. An image golden would pin a driver; this pins the invariant.
+  const CameraPolicy policy;
+  for (const char* name : {"klein", "cube5", "hyper4", "t6"}) {
+    CAPTURE(name);
+    const VariantSpec v = test::loadVariant(name);
+    const ViewConfig cfg = ViewConfig::forBoard(v.dims);
+    const std::vector<Placement> placements = layout(v.dims, cfg);
+    const Bounds scene = boundsOf(placements);
+    Position pos = Position::startPosition(v);
+    MoveGen gen(v);
+    MoveList legal(v.moveUpperBound());
+    gen.generateLegal(pos, legal);
+    const float margin = policy.lead + 0.75f;
+    for (const Move& m : legal) {
+      const Piece mover = pos.at(m.from);
+      if (mover.empty()) continue;
+      const MovePath path = tracePath(v, pos, mover.type, mover.colorOf(), m);
+      if (path.unexplained) continue;
+      for (int i = 0; i <= 8; ++i) {
+        const float t = static_cast<float>(i) / 8.0f;
+        const CameraPose p = moveCamera(path, placements, cfg, scene, policy, t);
+        REQUIRE(std::isfinite(p.target.x));
+        REQUIRE(std::isfinite(p.yaw));
+        CHECK(p.target.x >= scene.minX - margin);
+        CHECK(p.target.x <= scene.maxX + margin);
+        CHECK(p.target.y >= scene.minY - margin);
+        CHECK(p.target.y <= scene.maxY + margin);
+        CHECK(p.distance >= policy.minDistance);
+      }
+    }
+  }
+}
+
 TEST_CASE("the camera function is pure", "[unit][view]") {
   const VariantSpec v = test::loadVariant("klein");
   const ViewConfig cfg = ViewConfig::forBoard(v.dims);
