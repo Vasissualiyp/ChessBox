@@ -27,6 +27,14 @@ struct Image {
   /// Fraction of pixels differing from `background`, in parts per thousand. A cheap,
   /// robust "did anything actually get drawn" measure.
   [[nodiscard]] int coveragePerMille(Rgba background) const;
+  /// Population variance of luminance. A blank fill is 0; a board is far from it - a
+  /// cheap "is there a picture here" that a solid colour cannot fake.
+  [[nodiscard]] double luminanceVariance() const;
+  /// Pixels whose channels are far from grey. The board reserves saturated colour for
+  /// geometry that is not flat, so this is near zero on a plain board and non-zero where
+  /// there are seams or other non-flat geometry. `spread` is the least max-minus-min
+  /// channel difference counted, and `floorValue` the least brightness.
+  [[nodiscard]] std::size_t saturatedPixels(int spread = 60, int floorValue = 120) const;
 };
 
 /// Write a PPM. Deliberately not PNG: PPM needs no compression library, and the only

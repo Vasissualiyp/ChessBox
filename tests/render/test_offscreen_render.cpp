@@ -413,4 +413,23 @@ TEST_CASE("a branch connector turns into its rail on a rounded corner", "[render
   CHECK(std::abs(fil.scale[2] - 0.025f / 0.055f) < 0.05f);
 }
 
+TEST_CASE("a board renders a picture, not a fill", "[render][gpu]") {
+  // The screenshot tests elsewhere only check the exit code; this checks the pixels are
+  // a board - structure, and no saturated colour on a flat board (the theme's own law).
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  for (const char* name : {"standard", "cube5", "hyper4", "torus", "5d", "klein"}) {
+    CAPTURE(name);
+    const Frame f = renderVariant(name, 256, 192);
+    CAPTURE(f.messages);
+    REQUIRE(f.validationErrors == 0);
+    // Structure: a blank or solid frame has near-zero luminance variance.
+    CHECK(f.image.luminanceVariance() > 50.0);
+    CHECK(f.image.distinctColors() > 8);
+    // A flat board has no non-flat geometry, so it spends no saturated colour.
+    if (std::string(name) == "standard") {
+      CHECK(f.image.saturatedPixels() == 0);
+    }
+  }
+}
+
 #endif  // CB_HAVE_VULKAN

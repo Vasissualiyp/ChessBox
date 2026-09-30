@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "render/image_io.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <set>
 
@@ -36,6 +37,38 @@ int Image::coveragePerMille(Rgba background) const {
     }
   }
   return static_cast<int>(differing * 1000 / total);
+}
+
+double Image::luminanceVariance() const {
+  const std::size_t total = static_cast<std::size_t>(width) * height;
+  if (total == 0) return 0.0;
+  double sum = 0.0;
+  double sumSq = 0.0;
+  for (std::uint32_t y = 0; y < height; ++y) {
+    for (std::uint32_t x = 0; x < width; ++x) {
+      const Rgba p = at(x, y);
+      const double lum = 0.299 * static_cast<double>(p.r) +
+                         0.587 * static_cast<double>(p.g) +
+                         0.114 * static_cast<double>(p.b);
+      sum += lum;
+      sumSq += lum * lum;
+    }
+  }
+  const double mean = sum / static_cast<double>(total);
+  return sumSq / static_cast<double>(total) - mean * mean;
+}
+
+std::size_t Image::saturatedPixels(int spread, int floorValue) const {
+  std::size_t count = 0;
+  for (std::uint32_t y = 0; y < height; ++y) {
+    for (std::uint32_t x = 0; x < width; ++x) {
+      const Rgba p = at(x, y);
+      const int hi = std::max({p.r, p.g, p.b});
+      const int lo = std::min({p.r, p.g, p.b});
+      if (hi >= floorValue && hi - lo >= spread) ++count;
+    }
+  }
+  return count;
 }
 
 Result<void> writePpm(const Image& img, const std::filesystem::path& path) {
