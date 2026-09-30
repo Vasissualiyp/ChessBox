@@ -436,5 +436,15 @@ orientation axis, name, description, difficulty.
 
 ## Status
 
-Not started. The editor screen is a stub today (`app::Screen::Editor`,
-`Ui::buildEditor`), and there is no TOML writer; M7.0 is the first work.
+In progress. Shipped: the document and its canonical TOML writer (M7.0.2), with the
+round-trip property; `app::Editor` with dirty tracking, snapshot undo/redo and save;
+the piece designer (pieces, moves as `- n +` steppers with cycling kind/capture
+buttons, a colour palette, a live move preview on a scratch board with placeable
+pawns, and a help page); and the board designer (axis name/extent, kind, and a
+glued/open toggle per axis, add/remove axis, save).
+
+Not yet built: the geometry editor's twists and swaps, the rule builder and custom
+fields (M7.2), the 3-D/2-D model editors (M7.3), the game editor's start position,
+pieces list, rules and policy (M7.5), and the package/validation-before-save flow
+(the save button does not yet gate on `finalize()`). The serializer and the move and
+axis editing are the parts the rest will hang off.

@@ -220,4 +220,146 @@ int VariantDoc::orientationAxis() const {
   return orientationAxisOf(impl_->table).first;
 }
 
+namespace {
+
+toml::table* axisAt(toml::table& root, std::size_t index) {
+  auto* arr = root["axis"].as_array();
+  if (arr == nullptr || index >= arr->size()) return nullptr;
+  return (*arr)[index].as_table();
+}
+
+std::string_view kindWord(AxisKind kind) {
+  switch (kind) {
+    case AxisKind::Spatial:
+      return "spatial";
+    case AxisKind::Temporal:
+      return "temporal";
+    case AxisKind::Multiverse:
+      return "multiverse";
+  }
+  return "spatial";
+}
+
+}  // namespace
+
+std::vector<VariantDoc::AxisInfo> VariantDoc::axes() const {
+  std::vector<AxisInfo> out;
+  const auto* arr = impl_->table["axis"].as_array();
+  if (arr == nullptr) return out;
+
+  std::vector<std::string> periodicAxes;
+  if (const auto* geom = impl_->table["geometry"].as_table()) {
+    if (const auto* idents = (*geom)["identify"].as_array()) {
+      for (const auto& node : *idents) {
+        const auto* t = node.as_table();
+        if (t == nullptr) continue;
+        if ((*t)["kind"].value_or(std::string{"periodic"}) == "periodic") {
+          periodicAxes.push_back((*t)["axis"].value_or(std::string{}));
+        }
+      }
+    }
+  }
+
+  for (const auto& node : *arr) {
+    const auto* t = node.as_table();
+    if (t == nullptr) continue;
+    AxisInfo info;
+    info.name = (*t)["name"].value_or(std::string{});
+    info.extent = static_cast<int>((*t)["extent"].value_or<std::int64_t>(0));
+    const std::string kind = (*t)["kind"].value_or(std::string{"spatial"});
+    info.kind = kind == "temporal"     ? AxisKind::Temporal
+                : kind == "multiverse" ? AxisKind::Multiverse
+                                       : AxisKind::Spatial;
+    info.pitch = static_cast<int>((*t)["pitch"].value_or<std::int64_t>(1));
+    for (const std::string& name : periodicAxes) {
+      if (name == info.name) info.periodic = true;
+    }
+    out.push_back(std::move(info));
+  }
+  return out;
+}
+
+Result<void> VariantDoc::setAxisExtent(std::size_t index, int extent) {
+  toml::table* axis = axisAt(impl_->table, index);
+  if (axis == nullptr) return fail(ErrorCode::OutOfRange, "no such axis");
+  if (extent < 1)
+    return fail(ErrorCode::ValidationError, "an axis needs at least one cell");
+  axis->insert_or_assign("extent", static_cast<std::int64_t>(extent));
+  return {};
+}
+
+Result<void> VariantDoc::setAxisKind(std::size_t index, AxisKind kind) {
+  toml::table* axis = axisAt(impl_->table, index);
+  if (axis == nullptr) return fail(ErrorCode::OutOfRange, "no such axis");
+  axis->insert_or_assign("kind", std::string(kindWord(kind)));
+  return {};
+}
+
+Result<void> VariantDoc::setAxisPeriodic(std::size_t index, bool periodic) {
+  toml::table* axis = axisAt(impl_->table, index);
+  if (axis == nullptr) return fail(ErrorCode::OutOfRange, "no such axis");
+  const std::string name = (*axis)["name"].value_or(std::string{});
+
+  // Keep every identification that is not a periodic glue of this axis.
+  toml::array kept;
+  if (const auto* geom = impl_->table["geometry"].as_table()) {
+    if (const auto* idents = (*geom)["identify"].as_array()) {
+      for (const auto& node : *idents) {
+        const auto* t = node.as_table();
+        if (t == nullptr) continue;
+        const bool isThisPeriodic =
+            (*t)["axis"].value_or(std::string{}) == name &&
+            (*t)["kind"].value_or(std::string{"periodic"}) == "periodic";
+        if (!isThisPeriodic) kept.push_back(*t);
+      }
+    }
+  }
+  if (periodic) {
+    toml::table glue;
+    glue.insert("axis", name);
+    glue.insert("kind", std::string("periodic"));
+    kept.push_back(std::move(glue));
+  }
+
+  toml::table geom;
+  if (const auto* existing = impl_->table["geometry"].as_table()) geom = *existing;
+  geom.insert_or_assign("identify", std::move(kept));
+  impl_->table.insert_or_assign("geometry", std::move(geom));
+  return {};
+}
+
+Result<void> VariantDoc::addAxis() {
+  auto* arr = impl_->table["axis"].as_array();
+  if (arr == nullptr) return fail(ErrorCode::ValidationError, "the board has no axes");
+  int n = static_cast<int>(arr->size()) + 1;
+  std::string name;
+  for (;; ++n) {
+    name = "axis" + std::to_string(n);
+    bool taken = false;
+    for (const auto& node : *arr) {
+      if (const auto* t = node.as_table()) {
+        if ((*t)["name"].value_or(std::string{}) == name) taken = true;
+      }
+    }
+    if (!taken) break;
+  }
+  toml::table axis;
+  axis.insert("name", name);
+  axis.insert("extent", static_cast<std::int64_t>(4));
+  arr->push_back(std::move(axis));
+  return {};
+}
+
+Result<void> VariantDoc::removeAxis(std::size_t index) {
+  auto* arr = impl_->table["axis"].as_array();
+  if (arr == nullptr || index >= arr->size()) {
+    return fail(ErrorCode::OutOfRange, "no such axis");
+  }
+  if (arr->size() <= 1) {
+    return fail(ErrorCode::ValidationError, "a board needs at least one axis");
+  }
+  arr->erase(arr->begin() + static_cast<std::ptrdiff_t>(index));
+  return {};
+}
+
 }  // namespace cb

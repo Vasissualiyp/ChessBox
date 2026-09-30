@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -8,6 +9,7 @@
 
 #include "base/result.hpp"
 #include "pieces/atom.hpp"
+#include "space/dim_spec.hpp"
 
 namespace cb {
 
@@ -61,6 +63,24 @@ class VariantDoc {
   /// Index of the axis "forward" is measured along, or -1 when none is declared. The
   /// piece designer needs it: an oriented atom's forward half depends on it.
   [[nodiscard]] int orientationAxis() const;
+
+  /// A board axis as the board designer edits it. `periodic` is the common glued face -
+  /// a `[[geometry.identify]]` gluing this axis to its opposite - so a cylinder or torus
+  /// is one toggle. Mirror/Klein (with flips and swaps) is authored in the file.
+  struct AxisInfo {
+    std::string name;
+    int extent{0};
+    AxisKind kind{AxisKind::Spatial};
+    int pitch{1};
+    bool periodic{false};
+  };
+  [[nodiscard]] std::vector<AxisInfo> axes() const;
+  Result<void> setAxisExtent(std::size_t index, int extent);
+  Result<void> setAxisKind(std::size_t index, AxisKind kind);
+  Result<void> setAxisPeriodic(std::size_t index, bool periodic);
+  /// Append a fresh spatial axis, or drop the last one. A board keeps at least one.
+  Result<void> addAxis();
+  Result<void> removeAxis(std::size_t index);
 
  private:
   VariantDoc();

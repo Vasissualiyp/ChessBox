@@ -111,3 +111,46 @@ TEST_CASE("a cosmetic edit leaves the variant's identity alone", "[unit][io]") {
   REQUIRE(after.has_value());
   CHECK(before->variantId() == after->variantId());
 }
+
+TEST_CASE("the document reads and edits the board's axes", "[unit][io]") {
+  auto doc = VariantDoc::parse(readFile(test::variantPath("standard")), "standard");
+  REQUIRE(doc.has_value());
+
+  const auto axes = doc->axes();
+  REQUIRE(axes.size() == 2);
+  CHECK(axes[0].name == "file");
+  CHECK(axes[0].extent == 8);
+  CHECK_FALSE(axes[0].periodic);
+
+  const auto before =
+      loadVariantToml(readFile(test::variantPath("standard")), "standard");
+  REQUIRE(before.has_value());
+
+  // Gluing the file axis makes the board a cylinder: still loadable, but a different
+  // game.
+  REQUIRE(doc->setAxisPeriodic(0, true).has_value());
+  const auto after = loadVariantToml(doc->serialize(), "standard");
+  REQUIRE(after.has_value());
+  CHECK(before->variantId() != after->variantId());
+  const auto glued = doc->axes();
+  CHECK(glued[0].periodic);
+  CHECK_FALSE(glued[1].periodic);
+
+  // Ungluing it restores exactly the shipped game.
+  REQUIRE(doc->setAxisPeriodic(0, false).has_value());
+  const auto back = loadVariantToml(doc->serialize(), "standard");
+  REQUIRE(back.has_value());
+  CHECK(back->variantId() == before->variantId());
+}
+
+TEST_CASE("axes can be added and removed, but one always remains", "[unit][io]") {
+  auto doc = VariantDoc::parse(readFile(test::variantPath("standard")), "standard");
+  REQUIRE(doc.has_value());
+  REQUIRE(doc->addAxis().has_value());
+  CHECK(doc->axes().size() == 3);
+  REQUIRE(doc->removeAxis(2).has_value());
+  CHECK(doc->axes().size() == 2);
+  REQUIRE(doc->removeAxis(1).has_value());
+  CHECK(doc->axes().size() == 1);
+  CHECK_FALSE(doc->removeAxis(0).has_value());  // a board keeps at least one axis
+}

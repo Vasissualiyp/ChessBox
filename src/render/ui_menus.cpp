@@ -243,13 +243,29 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   auto* small = static_cast<ImFont*>(fontSmall_);
   auto* mono = static_cast<ImFont*>(fontMono_);
 
-  // Settled before the frame is drawn: the decoration beside the menu is the selected
-  // variant's own lattice, and it is drawn first.
+  // Settled before the frame is drawn: the object beside the menu is the selected
+  // variant's overture, and it is drawn first.
   if (pickedVariant_.empty()) {
-    pickedVariant_ = shell.currentVariant();
-    if (pickedVariant_.empty() && !shell.library().empty()) {
-      pickedVariant_ = shell.library().front();
+    const auto& lib = shell.library();
+    const bool hasStandard = std::find(lib.begin(), lib.end(), "standard") != lib.end();
+    // The first entry to the library in a session opens on standard, because that is
+    // the overture that builds the board out of nothing and it only ever happens once.
+    // After that the picker reopens wherever the player last was.
+    if (shell.overtures().intro() && hasStandard) {
+      pickedVariant_ = "standard";
+    } else {
+      pickedVariant_ = shell.currentVariant();
+      if (pickedVariant_.empty() && !lib.empty()) pickedVariant_ = lib.front();
     }
+  }
+  // The picker reports what the player is looking at; the shell decides what that does
+  // to the overture - including that a shape already on screen unwinds to the flat board
+  // before the next one begins. Not while building the departing ghost: its request is
+  // discarded, and advancing the cycle twice in a frame would run it at double speed.
+  // A pinned player belongs to a capture, which has already said what it wants to see.
+  if (!ghosting_ && !shell.overtures().pinned()) {
+    shell.overtures().select(pickedVariant_);
+    shell.overtures().advance(lastDt_);
   }
 
   ImVec2 menuMin, menuMax;
@@ -270,7 +286,23 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   // Proportional, not a pixel count: the pane is half the window, and a width chosen
   // for a fixed plate squeezes the description to one letter per line.
   const float listW = ImGui::GetContentRegionAvail().x * 0.44f;
-  const float listH = ImGui::GetContentRegionAvail().y - px(70.0f);
+  // Room beneath the list for the two-player tick, its legend line, and the
+  // Start/Back row; the list scrolls, so reserving more costs nothing.
+  // Reserve what the footer actually needs rather than a constant: the hot-seat row was
+  // added under the list and pushed START and BACK off the bottom of the pane, because
+  // the constant still described a footer that was only two buttons. Measured, so a
+  // larger interface scale - or another row here later - cannot do it again.
+  const float footerH = px(10) + ImGui::GetFrameHeight()      // hot-seat checkbox
+                        + px(2) + ImGui::GetTextLineHeight()  // its one-line note
+                        + px(10) + px(40)                     // the buttons
+                        + px(6);
+  // And no taller than the list actually is. Stretching it to the full pane left a
+  // field of empty panel between the last variant and the buttons, which reads as the
+  // controls having fallen to the bottom of the screen rather than as a group sitting
+  // under the thing they act on.
+  const float wantH = static_cast<float>(shell.library().size()) * rowH + px(18.0f);
+  const float listH =
+      std::clamp(wantH, px(140.0f), ImGui::GetContentRegionAvail().y - footerH);
   ImGui::PushStyleColor(ImGuiCol_ChildBg, col(t.ink, 0.45f));
   ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
   ImGui::BeginChild("##library", ImVec2(listW, listH), ImGuiChildFlags_Border);
@@ -337,8 +369,24 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   ImGui::PopFont();
   ImGui::EndChild();
 
-  ImGui::Dummy(ImVec2(0, px(8)));
-  if (button("START", t, px(150), true, false, true, display)) {
+  ImGui::Dummy(ImVec2(0, px(6)));
+  // Two-player keyboard mode, chosen here so it can be set for the game about to start
+  // as well as from Settings; both write the one saved setting.
+  ImGui::Checkbox("Two players, one keyboard", &shell.settings().hotSeat);
+  if (ImGui::IsItemDeactivatedAfterEdit()) request.settingsChanged = true;
+  ImGui::PushFont(small);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::TextUnformatted("each player types their own half of the keyboard");
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
+  ImGui::Dummy(ImVec2(0, px(6)));
+  // Enter starts whatever the list has selected. The library is a list of things to
+  // play, so the key that means "yes, this one" should work without reaching for the
+  // mouse - and it is the only control here that needs no aim.
+  const bool enter = !ghosting_ && !ImGui::GetIO().WantTextInput &&
+                     (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
+                      ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
+  if (button("START", t, px(150), true, false, true, display) || enter) {
     request.loadVariant = pickedVariant_;
   }
   ImGui::SameLine();
@@ -452,6 +500,7 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
       editorPage_ = 1;
     }
     if (menuEntry("Board designer", 2, t, display, homeWidth, true, scale_)) {
+      editorPage_ = 3;
     }
     ImGui::Dummy(ImVec2(0, px(10)));
     if (button("BACK", t, px(120), false, false, true, display)) shell.back();
@@ -492,6 +541,95 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     ImGui::PopFont();
     ImGui::Dummy(ImVec2(0, px(12)));
     if (button("BACK", t, px(120), false, false, true, display)) editorPage_ = 1;
+    endPane();
+    return request;
+  }
+
+  // The board designer: the shape of the board - its axes, and whether an axis is glued
+  // to its opposite face. Piecing the army together is the other designer's job.
+  if (editorPage_ == 3) {
+    screenTitle("Board designer", t, display, scale_, 1.7f);
+    app::Editor* editor = shell.editor();
+    if (editor == nullptr) {
+      ImGui::PushFont(small);
+      ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
+      ImGui::TextWrapped("No variant is open to edit.");
+      ImGui::PopStyleColor();
+      ImGui::PopFont();
+      ImGui::Dummy(ImVec2(0, px(10)));
+      if (button("BACK", t, px(120), false, false, true, display)) editorPage_ = 0;
+      endPane();
+      return request;
+    }
+
+    const auto chip = [&](const char* label, const view::Rgba& c, float w) {
+      ImGui::PushStyleColor(ImGuiCol_Button, col(c, 0.85f));
+      ImGui::PushStyleColor(ImGuiCol_ButtonHovered, col(c));
+      ImGui::PushStyleColor(ImGuiCol_ButtonActive, col(c));
+      const bool pressed = ImGui::Button(label, ImVec2(w, 0.0f));
+      ImGui::PopStyleColor(3);
+      return pressed;
+    };
+
+    ImGui::PushFont(small);
+    const auto axes = editor->axes();
+    for (std::size_t i = 0; i < axes.size(); ++i) {
+      ImGui::PushID(static_cast<int>(i));
+      ImGui::TextUnformatted(axes[i].name.c_str());
+      ImGui::SameLine(px(120.0f));
+      if (chip("-", t.panelHi, px(22)) && axes[i].extent > 1) {
+        (void)editor->setAxisExtent(i, axes[i].extent - 1);
+      }
+      ImGui::SameLine();
+      ImGui::Text("%d", axes[i].extent);
+      ImGui::SameLine();
+      if (chip("+", t.ember, px(22))) {
+        (void)editor->setAxisExtent(i, axes[i].extent + 1);
+      }
+      ImGui::SameLine();
+      const char* kindLabel = axes[i].kind == AxisKind::Spatial    ? "spatial"
+                              : axes[i].kind == AxisKind::Temporal ? "temporal"
+                                                                   : "multiverse";
+      const view::Rgba kindCol = axes[i].kind == AxisKind::Spatial    ? t.moss
+                                 : axes[i].kind == AxisKind::Temporal ? t.diffMedium
+                                                                      : t.diffImpossible;
+      if (chip(kindLabel, kindCol, px(86))) {
+        const AxisKind next = axes[i].kind == AxisKind::Spatial    ? AxisKind::Temporal
+                              : axes[i].kind == AxisKind::Temporal ? AxisKind::Multiverse
+                                                                   : AxisKind::Spatial;
+        (void)editor->setAxisKind(i, next);
+      }
+      ImGui::SameLine();
+      if (chip(axes[i].periodic ? "glued" : "open", axes[i].periodic ? t.rift : t.panelHi,
+               px(64))) {
+        (void)editor->setAxisPeriodic(i, !axes[i].periodic);
+      }
+      ImGui::SameLine();
+      if (chip("x", t.blood, px(22))) (void)editor->removeAxis(i);
+      ImGui::PopID();
+    }
+    ImGui::PopFont();
+
+    ImGui::Dummy(ImVec2(0, px(6)));
+    ImGui::PushFont(small);
+    if (chip("ADD AXIS", t.emberDeep, 0.0f)) (void)editor->addAxis();
+    ImGui::PopFont();
+
+    ImGui::Dummy(ImVec2(0, px(4)));
+    ImGui::PushFont(small);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+    ImGui::TextWrapped(
+        "An extent is how many cells an axis has; a glued axis joins its two ends, so a "
+        "cylinder is one glued axis and a torus two.");
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+
+    ImGui::Dummy(ImVec2(0, px(8)));
+    ImGui::PushFont(small);
+    if (chip("SAVE", t.ember, px(90))) (void)shell.saveEditor();
+    ImGui::SameLine();
+    if (button("BACK", t, px(120), false, false, true, display)) editorPage_ = 0;
+    ImGui::PopFont();
     endPane();
     return request;
   }

@@ -9,6 +9,7 @@
 
 #include "base/result.hpp"
 #include "io/variant_doc.hpp"
+#include "space/dim_spec.hpp"
 
 namespace cb::app {
 
@@ -41,6 +42,16 @@ class Editor {
 
   /// Index of the variant's orientation axis, or -1. Read by the move preview.
   [[nodiscard]] int orientationAxis() const;
+
+  /// The board designer's axes: name, extent, kind, pitch and whether the axis is glued
+  /// to its opposite face. Every edit goes through the undo stack.
+  using AxisInfo = VariantDoc::AxisInfo;
+  [[nodiscard]] std::vector<AxisInfo> axes() const;
+  Result<void> setAxisExtent(std::size_t index, int extent);
+  Result<void> setAxisKind(std::size_t index, AxisKind kind);
+  Result<void> setAxisPeriodic(std::size_t index, bool periodic);
+  Result<void> addAxis();
+  Result<void> removeAxis(std::size_t index);
 
   [[nodiscard]] std::vector<std::string> pieceNames() const;
   [[nodiscard]] Result<std::vector<MoveAtom>> pieceAtoms(std::string_view piece) const;

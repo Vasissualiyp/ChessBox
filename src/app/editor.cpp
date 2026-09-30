@@ -94,6 +94,32 @@ int Editor::orientationAxis() const {
   return doc_.orientationAxis();
 }
 
+std::vector<Editor::AxisInfo> Editor::axes() const {
+  return doc_.axes();
+}
+
+Result<void> Editor::setAxisExtent(std::size_t index, int extent) {
+  return edit(
+      [&](VariantDoc& d) -> Result<void> { return d.setAxisExtent(index, extent); });
+}
+
+Result<void> Editor::setAxisKind(std::size_t index, AxisKind kind) {
+  return edit([&](VariantDoc& d) -> Result<void> { return d.setAxisKind(index, kind); });
+}
+
+Result<void> Editor::setAxisPeriodic(std::size_t index, bool periodic) {
+  return edit(
+      [&](VariantDoc& d) -> Result<void> { return d.setAxisPeriodic(index, periodic); });
+}
+
+Result<void> Editor::addAxis() {
+  return edit([&](VariantDoc& d) -> Result<void> { return d.addAxis(); });
+}
+
+Result<void> Editor::removeAxis(std::size_t index) {
+  return edit([&](VariantDoc& d) -> Result<void> { return d.removeAxis(index); });
+}
+
 void Editor::setDescription(std::string text) {
   (void)edit([&](VariantDoc& d) -> Result<void> {
     d.setDescription(std::move(text));
