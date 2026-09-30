@@ -78,6 +78,7 @@ Each layer is a CMake target linking only to lower layers, so a violation is a
 | L110 | `src/cli` | the scriptable command-line front end |
 | L110 | `src/gui` | the playable window's main loop (exe only) |
 | L100 | `src/render` | Vulkan, offscreen target, instanced renderer, piece meshes, ImGui panels |
+| L105 | `src/net` | the multiplayer front end: framed protocol, in-process transport, authoritative server, thin client |
 | L95 | `src/app` | screens, settings, interaction: actions in, snapshot out |
 | L90 | `src/io` | variant TOML loader, notation, FEN-N, ASCII board, replay |
 | L80 | `src/game` | history, undo, adjudication, repetition, clocks |

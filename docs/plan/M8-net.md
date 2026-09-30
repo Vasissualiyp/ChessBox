@@ -60,3 +60,23 @@ link, with server-side validation and full replay reproduction.
    divergence.
 5. Replay corpus reproduces through the network path.
 6. Soak test clean under ASan.
+
+## Status: the protocol, transport and an authoritative server (first slice)
+
+Recorded 2026-09-29.
+
+The `chessbox_net` layer (L105) ships a versioned, length-prefixed protocol whose decoder
+refuses a truncated frame, trailing bytes and an unknown tag rather than guessing; an
+in-process transport (`makeLoopback`); an authoritative `Server` that owns the `Game`,
+plays only intents that are among the engine's own legal moves, and answers with the
+position by ply, side and hash; and a thin `Client` that mirrors it and never advances
+the game itself. A Hello carries the protocol version and the `VariantId`, and a
+mismatch is a clean refusal.
+
+Tests: protocol round-trip and every refusal class; the loopback; and a game played over
+the loopback where both sides agree on the hash, an illegal intent is refused, and a
+client naming a different variant is turned away.
+
+Not built yet: the socket transport and TLS, the lobby / matchmaking / spectators /
+reconnection, the latency-and-loss harness, and the adversarial-client corpus. Nothing
+here touches a real network yet - the socket transport is one more `Transport`.
