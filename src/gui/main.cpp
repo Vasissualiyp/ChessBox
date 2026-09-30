@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -179,15 +180,21 @@ void syncMarks(render::BoardRenderer& renderer, const app::Session& session) {
           : kInvalidCell);
 }
 
-/// Render a single frame - board and interface together - to a file, and exit.
+/// Render a frame - board and interface together - to a PPM, and exit.
 ///
 /// It needs no display: SDL's dummy video driver supplies the window the interface uses
 /// for input mapping, and the frame goes to the same offscreen target the headless tests
 /// use. That makes the whole screen capturable on a machine with no compositor, which is
 /// how the interface gets reviewed at all.
+///
+/// `clip` turns one frame into a sequence: `t` is swept from `clipT0` to `clipT1` over
+/// `clipFrames` frames, each rendered at that fixed `t` and written as
+/// `<dir>/frame_%04d.ppm`. That is the deterministic, dependency-light half of the clip
+/// export (M12.2): a directory of numbered frames is the guaranteed output, and muxing a
+/// video from them is an external convenience, never a codec in the engine.
 int captureFrame(const std::string& variantName, const std::string& path,
                  const std::string& script, const std::string& screen, float overtureT,
-                 int previewDims) {
+                 int previewDims, bool clip, int clipFrames, float clipT0, float clipT1) {
   // Captures use default settings, never the person's own. A screenshot that changes
   // because whoever ran it likes a larger interface is not a screenshot of the game -
   // and `ctest -R gui-` would then pass or fail by whose machine it ran on.
@@ -280,15 +287,14 @@ int captureFrame(const std::string& variantName, const std::string& path,
   if (screen == "body") (*ui)->openEditorPage(1, 1);
   if (screen == "flat") (*ui)->openEditorPage(1, 2);
   (*ui)->setPreviewDims(previewDims);
-  // Two frames: ImGui sizes some things from the previous frame, so the first can catch
-  // a panel mid-layout.
-  for (int frame = 0; frame < 2; ++frame) {
-    // A fixed step rather than a real clock: the shell animates, and a capture has to
-    // be the same picture every time it is taken.
-    (*ui)->tick(frame == 0 ? 0.0f : 1.0f);
-    // Re-pinned every frame, because that fixed one-second tick is exactly what the
-    // interface hands the overture as its own dt - so pinning once before the loop put
-    // the capture almost half a cycle past where it was asked for.
+  // One frame, built and rendered at whatever `t` the caller has pinned. Split out from
+  // writing so `--clip` can call it once per frame. `dt` is the interface's own clock:
+  // the warm-up gives it enough to settle a screen transition, and the real frames give
+  // it none so the drifting field is the same in every frame of a clip.
+  const auto renderFrame = [&](float dt) -> std::optional<render::Image> {
+    // A fixed step rather than a real clock: the shell animates, and a capture has to be
+    // the same picture every time it is taken.
+    (*ui)->tick(dt);
     (*ui)->newFrame();
     const render::UiRequest request = (*ui)->build(*shell, 60.0f);
     (*ui)->endFrame();
@@ -318,7 +324,58 @@ int captureFrame(const std::string& variantName, const std::string& path,
             rect);
         !ok.has_value()) {
       std::fprintf(stderr, "%s\n", ok.error().format().c_str());
-      return 1;
+      return std::nullopt;
+    }
+    auto pixels = target->readPixels();
+    if (!pixels.has_value()) {
+      std::fprintf(stderr, "%s\n", pixels.error().format().c_str());
+      return std::nullopt;
+    }
+    render::Image img;
+    img.width = target->width();
+    img.height = target->height();
+    img.rgba = std::move(*pixels);
+    return img;
+  };
+  const auto writeFrame = [](const render::Image& img, const std::string& outPath) {
+    if (auto ok = render::writePpm(img, outPath); !ok.has_value()) {
+      std::fprintf(stderr, "%s\n", ok.error().format().c_str());
+      return false;
+    }
+    std::printf("wrote %s\n", outPath.c_str());
+    return true;
+  };
+
+  // Two thrown-away frames, in this order: the first lets a screen-change reset the pane
+  // transition (which it does after the tick), the second advances that transition to
+  // done - without both, the library draws at alpha zero. Then ImGui has a previous frame
+  // to size from as well.
+  if (!renderFrame(0.0f).has_value()) return 1;
+  if (!renderFrame(1.0f).has_value()) return 1;
+
+  if (!clip) {
+    const std::optional<render::Image> img = renderFrame(0.0f);
+    if (!img.has_value() || !writeFrame(*img, path)) return 1;
+  } else {
+    // A directory of numbered frames: the guaranteed output. Muxing a video from them is
+    // an external step, so no codec enters the build.
+    std::error_code ec;
+    std::filesystem::create_directories(path, ec);
+    const int frames = std::max(1, clipFrames);
+    for (int i = 0; i < frames; ++i) {
+      const float t = frames <= 1 ? clipT0
+                                  : clipT0 + (clipT1 - clipT0) * static_cast<float>(i) /
+                                                 static_cast<float>(frames - 1);
+      // Pin the cycle outright: a clip is only deterministic if every frame states its
+      // own `t` rather than integrating towards it.
+      if (screen == "newgame") shell->overtures().setProgress(t);
+      char name[32];
+      std::snprintf(name, sizeof(name), "frame_%04d.ppm", i);
+      const std::optional<render::Image> img = renderFrame(0.0f);
+      if (!img.has_value() ||
+          !writeFrame(*img, (std::filesystem::path(path) / name).string())) {
+        return 1;
+      }
     }
   }
 #else
@@ -327,8 +384,6 @@ int captureFrame(const std::string& variantName, const std::string& path,
       &shell->session()->seams(), &shell->session()->animation(),
       [&](CellId c) { return shell->session()->boardVisible(c); });
   (void)renderer->render(*target, instances, shell->session()->camera());
-#endif
-
   auto pixels = target->readPixels();
   if (!pixels.has_value()) {
     std::fprintf(stderr, "%s\n", pixels.error().format().c_str());
@@ -342,6 +397,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
     std::fprintf(stderr, "%s\n", ok.error().format().c_str());
     return 1;
   }
+#endif
+
   const std::size_t validation = ctx->validationErrorCount();
   for (const std::string& message : ctx->takeValidationMessages()) {
     std::fprintf(stderr, "%s\n", message.c_str());
@@ -357,8 +414,12 @@ int main(int argc, char** argv) {
   std::string shotPath;
   std::string script;
   std::string screen;
+  std::string clipDir;
   float overtureT = 0.78f;
   int previewDims = 2;
+  int clipFrames = 96;
+  float clipT0 = 0.0f;
+  float clipT1 = 1.0f;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "-h" || arg == "--help") {
@@ -373,25 +434,37 @@ int main(int argc, char** argv) {
           "body, flat, info, pieces, or the board by default.\n"
           "--t 0..1 is where the library screen's overture is in its cycle: 0 the flat\n"
           "board every variant starts from, 1 the shape it becomes.\n"
+          "--clip DIR renders a sequence of numbered PPM frames instead of one shot,\n"
+          "sweeping t from --t0 to --t1 over --frames frames (default 0..1, 96).\n"
           "--dims 2..4 is how many dimensions the designer's move preview shows.\n");
       return 0;
     }
     if (arg == "--shot" && i + 1 < argc)
       shotPath = argv[++i];
+    else if (arg == "--clip" && i + 1 < argc)
+      clipDir = argv[++i];
     else if (arg == "--script" && i + 1 < argc)
       script = argv[++i];
     else if (arg == "--screen" && i + 1 < argc)
       screen = argv[++i];
     else if (arg == "--t" && i + 1 < argc)
       overtureT = std::strtof(argv[++i], nullptr);
+    else if (arg == "--t0" && i + 1 < argc)
+      clipT0 = std::strtof(argv[++i], nullptr);
+    else if (arg == "--t1" && i + 1 < argc)
+      clipT1 = std::strtof(argv[++i], nullptr);
+    else if (arg == "--frames" && i + 1 < argc)
+      clipFrames = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
     else if (arg == "--dims" && i + 1 < argc)
       previewDims = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
     else if (!arg.starts_with("-"))
       variantName = arg;
   }
-  if (!shotPath.empty()) {
-    return captureFrame(variantName.empty() ? "standard" : variantName, shotPath, script,
-                        screen, overtureT, previewDims);
+  const std::string& targetPath = !clipDir.empty() ? clipDir : shotPath;
+  if (!targetPath.empty()) {
+    return captureFrame(variantName.empty() ? "standard" : variantName, targetPath,
+                        script, screen, overtureT, previewDims, !clipDir.empty(),
+                        clipFrames, clipT0, clipT1);
   }
 
   auto shell = makeShell();
