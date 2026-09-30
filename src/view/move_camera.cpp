@@ -26,6 +26,19 @@ Vec3 mix(const Vec3& a, const Vec3& b, float t) {
   return {a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t};
 }
 
+/// True when a direction has support on an axis `ViewConfig` draws as a *grid* axis - a
+/// sub-board lattice rather than a screen axis. A grid-axis move leaves one sub-board and
+/// arrives on another of the same shape; the camera's policy is to cut, not pan (M11.4).
+/// The decision is `ViewConfig`'s, so it is never a dimension count.
+bool travelsGridAxis(const ViewConfig& cfg, const Direction& d) {
+  for (std::size_t k = 0; k < d.nsup; ++k) {
+    for (std::size_t g = 0; g < cfg.gridAxes.size(); ++g) {
+      if (cfg.gridAxes[g] == d.sup[k]) return true;
+    }
+  }
+  return false;
+}
+
 /// A lattice direction read as a world vector, through the same screen-axis mapping the
 /// animation uses (`MoveAnimation::start`). A direction with no screen-axis support -
 /// a move along a grid axis - projects to nothing and the caller falls back to the run's
@@ -148,6 +161,16 @@ CameraPose moveCamera(const MovePath& path, const std::vector<Placement>& placem
   const float local = applyEase(Ease::Smooth, (t - run->t0) / span);
   CameraPose pose = base;
   pose.target = pointAlong(*run, local);
+
+  if (policy.grid == GridAxisPolicy::Cut && travelsGridAxis(cfg, run->dir)) {
+    // A grid-axis move travels between sub-boards, not across the screen. Following the
+    // piece across the lattice gap is a long, disorienting dolly over empty space; the
+    // readable choice is a cut at the crossing: frame the source slice before it and the
+    // destination slice after. The orientation is kept - the gap direction is not a
+    // screen direction to turn towards.
+    pose.target = local < 0.5f ? run->points.front() : run->points.back();
+    return pose;
+  }
 
   const Vec3 first = run->points.front();
   const Vec3 last = run->points.back();

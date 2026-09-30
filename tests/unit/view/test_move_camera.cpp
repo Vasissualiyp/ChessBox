@@ -282,6 +282,64 @@ TEST_CASE("a crossing that transports the direction turns the camera", "[unit][v
   CHECK(std::abs(std::sin(before.yaw - after.yaw)) > 1e-3f);  // the camera turned
 }
 
+TEST_CASE("a grid-axis move cuts between sub-boards instead of panning the gap",
+          "[unit][view]") {
+  // M11.4: whether a move pans or cuts is decided by `ViewConfig` - is the crossed axis a
+  // screen axis or a sub-board grid axis - and never by the dimension count. `hyper4`
+  // draws three screen axes and makes the fourth (aeon) a grid axis.
+  const VariantSpec v = test::loadVariant("hyper4");
+  const ViewConfig cfg = ViewConfig::forBoard(v.dims);
+  REQUIRE(cfg.gridAxes.size() == 1);
+  const std::uint8_t gridAxis = cfg.gridAxes[0];
+  const std::vector<Placement> placements = layout(v.dims, cfg);
+  const Bounds scene = boundsOf(placements);
+
+  Coord a(v.dims.dims());
+  Coord b = a;
+  b.c[gridAxis] = 1;
+  MovePath path;
+  path.from = v.dims.toCell(a);
+  path.to = v.dims.toCell(b);
+  Direction d;
+  d.v[gridAxis] = 1;
+  d.n = v.dims.dims();
+  d.nsup = 1;
+  d.sup[0] = gridAxis;
+  path.startDir = d;
+  PathStep s;
+  s.from = path.from;
+  s.to = path.to;
+  s.kind = StepKind::Interior;
+  s.dir = d;
+  path.steps = {s};
+
+  const auto at = [&](CellId id) {
+    for (const Placement& p : placements) {
+      if (p.cell == id) return Vec3{p.x, p.y, p.z};
+    }
+    FAIL("cell not laid out");
+    return Vec3{};
+  };
+  const Vec3 src = at(path.from);
+  const Vec3 dst = at(path.to);
+
+  CameraPolicy cut = identity();
+  cut.grid = GridAxisPolicy::Cut;
+  const CameraPose before = moveCamera(path, placements, cfg, scene, cut, 0.25f);
+  const CameraPose after = moveCamera(path, placements, cfg, scene, cut, 0.75f);
+  CHECK_THAT(dist(before.target, src), WithinAbs(0.0f, 1e-4f));  // the source slice
+  CHECK_THAT(dist(after.target, dst), WithinAbs(0.0f, 1e-4f));   // the destination slice
+  // A cut jumps: no frame sits part-way across the gap.
+  CHECK(dist(before.target, after.target) > 0.5f * dist(src, dst));
+
+  // `Pan` is the other policy: the same move interpolates across the gap.
+  CameraPolicy pan = identity();
+  pan.grid = GridAxisPolicy::Pan;
+  const CameraPose mid = moveCamera(path, placements, cfg, scene, pan, 0.5f);
+  CHECK(dist(mid.target, src) > 1e-3f);
+  CHECK(dist(mid.target, dst) > 1e-3f);
+}
+
 TEST_CASE("a pose applies to the orbit camera by assignment", "[unit][view]") {
   CameraPose pose;
   pose.target = {1.0f, 2.0f, 3.0f};
