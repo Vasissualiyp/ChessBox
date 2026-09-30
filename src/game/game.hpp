@@ -30,6 +30,8 @@ enum class EndReason : std::uint8_t {
   Repetition,    ///< the same position three times
   NoLegalMoves,  ///< no royal piece exists, so "checkmate" does not apply
   RuleDeclared,  ///< a variant rule ended the game
+  Resignation,   ///< a player conceded
+  Agreement,     ///< the players agreed a draw
 };
 
 std::string_view toString(EndReason r) noexcept;
@@ -55,6 +57,11 @@ class Game {
   Result<void> play(const Move& m);
   bool undo();
   void reset();
+
+  /// End the game by concession: `who` loses. A game already over is left alone.
+  void resign(Color who);
+  /// End the game as a draw by agreement.
+  void agreeDraw();
 
   [[nodiscard]] std::size_t plyCount() const noexcept { return played_.size(); }
   [[nodiscard]] const std::vector<Move>& moveHistory() const noexcept { return played_; }
@@ -115,6 +122,10 @@ class Game {
   std::vector<bool> repeated_;
   bool startHasRoyal_{false};
   bool ruleEnded_{false};
+  /// A concession or an agreed draw: an end that came from the players, not the board.
+  bool resigned_{false};
+  Color resignedBy_{Color::White};
+  bool agreed_{false};
   rules::Outcome ruleOutcome_{rules::Outcome::Draw};
   Color ruleOutcomeMover_{Color::White};
   std::vector<Undo> history_;

@@ -433,9 +433,24 @@ UiRequest Ui::buildPause(app::Shell& shell) {
   if (menuEntry("Main menu", 5, t, display, width, true, scale_)) {
     shell.go(app::Screen::MainMenu);
   }
+  // Resigning or agreeing a draw only means anything while the game is unfinished.
+  if (shell.session()->game().result() == GameResult::InProgress) {
+    if (menuEntry("Resign", 6, t, display, width, true, scale_)) {
+      app::Action a;
+      a.kind = app::ActionKind::Resign;
+      (void)shell.session()->apply(a);
+      shell.resume();
+    }
+    if (menuEntry("Offer draw", 7, t, display, width, true, scale_)) {
+      app::Action a;
+      a.kind = app::ActionKind::AgreeDraw;
+      (void)shell.session()->apply(a);
+      shell.resume();
+    }
+  }
   // A pause-specific confirmation, so quitting from the game keeps the pause section's
   // own look and step rather than jumping to the main menu's prompt.
-  if (menuEntry("Quit", 6, t, display, width, true, scale_)) {
+  if (menuEntry("Quit", 8, t, display, width, true, scale_)) {
     shell.go(app::Screen::PauseQuitConfirm);
   }
 

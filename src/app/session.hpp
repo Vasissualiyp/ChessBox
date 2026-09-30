@@ -27,6 +27,8 @@ enum class ActionKind : std::uint8_t {
   SetPromotion,   ///< text is a piece name
   Confirm,        ///< play the move that is waiting for confirmation
   Cancel,         ///< discard it
+  Resign,         ///< the side to move concedes
+  AgreeDraw,      ///< the players agree a draw
 };
 
 struct Action {

@@ -35,6 +35,10 @@ std::string_view toString(EndReason r) noexcept {
       return "no legal moves";
     case EndReason::RuleDeclared:
       return "a variant rule";
+    case EndReason::Resignation:
+      return "resignation";
+    case EndReason::Agreement:
+      return "agreement";
   }
   return "?";
 }
@@ -368,7 +372,20 @@ bool Game::undo() {
   return true;
 }
 
+void Game::resign(Color who) {
+  if (result() != GameResult::InProgress) return;
+  resigned_ = true;
+  resignedBy_ = who;
+}
+
+void Game::agreeDraw() {
+  if (result() != GameResult::InProgress) return;
+  agreed_ = true;
+}
+
 void Game::reset() {
+  resigned_ = false;
+  agreed_ = false;
   pos_ = Position::startPosition(*v_);
   if (temporal_) {
     initTemporal();
@@ -393,6 +410,8 @@ int Game::repetitionCount() const {
 }
 
 EndReason Game::endReason() const {
+  if (resigned_) return EndReason::Resignation;
+  if (agreed_) return EndReason::Agreement;
   if (ruleEnded_) return EndReason::RuleDeclared;
   if (!legalMoves().empty()) {
     if (v_->halfmoveDrawLimit > 0 && pos_.halfmoveClock() >= v_->halfmoveDrawLimit) {
@@ -410,6 +429,10 @@ EndReason Game::endReason() const {
 GameResult Game::result() const {
   const Color side = pos_.sideToMove();
   const Color other = opponent(side);
+  if (resigned_) {
+    return resignedBy_ == Color::White ? GameResult::BlackWins : GameResult::WhiteWins;
+  }
+  if (agreed_) return GameResult::Draw;
   if (ruleEnded_) {
     // A rule's outcome is stated relative to whoever made the move that triggered it.
     switch (ruleOutcome_) {
@@ -444,6 +467,8 @@ GameResult Game::result() const {
     case EndReason::DrawClock:
     case EndReason::Repetition:
     case EndReason::RuleDeclared:
+    case EndReason::Resignation:
+    case EndReason::Agreement:
       return GameResult::Draw;
   }
   return GameResult::InProgress;

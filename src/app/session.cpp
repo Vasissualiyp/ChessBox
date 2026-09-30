@@ -41,6 +41,14 @@ Result<Action> parseAction(const VariantSpec& v, std::string_view line) {
     a.kind = ActionKind::Cancel;
     return a;
   }
+  if (verb == "resign") {
+    a.kind = ActionKind::Resign;
+    return a;
+  }
+  if (verb == "draw") {
+    a.kind = ActionKind::AgreeDraw;
+    return a;
+  }
   if (verb == "orbit") {
     a.kind = ActionKind::Orbit;
     in >> a.dx >> a.dy;
@@ -421,6 +429,20 @@ Result<void> Session::apply(const Action& a) {
       refreshSnapshot();
       return {};
     }
+
+    case ActionKind::Resign:
+      game_->resign(game_->position().sideToMove());
+      selected_ = kInvalidCell;
+      message_ = "resigned";
+      refreshSnapshot();
+      return {};
+
+    case ActionKind::AgreeDraw:
+      game_->agreeDraw();
+      selected_ = kInvalidCell;
+      message_ = "a draw was agreed";
+      refreshSnapshot();
+      return {};
 
     case ActionKind::Confirm:
       return confirmMove();
