@@ -548,6 +548,14 @@ int main(int argc, char** argv) {
                 (void)shell->session()->apply(a);
               }
               break;
+            case SDLK_F:
+              // Flat view, without a trip to the settings screen.
+              if (inGame && !twoPlayer) {
+                app::Settings& st = shell->settings();
+                st.flatView = !st.flatView;
+                shell->session()->setFlatView(st.flatView);
+              }
+              break;
             default:
               break;
           }

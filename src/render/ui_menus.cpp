@@ -437,6 +437,15 @@ UiRequest Ui::buildPause(app::Shell& shell) {
   if (menuEntry("Quit", 6, t, display, width, true, scale_)) {
     shell.go(app::Screen::PauseQuitConfirm);
   }
+
+  // The keys, where a player looks for them.
+  ImGui::Dummy(ImVec2(0, px(10)));
+  ImGui::PushFont(static_cast<ImFont*>(fontSmall_));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::TextUnformatted(
+      "Esc pause   U undo   R reset   F flat view   Q quit (from the menu)");
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
   endPane();
   return request;
 }
