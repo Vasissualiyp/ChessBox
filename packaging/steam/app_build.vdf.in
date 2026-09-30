@@ -1,0 +1,20 @@
+// SteamPipe app build script (M16.2). The @...@ tokens are filled by
+// tools/steam_upload.sh from the environment. Run it by hand with:
+//
+//   steamcmd +login <user> +run_app_build <abs>/app_build.vdf +quit
+//
+// The AppID and depot id come from Steamworks once the store page exists; nothing here is
+// committed with real ids, and credentials are never written to disk.
+"appbuild"
+{
+  "appid"       "@APPID@"
+  "desc"        "ChessBox@DESC@"
+  "buildoutput" "@BUILDOUT@"
+  "contentroot" "@CONTENT@"
+  "setlive"     "@SETLIVE@"
+  "preview"     "@PREVIEW@"
+  "depots"
+  {
+    "@DEPOTID@" "@DEPOTVDF@"
+  }
+}

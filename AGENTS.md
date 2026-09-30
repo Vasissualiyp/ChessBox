@@ -39,6 +39,8 @@ tools/test.sh --build view app   # ONLY the tests a change can touch; runs the t
                                  # (see "Testing what you touched" below) — prefer this while iterating
 tools/precommit.sh               # format + tidy + fast tests — run before every commit
 nix flake check                  # THE gate: both compilers, sanitizers, coverage, goldens, bench
+tools/package.sh                 # a self-contained release prefix + a headless smoke test (M16.2)
+tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID + credentials)
 
 ./build/dev/src/cli/chessbox                          # interactive
 ./build/dev/src/cli/chessbox "load torus" board moves  # batch; nonzero exit on error

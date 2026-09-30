@@ -1,0 +1,16 @@
+// SteamPipe depot build script (M16.2). The @...@ tokens are filled by
+// tools/steam_upload.sh. Everything under the packaged prefix is uploaded, so the package
+// must be self-contained first (`tools/package.sh`).
+"DepotBuildConfig"
+{
+  "DepotID"     "@DEPOTID@"
+  "contentroot" "@CONTENT@"
+  "FileMapping"
+  {
+    "LocalPath" "*"
+    "DepotPath" "."
+    "recursive" "1"
+  }
+  "FileExclusion" "*.pdb"
+  "FileExclusion" "*.log"
+}
