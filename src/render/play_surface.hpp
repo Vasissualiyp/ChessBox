@@ -40,6 +40,14 @@ struct SurfaceMoveSample {
 [[nodiscard]] SurfaceMoveSample surfaceMoveSample(const view::MovePath& path,
                                                   const PlaySurface& surf, float t);
 
+/// The slide offset, in cells, that turns `target`'s cell most toward `camera`: the
+/// facing search behind ALIGN (M17.17). For a closed ring (`torus`, `klein`) only - an
+/// open tube or ribbon has no inner/outer side to turn, so it returns 0. A search rather
+/// than a closed form: the embeddings have no general inverse for "which slide makes this
+/// point face outward", and a 16-point sweep is cheap.
+[[nodiscard]] float alignSlideU(const VariantSpec& v, CellId target,
+                                const view::OrbitCamera& camera);
+
 /// How many corners a square is cut into per axis. A square on a curved board is not a
 /// square: it is a patch of the surface, and this is how finely that patch is sampled.
 inline constexpr int kSurfaceSubdiv = 4;

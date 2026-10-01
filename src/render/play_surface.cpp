@@ -336,6 +336,34 @@ SurfaceMoveSample surfaceMoveSample(const view::MovePath& path, const PlaySurfac
   return out;
 }
 
+float alignSlideU(const VariantSpec& v, CellId target, const view::OrbitCamera& camera) {
+  // Only a closed ring has an inner/outer side worth turning.
+  if (!PlaySurface::slidesAlongRanks(v)) return 0.0f;
+  const int nx = static_cast<int>(v.dims.extent(0));
+  const float period = 2.0f * static_cast<float>(nx);
+  const view::Vec3 eye = camera.eye();
+  float best = 0.0f;
+  float bestFacing = -2.0f;
+  for (int i = 0; i < 16; ++i) {
+    SurfacePose pose;
+    pose.slideU = period * static_cast<float>(i) / 16.0f;
+    const PlaySurface s = PlaySurface::build(v, pose);
+    for (const SurfaceSeat& seat : s.seats()) {
+      if (seat.cell != target) continue;
+      view::Vec3 toCam = eye - seat.centre;
+      if (view::length(toCam) < 1e-6f) break;
+      toCam = view::normalize(toCam);
+      const float facing = view::dot(seat.normal, toCam);
+      if (facing > bestFacing) {
+        bestFacing = facing;
+        best = pose.slideU;
+      }
+      break;
+    }
+  }
+  return best;
+}
+
 void PlaySurface::buildStacked(const VariantSpec& v) {
   stacked_ = true;
   const DimSpec& d = v.dims;

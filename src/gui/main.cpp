@@ -189,7 +189,7 @@ render::BoardOptions optionsFor(const app::Shell& shell) {
 /// How the geometry view's surface is posed right now.
 render::SurfacePose poseFrom(const app::Settings& s) {
   render::SurfacePose pose;
-  pose.slideU = s.geometrySlideU;
+  pose.slideU = s.geometrySlideU + s.geometryAlignOffset;
   pose.slideV = s.geometrySlideV;
   pose.evert = s.geometryEvert;
   return pose;
@@ -693,6 +693,10 @@ int main(int argc, char** argv) {
   /// Whether the board was its own shape last frame, so the camera can be put round
   /// whatever it has just become.
   bool wasSurface = false;
+  /// The ALIGN search's target cell and offset, so the sweep runs once per followed cell
+  /// rather than every frame (M17.17).
+  CellId lastAlignCell = kInvalidCell;
+  float alignTarget = 0.0f;
   auto lastFrame = std::chrono::steady_clock::now();
   float fps = 0.0f;
 
@@ -934,6 +938,42 @@ int main(int argc, char** argv) {
         st.geometryEvert = std::min(target, st.geometryEvert + step);
       } else if (st.geometryEvert > target) {
         st.geometryEvert = std::max(target, st.geometryEvert - step);
+      }
+    }
+
+    // ALIGN (M17.17): while a followed move is in flight, ease the ring so the followed
+    // cell presents its outer face to the camera. The search runs once per followed cell,
+    // not every frame - the value only needs to change when the target cell does.
+    {
+      app::Settings& st = shell->settings();
+      app::Session* session = shell->session();
+      bool following = false;
+      if (st.geometryAlign && session != nullptr && session->shotInFlight()) {
+        following = true;
+        const CellId followed = session->animation().travellingTo();
+        if (followed != lastAlignCell) {
+          lastAlignCell = followed;
+          alignTarget =
+              render::alignSlideU(session->variant(), followed, session->camera());
+        }
+      } else {
+        lastAlignCell = kInvalidCell;
+      }
+      const int nx =
+          session != nullptr ? static_cast<int>(session->variant().dims.extent(0)) : 0;
+      const float period = nx > 0 ? 2.0f * static_cast<float>(nx) : 0.0f;
+      // Ease towards the representative of the target nearest the current offset: the
+      // slide wraps, so 15 and 1 are one cell apart, not fourteen.
+      float target = following ? alignTarget : 0.0f;
+      if (period > 0.0f) {
+        while (target - st.geometryAlignOffset > period * 0.5f) target -= period;
+        while (st.geometryAlignOffset - target > period * 0.5f) target += period;
+      }
+      st.geometryAlignOffset +=
+          (target - st.geometryAlignOffset) * std::min(1.0f, dt * 2.0f);
+      if (period > 0.0f) {
+        st.geometryAlignOffset = std::fmod(st.geometryAlignOffset, period);
+        if (st.geometryAlignOffset < 0.0f) st.geometryAlignOffset += period;
       }
     }
 

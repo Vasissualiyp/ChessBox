@@ -387,6 +387,17 @@ These are the ones that have actually cost time here, not hypotheticals.
   folds ~10 lattice cells onto each drawn tile - so `t6` stays on the lattice and any
   playable quintic must be sliced. Read `docs/plan/M17.12-shapes-above-two-dimensions.md`
   before extending this.
+- **A stacked (D>=3) tile's frame wraps a periodic axis and one-sides a bounded boundary,
+  per axis.** Clamping a periodic neighbour returns the cell's own position and scatters
+  the frames as fish scales; halving a bounded boundary's one-sided step draws it half
+  size. `PlaySurface::buildStacked` chooses wrap vs one-side from the geometry's
+  `boundaryKind` (M17.13).
+- **A move on the shape is sampled, not teleported.** `render::surfaceMoveSample` walks the
+  seats `view::MoveAnimation::path()` names (a leap arcs, a glide hugs; a seam step is not a
+  cut), and `Session::cameraOver(placements, bounds, cfg)` is the one move-camera blend, asked
+  against the surface's seats so the camera follows on the shape. `ALIGN`
+  (`Settings::geometryAlign`, `torus`/`klein` only) searches a slide offset that turns the
+  followed cell toward the camera (M17.15-M17.17).
 - **An 8-cell figure-eight is aliased, and that is why `lemniscateAngle` exists.** Equally
   spaced values of the Klein cross-section's angle land in pairs, which made every other
   file twice the width of its neighbour. The curve is walked at constant speed instead;

@@ -131,7 +131,7 @@ the lattice: `torus3d` as nested shells, `hyper4` as a hypercube, `t6` as the qu
 
 ---
 
-## M17.7 - M17.17 The next increment: a shape you can handle
+## M17.7 - M17.18 The next increment: a shape you can handle
 
 M17 shipped a board you can play on its own surface, and playing on it turned up six
 things the first pass does not do. They are specified here, smallest first; each names what
@@ -140,7 +140,8 @@ added after M17.7-M17.12 shipped, diagnosing two regressions the M17.12 first pa
 introduced - see each section's own **Have** for the evidence. M17.15-M17.17 are a third
 batch, asked for once a move could be made on the shape at all: the piece's own travel, the
 move camera following it there, and keeping that camera from looking through the shape's
-own geometry to find it.
+own geometry to find it. M17.18 is a fourth, a defect found by playing with the slide on
+`klein` specifically.
 
 ### M17.7 An INVERT control, and pieces that stay on the outside
 
@@ -852,18 +853,155 @@ looking through the tube wall (self-occlusion visible in a capture). With ALIGN 
 torus itself turns so the travelled ring presents its outer face to the camera and the
 piece stays visible throughout.
 
+### M17.18 Klein's normal field flips mid-board, not at its seam
+
+**Want.** The Klein bottle reads as one continuous shape while sliding through it (the
+middle-drag that moves `slideU`), the way `torus`/`cylinder`/`mobius` already do. Today it
+looks like two shapes glued together: on one side of a line through the middle of the
+board the squares (and the pieces standing on them) read as facing/leaning one way, on the
+other side the opposite way, and that line sweeps across the board as the slide changes -
+confirmed below, it is not an impression, the normal field genuinely reverses there.
+
+**Have - confirmed by measurement, not just by eye.** `PlaySurface::build`'s Klein branch
+computes "outward" in two places, both independently, both from the *same* unstable test,
+and both away from the pinch where it is actually unstable:
+
+- **The fine mesh shading.** `nrm(u, vv)` (`play_surface.cpp:171-176`) takes the raw
+  `normalAt(...)` and flips it to point away from `axisRef(vv)` - the per-rank
+  cross-section centroid, averaged over the full gapless grid (`play_surface.cpp:148-161`,
+  comment at `148-154`: *"'Outward' at a point is the side away from it"*). This feeds
+  every `patch.normal[k]` (`play_surface.cpp:193`) and every `seat.normal`
+  (`play_surface.cpp:203`).
+- **The per-cell piece orientation.** `ex` (`play_surface.cpp:216-220`) comes from a
+  *separate*, coarser tangent - the chord across the whole cell,
+  `along = at(u + 0.5/fnx, vv) - at(u - 0.5/fnx, vv)` - projected flat against
+  `seat.normal` and normalised. It inherits whatever `seat.normal` already decided, and
+  adds its own instability on top (below).
+
+A probe of `PlaySurface::build(klein).patches()`, dumping `patch.normal[]` across one rank
+at fine (`kSubdiv = 4`) resolution, shows the fault precisely - two places where
+*consecutive fine samples, a quarter-cell apart, inside what should be one smooth square*,
+are nearly exact opposites (`slideU = 2.0`, rank 0, patch for file 2, its own four
+corners):
+
+```
+file 2, corner i=2: n=(0.208, 0.311, -0.927)
+file 2, corner i=3: n=(-0.227, -0.472, 0.852)   <- dot with i=2 is -0.98: ~168 degrees
+...
+file 5, corner i=1: n=(0.607, 0.425, 0.672)
+file 5, corner i=2: n=(-0.556, -0.361, -0.748)  <- dot with i=1 is -0.99: ~174 degrees
+```
+
+Both loci sit at a *fixed* `u`, independent of rank, and both move together as `slideU`
+changes (confirmed: at `slideU = 0` the same two flips sit at files 0 and 4; at
+`slideU = 2` they sit at files 2 and 6 - a clean two-cell shift, matching the slide
+exactly). That `u` is where `kleinSurf`'s lemniscate cross-section passes through its own
+centre - `cr = rho*sin(a(u))` and `ca = rho*sin(2a(u))` are both zero at `u ≈ 0` and
+`u ≈ 0.5` (AGENTS.md's own gotcha already names this point: *"on a Klein bottle's crossing
+the tangent at the seat and the direction of the next square are most of a right angle
+apart"* - this is that crossing, and it is worse than a right angle apart). Exactly there,
+the sampled point sits almost *on* `axisRef`'s centroid (the centroid of a figure-eight is
+near its own crossing), so `dot(n, out)` in `nrm()`'s flip test is dividing by
+almost nothing - the sign it returns is numerical noise, and it comes out different sides
+of zero for two points a quarter of a cell apart. The coarser `ex` computation
+(`along` spanning a *whole* cell) is the same instability at a coarser scale - its
+`seat.normal` is the one that just flipped, and `along` itself is a wide secant straight
+across the same crossing.
+
+**Why this cannot simply be "fixed" to zero seams.** The Klein bottle is non-orientable -
+that is the entire content of the variant (its own description: *"a bishop that finally
+escapes its colour"* because no global two-colouring, equivalently no global consistent
+"outward", exists). A continuous outward-pointing normal field, walked all the way around
+the closed `u` loop, is mathematically guaranteed to come back reversed from where it
+started - this is not a bug to eliminate, it is the shape. The bug is only that the one
+unavoidable discontinuity a non-orientable field must have is landing **twice, in the
+middle of the board, at a numerically unstable point** instead of **once, at the board's
+own declared seam** - the file edge the variant already glues (`klein.toml`'s own
+`[[geometry.identify]] axis = "file"`), which is where a player already expects something
+to join up, not in the middle of a square.
+
+**Build.** Replace the per-point "test against the centroid" with a **continuity walk**:
+seed one known-good orientation, then choose each neighbouring sample's sign to agree with
+its neighbour rather than with a global reference. This is stable everywhere (it never
+divides by a near-zero quantity) and it places the one unavoidable flip exactly where the
+walk stops propagating - which can be chosen to be the file axis's own wrap, by simply
+*not* closing the loop.
+
+- **The fine field.** Build a `normals_` grid parallel to `corners_` (same
+  `cu = nx * kSubdiv + 1` by `cv = nz * kSubdiv + 1` indexing, `play_surface.cpp:140-148`).
+  For each rank row `j` in `[0, cv)`:
+  - Seed `i = 0` using today's test (`dot(normalAt(...), corner - axisAt[j]) `, flip if
+    negative) - this is stable at `i = 0` precisely when `i = 0` is not itself a pinch
+    (true for every `slideU` except the rare case the slide lands a pinch exactly on the
+    lattice's own file-0 edge, where seeding from `i = 1` instead is a safe fallback).
+  - For `i` from `1` to `cu - 1`: take the raw `normalAt(...)` at that corner, and keep its
+    sign if `dot(candidate, normals_[i-1][j]) >= 0`, else negate it. **Do not wrap `i = 0`
+    back to `i = cu - 1`** - that seam is where the one unavoidable flip is meant to land,
+    and it is already the board's own glued file edge.
+  - `nrm(u, vv)` becomes a bilinear lookup into `normals_` (the same four-corner
+    interpolation `axisRef` already does for one axis, extended to both) instead of a
+    fresh `normalAt` + centroid test - patch corners sample at `kCoverage`-inset points
+    that do not land exactly on grid lines, so this is an interpolation of already-
+    continuous values, not a re-derivation.
+  - The `inverted` flip (`play_surface.cpp:174`, the INVERT feature) still applies once,
+    uniformly, to every entry after the walk - it is a global swap keyed to the `evert`
+    parameter, not a spatial choice, and does not interact with this.
+- **The per-cell tangent.** Compute `ex` for every `(file, rank)` with the same walk, at
+  cell resolution, *before* populating `seats_`: for each rank, walk `f` from `0` to
+  `nx - 1`, seed `f = 0`'s `ex` as today (`normalize(flat)`, whatever sign that naturally
+  gives), and for `f >= 1` negate the candidate `ex` (and recompute
+  `ey = cross(normal, ex)` to match) when it disagrees in sign with the previous file's
+  `ex`. Store the result in a temporary `nx`-by-`nz` array and have the existing per-cell
+  loop (`play_surface.cpp:177-221`) read `ex`/`ey` from it instead of computing them
+  inline - the loop's own nesting and the order `seats_`/`patches_` are populated in does
+  not need to change, only where `ex` comes from.
+- Both walks are **independent per rank** (a `v`-row's own `u`-walk does not depend on any
+  other row), so this is no more expensive than today's per-sample work, done once instead
+  of redundantly at every patch corner.
+
+**Tests.** `tests/render/test_play_surface.cpp`:
+
+- For `klein`, across every pair of **adjacent fine samples within the same rank** -
+  i.e. `patch.normal[k]` and its immediate neighbour one `kSubdiv` step over, including
+  across a cell boundary (e.g. file 2's last corner and file 3's first corner at the same
+  rank) - assert `dot` of the two is positive and close to 1 (a few degrees of turn at
+  most, never the ~170 degree flips measured above). This directly fails today and must
+  pass after the fix; it is the test that would have caught this the way M17.13's
+  uniformity test would have caught the clamp bug.
+- The same adjacency check for `seat.quat`'s reconstructed `ex` across consecutive files
+  at a fixed rank.
+- **The one remaining discontinuity is exactly at the wrap**, not eliminated and not
+  moved: `dot` of file `nx - 1`'s last fine sample and file `0`'s first fine sample, at
+  the same rank, is allowed to be negative - assert this *can* happen (so a future change
+  that "fixes" it by closing the loop and reintroducing a mid-board flip is itself
+  caught), while every other adjacent pair in the same sweep is positive.
+- Re-run with `slideU` at a few values spanning more than one cell, to confirm the two
+  measured loci above are gone at every slide position, not just the ones probed by hand.
+- `torus`/`cylinder`/`mobius` are unaffected (they have no pinch - `klein` is the only
+  shape in the catalogue whose cross-section is a self-crossing curve) - the existing
+  continuity/frame tests for those three must keep passing unchanged.
+
+**Acceptance.** `chessbox_gui klein --geometry --shot k.ppm` at several `--slide` values
+shows one continuous shape at every value - no captured frame shows a lit/shaded band that
+reads as a second, differently-oriented object glued to the first. Dragging the middle
+button through a full slide shows the squares and the pieces on them turning smoothly;
+the Klein-specific comment in AGENTS.md about the crossing being "most of a right angle"
+off should be revisited once this lands, since the continuity walk is the fix that comment
+was asking for.
+
 ### Ordering
 
-M17.13 and M17.14 are regressions found while playing with the M17.12 first pass and
-should be fixed before anything else here - both make `torus3d`/`hyper4` unusable to judge
-and M17.14 affects every shaped variant, not just the new ones. M17.8 and M17.9 are one
-sitting each. M17.11 is a measurement and then a small fix. M17.7 and M17.10 are a button
-each plus one real piece of work (the outward side; a blended pipeline). M17.15 is the
-dependency the other two need - M17.16's camera has nothing honest to follow before a
-move actually travels, and M17.17 only matters once the camera is close enough to clip.
-Build them in that order: M17.15, then M17.16, then M17.17. [M17.12's remaining
-limits](M17.12-shapes-above-two-dimensions.md) (level/aeon adjacency, no slide/invert on
-the stacked shapes) are their own, larger step.
+M17.13, M17.14 and M17.18 are regressions/defects found while playing with what shipped
+and should be fixed before anything new is judged against them - M17.13 makes
+`torus3d`/`hyper4` unusable to look at, M17.14 affects every shaped variant, and M17.18 is
+specific to `klein` but makes it look broken rather than merely non-orientable. M17.8 and
+M17.9 are one sitting each. M17.11 is a measurement and then a small fix. M17.7 and M17.10
+are a button each plus one real piece of work (the outward side; a blended pipeline).
+M17.15 is the dependency M17.16 and M17.17 both need - M17.16's camera has nothing honest
+to follow before a move actually travels, and M17.17 only matters once the camera is close
+enough to clip. Build them in that order: M17.15, then M17.16, then M17.17. [M17.12's
+remaining limits](M17.12-shapes-above-two-dimensions.md) (level/aeon adjacency, no
+slide/invert on the stacked shapes) are their own, larger step.
 
 ---
 
@@ -1019,3 +1157,40 @@ for the limits (the level/aeon axes are not adjacent-in-the-drawing; slide/inver
 offered yet) and for the `t6` verdict: **a faithful playable quintic is impossible** - the
 6-torus projects ~10 lattice cells onto each drawn tile - so `t6` stays on the lattice, and
 a playable quintic, if wanted, must be a *sliced* view.
+
+---
+
+## Status: M17.13 - M17.17 built (2026-09-30)
+
+The second increment, in the plan's order.
+
+- **M17.13 - the D >= 3 shapes are no longer fish scales.** `PlaySurface::buildStacked`
+  took clamped file/rank neighbours, so a *periodic* `torus3d` axis returned every boundary
+  cell its own position and the frames scattered; a *bounded* `hyper4` boundary took a
+  halved one-sided step. The neighbour lookup now wraps a periodic axis and one-sides a
+  bounded boundary, independently per axis. Tests: `stepU` uniform within a `torus3d` shell;
+  a `hyper4` boundary cell no longer half the interior's.
+- **M17.14 - the camera reframes on a variant switch.** `geometryView` is sticky across
+  `Shell::startGame`, so a switch while it was on never reframed. The framing policy is now
+  `render::frameGeometryCamera`, called unconditionally on a variant load.
+- **M17.15 - a move on the shape animates.** `MoveAnimation::path()` exposes the route,
+  `view::pointAlong` is shared with the camera, and `render::surfaceMoveSample` drives the
+  travelling piece: a leap arcs outward, a glide walks the route's own seats, and a seam
+  step is not a cut because on the surface the seam is one place.
+- **M17.16 - the move camera follows on the shape.** `Session::cameraOver` runs the one
+  blend against any placement set; the geometry view passes
+  `surfacePlacements(PlaySurface::build(...))`. A click mid-shot is refused, as on the flat
+  board.
+- **M17.17 - ALIGN.** A facing search (`render::alignSlideU`, 16 slide candidates) picks the
+  offset that turns the followed cell most toward the camera; `Settings::geometryAlign` (an
+  `ALIGN` button, shown while following on a closed ring) eases a transient
+  `geometryAlignOffset` into the pose. `torus`/`klein` only - an open tube or ribbon has no
+  inner/outer side.
+
+Tests: the M17.13 uniformity/boundary cases, the M17.14 reframe-on-load case, the M17.15
+sampler (leap arc, glide visits, seam continuity) and a validation-clean in-flight render,
+the M17.16 `cameraOver` no-op and follow cases, and the M17.17 facing search. All in
+`tests/render/test_play_surface.cpp` and `tests/render/test_offscreen_render.cpp`.
+
+**Remaining:** M17.12's larger limits (level/aeon adjacency on the stacked shapes, and any
+sliced-`t6` view) and the M17.5 "no surface coordinates or seam rails yet" note.

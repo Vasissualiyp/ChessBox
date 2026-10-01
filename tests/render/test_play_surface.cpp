@@ -704,4 +704,44 @@ TEST_CASE("the move camera can follow on the shape", "[render]") {
   CHECK(dist(start, mid) > 0.05f);
 }
 
+TEST_CASE("align turns an inner-ring cell toward the camera", "[render]") {
+  // M17.17: a search over slide offsets that maximises the followed cell's `facing` -
+  // whether its outward normal points toward the camera. An open tube has no inner/outer
+  // side, so it returns 0.
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("torus"));
+  const PlaySurface rest = PlaySurface::build(v);
+  const view::OrbitCamera cam = view::OrbitCamera::frame(rest.bounds(), 1.3f, 0.0f);
+  const auto facingOf = [&](const PlaySurface& s, CellId c) {
+    for (const SurfaceSeat& seat : s.seats()) {
+      if (seat.cell != c) continue;
+      const view::Vec3 toCam = view::normalize(cam.eye() - seat.centre);
+      return view::dot(seat.normal, toCam);
+    }
+    return 0.0f;
+  };
+
+  // The cell facing most away from the camera at rest: the case the feature exists to
+  // fix.
+  CellId inner = kInvalidCell;
+  float worst = 0.0f;
+  for (const SurfaceSeat& seat : rest.seats()) {
+    const float f = facingOf(rest, seat.cell);
+    if (f < worst) {
+      worst = f;
+      inner = seat.cell;
+    }
+  }
+  REQUIRE(inner != kInvalidCell);
+  const float offset = alignSlideU(v, inner, cam);
+  SurfacePose pose;
+  pose.slideU = offset;
+  const PlaySurface turned = PlaySurface::build(v, pose);
+  CHECK(facingOf(turned, inner) > worst);
+  CHECK(facingOf(turned, inner) > 0.0f);
+
+  // An open tube/ribbon has nothing to align.
+  CHECK(alignSlideU(test::loadVariant("cylinder"), 0, cam) == 0.0f);
+  CHECK(alignSlideU(test::loadVariant("mobius"), 0, cam) == 0.0f);
+}
+
 #endif  // CB_HAVE_IMGUI

@@ -19,6 +19,7 @@
 #include "render/overture_scene.hpp"
 #include "render/piece_icon.hpp"
 #include "render/piece_mesh.hpp"
+#include "render/play_surface.hpp"
 #include "render/ui_widgets.hpp"
 
 namespace cb::render {
@@ -1241,6 +1242,18 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
         if (button("GHOST", t, px(84), ghost, true, true, display)) {
           shell.settings().geometryGhost = ghost ? 1.0f : 0.35f;
           request.settingsChanged = true;
+        }
+        // ALIGN (M17.17): turn the ring so the piece a followed move travels on presents
+        // its outer face to the camera. Offered only while following, and only on a
+        // closed ring - an open tube or ribbon has no inner/outer side to turn.
+        if (shell.settings().cameraMode != "off" &&
+            PlaySurface::slidesAlongRanks(session.variant())) {
+          ImGui::SameLine();
+          const bool aligned = shell.settings().geometryAlign;
+          if (button("ALIGN", t, px(84), aligned, true, true, display)) {
+            shell.settings().geometryAlign = !aligned;
+            request.settingsChanged = true;
+          }
         }
       }
     }

@@ -65,6 +65,13 @@ struct Settings {
   /// a ghost, so the far side of the shape and the pieces on it show through. The pieces
   /// stay opaque; the point is to see them (M17.10).
   float geometryGhost{1.0f};
+  /// Turn the ring so the piece a followed move travels on presents its outer face to the
+  /// camera, rather than the camera clipping through the tube wall to see it (M17.17).
+  bool geometryAlign{false};
+  /// The align feature's own eased slide offset, in cells, added on top of the player's
+  /// manual `geometrySlideU`. Transient: not written to disk, so a reload starts aligned
+  /// to nothing.
+  float geometryAlignOffset{0.0f};
   /// Which flat-piece icon set to draw: "faceted" or "primitive". A name rather than an
   /// enum because this layer is below the renderer, where the sets are defined, and a
   /// settings file should stay readable anyway.

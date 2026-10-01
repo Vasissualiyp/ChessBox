@@ -104,6 +104,8 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.geometryInvert = asBool(value);
     else if (key == "geometry_ghost")
       s.geometryGhost = asFloat(value, s.geometryGhost);
+    else if (key == "geometry_align")
+      s.geometryAlign = asBool(value);
     else if (key == "geometry_slide_u")
       s.geometrySlideU = asFloat(value, s.geometrySlideU);
     else if (key == "geometry_slide_v")
@@ -169,6 +171,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "geometry_evert = " << geometryEvert << '\n';
   out << "geometry_invert = " << boolText(geometryInvert) << '\n';
   out << "geometry_ghost = " << geometryGhost << '\n';
+  out << "geometry_align = " << boolText(geometryAlign) << '\n';
   out << "geometry_slide_u = " << geometrySlideU << '\n';
   out << "geometry_slide_v = " << geometrySlideV << '\n';
   out << "animate_moves = " << boolText(animateMoves) << '\n';
