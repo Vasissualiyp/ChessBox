@@ -27,6 +27,7 @@
 #include "render/image_io.hpp"
 #include "render/window.hpp"
 #ifdef CB_HAVE_IMGUI
+#include "render/play_surface.hpp"
 #include "render/ui.hpp"
 #endif
 
@@ -163,8 +164,55 @@ render::BoardOptions optionsFrom(const app::Settings& s) {
   o.showSeams = s.showSeams;
   o.pieceHeightScale = s.pieceHeightScale;
   o.flat = s.flatView;
+  o.surfaceSlideU = s.geometrySlideU;
+  o.surfaceSlideV = s.geometrySlideV;
+  o.surfaceEvert = s.geometryEvert;
   return o;
 }
+
+/// The board options for the shell's current variant: the geometry view is offered only
+/// where there is a surface to become, so `standard` and every non-glued board stay flat.
+render::BoardOptions optionsFor(const app::Shell& shell) {
+  render::BoardOptions o = optionsFrom(shell.settings());
+#ifdef CB_HAVE_IMGUI
+  const app::Session* session = shell.session();
+  o.surface = shell.settings().geometryView && session != nullptr &&
+              render::hasPlaySurface(session->variant());
+#else
+  (void)shell;
+#endif
+  return o;
+}
+
+#ifdef CB_HAVE_IMGUI
+/// How the geometry view's surface is posed right now.
+render::SurfacePose poseFrom(const app::Settings& s) {
+  render::SurfacePose pose;
+  pose.slideU = s.geometrySlideU;
+  pose.slideV = s.geometrySlideV;
+  pose.evert = s.geometryEvert;
+  return pose;
+}
+
+/// Put the camera round whatever the board has just become.
+///
+/// The shape and the flat board are different sizes and sit in different places, so a
+/// toggle that left the camera where it was left the board off in a corner of the
+/// window. The angle the player was looking from is kept: only the frame moves.
+void frameBoard(app::Shell& shell) {
+  app::Session* session = shell.session();
+  if (session == nullptr) return;
+  if (optionsFor(shell).surface) {
+    const render::PlaySurface surf =
+        render::PlaySurface::build(session->variant(), poseFrom(shell.settings()));
+    if (!surf.empty()) {
+      session->frameOn(surf.bounds());
+      return;
+    }
+  }
+  session->frameOn(view::boundsOf(session->placements()));
+}
+#endif
 
 /// Tell the renderer what the engine says just happened, so the board can show it.
 void syncMarks(render::BoardRenderer& renderer, const app::Session& session) {
@@ -195,8 +243,8 @@ void syncMarks(render::BoardRenderer& renderer, const app::Session& session) {
 int captureFrame(const std::string& variantName, const std::string& path,
                  const std::string& script, const std::string& screen, float overtureT,
                  int previewDims, bool clip, int clipFrames, float clipT0, float clipT1,
-                 bool cinema, const std::string& followMode, float moveT,
-                 int benchFrames) {
+                 bool cinema, const std::string& followMode, float moveT, int benchFrames,
+                 bool geometry, float evert, float slideU, float slideV) {
   // Captures use default settings, never the person's own. A screenshot that changes
   // because whoever ran it likes a larger interface is not a screenshot of the game -
   // and `ctest -R gui-` would then pass or fail by whose machine it ran on.
@@ -213,6 +261,15 @@ int captureFrame(const std::string& variantName, const std::string& path,
       return 1;
     }
   }
+  // A capture can state that it wants the play board as its own shape (M17), so the
+  // surface is reviewable the same way every other screen is.
+  if (geometry) shell->settings().geometryView = true;
+  shell->settings().geometryEvert = evert;
+  shell->settings().geometrySlideU = slideU;
+  shell->settings().geometrySlideV = slideV;
+#ifdef CB_HAVE_IMGUI
+  frameBoard(*shell);
+#endif
   if (screen == "menu")
     shell->go(app::Screen::MainMenu);
   else if (screen == "pause")
@@ -277,7 +334,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
     std::fprintf(stderr, "cannot set up the renderer\n");
     return 1;
   }
-  renderer->setOptions(optionsFrom(shell->settings()));
+  renderer->setOptions(optionsFor(*shell));
 
 #ifdef CB_HAVE_IMGUI
   auto ui = render::Ui::create(*ctx, window, renderer->theme());
@@ -324,6 +381,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
                                    static_cast<float>(target->height())}
                : uiRect;
     render::InstanceSet instances;
+    // The geometry view builds the warped board as ordinary instances, so the same
+    // render path draws it (M17); only the surface flag on the options selects it.
     if (shell->showsBoard()) {
       // A capture of a screen that sits over the board shows it exactly as a player
       // would see it - stepped back and out of focus - which is also what puts the blur
@@ -473,6 +532,10 @@ int main(int argc, char** argv) {
   float clipT1 = 1.0f;
   bool cinema = false;
   int benchFrames = 0;
+  bool geometry = false;
+  float evert = 0.0f;
+  float slideU = 0.0f;
+  float slideV = 0.0f;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "-h" || arg == "--help") {
@@ -480,6 +543,7 @@ int main(int argc, char** argv) {
           "chessbox_gui [variant] [--shot FILE [--screen NAME]] [--script TEXT]\n\n"
           "  left click    select a piece, then a lit cell to move it\n"
           "  right drag    orbit     wheel  zoom\n"
+          "  g             the board as its own shape; middle drag slides it round\n"
           "  Esc           pause     u  undo     r  reset\n\n"
           "With no variant, the game opens on the main menu.\n"
           "--shot renders one frame to a PPM and exits, with no display required;\n"
@@ -494,6 +558,9 @@ int main(int argc, char** argv) {
           "capture.\n"
           "--bench-frame N times N headless frames of the chosen screen and prints "
           "ms/frame.\n"
+          "--geometry draws the play board as its own shape (a cylinder, a torus, ...),\n"
+          "and --evert 0..1 turns that shape through itself - a torus inside out,\n"
+          "while --slide and --slide-v move the board round the shape, in cells.\n"
           "--dims 2..4 is how many dimensions the designer's move preview shows.\n");
       return 0;
     }
@@ -515,6 +582,14 @@ int main(int argc, char** argv) {
       clipFrames = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
     else if (arg == "--cinema")
       cinema = true;
+    else if (arg == "--geometry")
+      geometry = true;
+    else if (arg == "--evert" && i + 1 < argc)
+      evert = std::strtof(argv[++i], nullptr);
+    else if (arg == "--slide" && i + 1 < argc)
+      slideU = std::strtof(argv[++i], nullptr);
+    else if (arg == "--slide-v" && i + 1 < argc)
+      slideV = std::strtof(argv[++i], nullptr);
     else if (arg == "--follow" && i + 1 < argc)
       followMode = argv[++i];
     else if (arg == "--move-t" && i + 1 < argc)
@@ -531,7 +606,7 @@ int main(int argc, char** argv) {
     return captureFrame(variantName.empty() ? "standard" : variantName, targetPath,
                         script, screen, overtureT, previewDims, !clipDir.empty(),
                         clipFrames, clipT0, clipT1, cinema, followMode, moveT,
-                        benchFrames);
+                        benchFrames, geometry, evert, slideU, slideV);
   }
 
   auto shell = makeShell();
@@ -550,23 +625,17 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "cannot open a window: %s\n", window.error().format().c_str());
     return 1;
   }
-  auto renderer = render::BoardRenderer::create(window->context());
+  auto renderer = render::BoardRenderer::create(window->context(), window->colorFormat());
   if (!renderer.has_value()) {
     std::fprintf(stderr, "cannot create the renderer: %s\n",
                  renderer.error().format().c_str());
     return 1;
   }
-  auto target = render::OffscreenTarget::create(window->context(), window->width(),
-                                                window->height());
-  if (!target.has_value()) {
-    std::fprintf(stderr, "cannot create a render target: %s\n",
-                 target.error().format().c_str());
-    return 1;
-  }
-  renderer->setOptions(optionsFrom(shell->settings()));
+  renderer->setOptions(optionsFor(*shell));
 
 #ifdef CB_HAVE_IMGUI
-  auto ui = render::Ui::create(window->context(), window->handle(), renderer->theme());
+  auto ui = render::Ui::create(window->context(), window->handle(), renderer->theme(),
+                               window->colorFormat());
   if (!ui.has_value()) {
     std::fprintf(stderr, "cannot create the interface: %s\n",
                  ui.error().format().c_str());
@@ -593,6 +662,11 @@ int main(int argc, char** argv) {
   bool running = true;
   bool orbiting = false;
   bool panning = false;
+  /// Middle-dragging the board around its own surface, in the geometry view.
+  bool sliding = false;
+  /// Whether the board was its own shape last frame, so the camera can be put round
+  /// whatever it has just become.
+  bool wasSurface = false;
   auto lastFrame = std::chrono::steady_clock::now();
   float fps = 0.0f;
 
@@ -621,32 +695,71 @@ int main(int argc, char** argv) {
           const auto w = static_cast<std::uint32_t>(e.window.data1);
           const auto h = static_cast<std::uint32_t>(e.window.data2);
           if (w > 0 && h > 0) {
+            // The window rebuilds the swapchain and its per-image targets with it.
             (void)window->recreate(w, h);
-            auto fresh = render::OffscreenTarget::create(window->context(), w, h);
-            if (fresh.has_value()) target = std::move(*fresh);
           }
           break;
         }
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
           if (consumed || !inGame) break;
           if (e.button.button == SDL_BUTTON_LEFT) {
-            // Picking uses the same rectangle the board was drawn into, or a click
-            // would land on a different cell than the one under the cursor.
-            shell->session()->clickPixel(e.button.x - boardRect.x,
-                                         e.button.y - boardRect.y, boardRect.width,
-                                         boardRect.height);
+            bool handled = false;
+#ifdef CB_HAVE_IMGUI
+            const app::Session* session = shell->session();
+            if (optionsFor(*shell).surface && session != nullptr) {
+              // The geometry view: pick against the same surface the renderer drew,
+              // with the effective camera, so the click resolves to the cell under the
+              // cursor (M17.3). The ray is in the board rectangle's pixel space.
+              app::Action a;
+              a.kind = app::ActionKind::ClickCell;
+              a.cell = render::PlaySurface::build(session->variant(), poseFrom(settings))
+                           .pick(session->camera(), boardRect.width, boardRect.height,
+                                 e.button.x - boardRect.x, e.button.y - boardRect.y);
+              (void)shell->session()->apply(a);
+              handled = true;
+            }
+#endif
+            if (!handled) {
+              // Picking uses the same rectangle the board was drawn into, or a click
+              // would land on a different cell than the one under the cursor.
+              shell->session()->clickPixel(e.button.x - boardRect.x,
+                                           e.button.y - boardRect.y, boardRect.width,
+                                           boardRect.height);
+            }
           } else if (e.button.button == SDL_BUTTON_RIGHT) {
             orbiting = true;
           } else if (e.button.button == SDL_BUTTON_MIDDLE) {
-            panning = true;
+            // On the shape, the middle button slides the board *along* the surface rather
+            // than sliding the view about. Nothing is lost: the shape is framed and
+            // centred the moment the view is switched on, so there is nothing to pan to -
+            // and riding a1 round to b1, to c1, and eventually back to a1 is the one way
+            // to feel a gluing rather than be told about it.
+            if (inGame && optionsFor(*shell).surface) {
+              sliding = true;
+            } else {
+              panning = true;
+            }
           }
           break;
         case SDL_EVENT_MOUSE_BUTTON_UP:
           if (e.button.button == SDL_BUTTON_RIGHT) orbiting = false;
-          if (e.button.button == SDL_BUTTON_MIDDLE) panning = false;
+          if (e.button.button == SDL_BUTTON_MIDDLE) {
+            panning = false;
+            sliding = false;
+          }
           break;
         case SDL_EVENT_MOUSE_MOTION:
-          if (panning && shell->hasGame()) {
+          if (sliding && shell->hasGame()) {
+            // Drag the board round its own surface: left and right along the files, up
+            // and down along the ranks where the ranks are glued. Roughly a cell per
+            // seventy pixels, and the pose is a pure function of the number, so dragging
+            // back retraces it with nothing remembered between frames.
+            app::Settings& st = shell->settings();
+            st.geometrySlideU += e.motion.xrel * 0.014f;
+            if (render::PlaySurface::slidesAlongRanks(shell->session()->variant())) {
+              st.geometrySlideV += e.motion.yrel * 0.014f;
+            }
+          } else if (panning && shell->hasGame()) {
             // Drag the board with the middle button: slide the look-at point in the
             // camera plane, scaled so it tracks the pixels at any zoom.
             app::Action a;
@@ -711,6 +824,26 @@ int main(int argc, char** argv) {
                 shell->session()->setFlatView(st.flatView);
               }
               break;
+#ifdef CB_HAVE_IMGUI
+            case SDLK_G:
+              // Turn the board into its own shape (M17), without a trip to the rail.
+              // Only where there is a surface to become.
+              if (inGame && !twoPlayer &&
+                  render::hasPlaySurface(shell->session()->variant())) {
+                app::Settings& st = shell->settings();
+                st.geometryView = !st.geometryView;
+              }
+              break;
+            case SDLK_LEFTBRACKET:
+            case SDLK_RIGHTBRACKET:
+              // The turn, for a keyboard: the same pose the drag reaches, in steps.
+              if (inGame && !twoPlayer && optionsFor(*shell).surface) {
+                app::Settings& st = shell->settings();
+                const float step = e.key.key == SDLK_RIGHTBRACKET ? 0.05f : -0.05f;
+                st.geometryEvert = std::clamp(st.geometryEvert + step, 0.0f, 1.0f);
+              }
+              break;
+#endif
             default:
               break;
           }
@@ -756,6 +889,8 @@ int main(int argc, char** argv) {
       renderer->setBlur(std::min(steppedBack, 1.0f));
     }
 
+    // Set once the interface has built this frame: the surface view draws the board
+    // itself, so the ordinary renderer stays out of the way (M17).
 #ifdef CB_HAVE_IMGUI
     (*ui)->tick(dt);
     (*ui)->newFrame();
@@ -769,17 +904,32 @@ int main(int argc, char** argv) {
     // is only built on its own screen - so this cannot restart a running game by itself.
     if (!request.loadVariant.empty()) {
       (void)shell->startGame(request.loadVariant);
-      renderer->setOptions(optionsFrom(shell->settings()));
+      renderer->setOptions(optionsFor(*shell));
     }
     if (request.settingsChanged) {
       shell->applySettings();
-      renderer->setOptions(optionsFrom(shell->settings()));
+      renderer->setOptions(optionsFor(*shell));
       (*ui)->setIconStyle(render::iconStyleFromName(shell->settings().pieceIcons));
       const view::Theme theme = view::themeFromName(shell->settings().theme);
       renderer->setTheme(theme);
       (*ui)->setTheme(theme);
       (void)window->setVsync(shell->settings().vsync);
     }
+#ifdef CB_HAVE_IMGUI
+    // The board has just become its own shape, or gone back to being a diagram. Either
+    // way it is a different size in a different place, so the camera is put round it -
+    // once, on the change, and never while the player is turning it.
+    {
+      const bool nowSurface = optionsFor(*shell).surface;
+      if (nowSurface != wasSurface) {
+        renderer->setOptions(optionsFor(*shell));
+        frameBoard(*shell);
+        wasSurface = nowSurface;
+      } else if (nowSurface) {
+        renderer->setOptions(optionsFor(*shell));
+      }
+    }
+#endif
     if (request.toggleFullscreen) {
       SDL_SetWindowFullscreen(window->handle(), shell->settings().fullscreen);
     }
@@ -826,14 +976,31 @@ int main(int argc, char** argv) {
       (void)cmd;
 #endif
     };
-    if (auto ok = renderer->render(*target, instances, camera, overlay, boardRect);
-        !ok.has_value()) {
-      std::fprintf(stderr, "render failed: %s\n", ok.error().format().c_str());
+
+    // Acquire a swapchain image and record the whole frame straight into it (ADR-0018):
+    // no offscreen image, no blit. Two frames may be in flight, so the previous frame can
+    // still be on the GPU while this one is recorded. A frame that comes back invalid had
+    // the swapchain rebuilt under it; skipping one frame is cheap and correct.
+    auto frame = window->beginFrame();
+    if (!frame.has_value()) {
+      std::fprintf(stderr, "begin frame failed: %s\n", frame.error().format().c_str());
       break;
     }
-    if (auto ok = window->present(*target); !ok.has_value()) {
-      std::fprintf(stderr, "present failed: %s\n", ok.error().format().c_str());
-      break;
+    if (frame->valid()) {
+      if (auto ok = renderer->record(frame->commandBuffer, *frame->target, instances,
+                                     camera, overlay, boardRect, frame->slot);
+          !ok.has_value()) {
+        std::fprintf(stderr, "render failed: %s\n", ok.error().format().c_str());
+        break;
+      }
+      if (auto ok = window->submitFrame(*frame); !ok.has_value()) {
+        std::fprintf(stderr, "submit failed: %s\n", ok.error().format().c_str());
+        break;
+      }
+      if (auto ok = window->presentFrame(*frame); !ok.has_value()) {
+        std::fprintf(stderr, "present failed: %s\n", ok.error().format().c_str());
+        break;
+      }
     }
 
 #ifdef CB_HAVE_IMGUI

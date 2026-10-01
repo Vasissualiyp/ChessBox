@@ -9,6 +9,8 @@
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in float inHeight;   // 0 at the piece's foot, 1 at its crown
+layout(location = 11) in vec4 inVertColor;  // white on authored shapes; the geometry
+                                            // view's board is one mesh of many colours
 
 layout(location = 3) in vec3 instCenter;
 layout(location = 4) in vec3 instScale;
@@ -18,6 +20,7 @@ layout(location = 7) in float instEdgeMask;
 
 layout(location = 8) in float instRoll;     // rotation about the mesh's own Z, radians
 layout(location = 9) in float instMetal;    // 1 for a mirror face, shaded as metal
+layout(location = 10) in vec4 instQuat;     // full orientation (x,y,z,w); identity flat
 
 layout(push_constant) uniform Push {
     mat4 viewProj;
@@ -33,6 +36,12 @@ layout(location = 5) out float fragHeight;
 layout(location = 6) out vec2 fragEdgeInset;
 layout(location = 7) out float fragMetal;
 
+// Rotate a vector by a unit quaternion.
+vec3 rotateByQuat(vec3 v, vec4 q) {
+    const vec3 t = 2.0 * cross(q.xyz, v);
+    return v + q.w * t + cross(q.xyz, t);
+}
+
 void main() {
     // Spin the mesh in its own plane before scaling, so one quarter-round corner can be
     // turned into any of the four quadrants it is needed in.
@@ -40,13 +49,23 @@ void main() {
     const float sr = sin(instRoll);
     const vec2 spun = vec2(inPosition.x * cr - inPosition.y * sr,
                            inPosition.x * sr + inPosition.y * cr);
-    const vec3 local = vec3(spun, inPosition.z);
-    vec3 world = instCenter + local * instScale;
+    // Size it in its OWN frame, before it is turned. Scaling after the rotation scales
+    // the world axes instead of the mesh's, so on the geometry view - where every tile is
+    // turned onto the surface - a cell drawn to the size of its own square came out
+    // stretched along whichever way the world happened to point. The two orders agree
+    // exactly wherever the orientation is identity, which is the whole of the flat board.
+    vec3 local = vec3(spun, inPosition.z) * instScale;
+    // Then orient the whole mesh - the geometry view turns each tile onto the surface's
+    // own frame, so the board is built from real geometry the ordinary camera and depth
+    // buffer can see. Identity on a flat board.
+    vec3 world = instCenter + rotateByQuat(local, instQuat);
     gl_Position = push.viewProj * vec4(world, 1.0);
-    fragColor = instColor;
+    fragColor = instColor * inVertColor;
     const vec2 nspun = vec2(inNormal.x * cr - inNormal.y * sr,
                             inNormal.x * sr + inNormal.y * cr);
-    fragNormal = normalize(vec3(nspun, inNormal.z) / max(abs(instScale), vec3(1e-6)));
+    // The normal takes the inverse scale, in the same frame the scale was applied in.
+    fragNormal = normalize(rotateByQuat(
+        vec3(nspun, inNormal.z) / max(abs(instScale), vec3(1e-6)), instQuat));
     fragLocal = inPosition.xy;
     fragEdge = instEdge;
     fragEdgeMask = instEdgeMask;

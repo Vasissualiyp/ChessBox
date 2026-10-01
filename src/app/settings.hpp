@@ -40,6 +40,23 @@ struct Settings {
   /// draw than the models, and on a slow machine that is the difference between a game
   /// and a slideshow.
   bool flatView{false};
+  /// Draw the play board as the shape its geometry describes - a cylinder, a torus, a
+  /// Moebius band - instead of a square diagram (M17). A presentation choice, so it never
+  /// enters `VariantId`; offered only for a glued 2-D variant, which is the only geometry
+  /// with a surface to become.
+  bool geometryView{false};
+  /// Where the board sits on its own surface, in cells. Sliding one along the files puts
+  /// a1 where b1 was; keep going and the board comes all the way round, which on a
+  /// Moebius band takes two laps and arrives mirrored. It is the one way to feel a gluing
+  /// rather than be told about it.
+  float geometrySlideU{0.0f};
+  float geometrySlideV{0.0f};
+  /// How far the geometry view has been turned through itself, 0 to 1: a torus pulled
+  /// inside out through its own hole, a cylinder rolled back over itself like a sock.
+  ///
+  /// All three are a pose of the same board - the cells, the moves and the position are
+  /// untouched - and each is a pure function of its number, so a capture reproduces.
+  float geometryEvert{0.0f};
   /// Which flat-piece icon set to draw: "faceted" or "primitive". A name rather than an
   /// enum because this layer is below the renderer, where the sets are defined, and a
   /// settings file should stay readable anyway.

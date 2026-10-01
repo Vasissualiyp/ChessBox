@@ -91,6 +91,14 @@ bool button(const char* label, const view::Theme& theme, float width = 0.0f,
             bool primary = false, bool cold = false, bool enabled = true,
             ImFont* font = nullptr);
 
+/// A settings control that cycles its value on press. There are no drop-downs in the
+/// interface: a settings screen is a list of states, and hiding the states behind a
+/// second click makes the reader open a menu to learn what the options even are. The name
+/// is on the left and the current value on the right; pressing advances to the next
+/// value.
+bool cycleButton(const char* label, const std::string& value, const view::Theme& theme,
+                 float scale, float width = 0.0f);
+
 /// The height a `button` row draws at, so a layout can reserve room for one and the row
 /// is never the thing that gets clipped when the interface scale grows.
 [[nodiscard]] float controlHeight();

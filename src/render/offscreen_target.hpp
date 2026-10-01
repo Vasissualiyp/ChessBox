@@ -17,7 +17,17 @@ namespace cb::render {
 class OffscreenTarget {
  public:
   static Result<OffscreenTarget> create(const VulkanContext& ctx, std::uint32_t width,
-                                        std::uint32_t height);
+                                        std::uint32_t height,
+                                        VkFormat colorFormat = kColorFormat);
+
+  /// Wrap a colour image the caller owns - an acquired swapchain image - as a render
+  /// target. The multisample, scratch and depth attachments are allocated here; the
+  /// colour image, and its view, are the caller's. This is how the interactive path
+  /// draws straight into the swapchain with no blit (ADR-0018); readPixels is not valid
+  /// on a wrapped target, and is never called on one.
+  static Result<OffscreenTarget> wrapColor(const VulkanContext& ctx, VkImage color,
+                                           VkFormat colorFormat, std::uint32_t width,
+                                           std::uint32_t height);
 
   OffscreenTarget() = default;
   ~OffscreenTarget();
@@ -28,7 +38,7 @@ class OffscreenTarget {
 
   [[nodiscard]] std::uint32_t width() const noexcept { return width_; }
   [[nodiscard]] std::uint32_t height() const noexcept { return height_; }
-  [[nodiscard]] VkFormat colorFormat() const noexcept { return kColorFormat; }
+  [[nodiscard]] VkFormat colorFormat() const noexcept { return colorFormat_; }
   /// The resolved, one-sample colour image: the render target's depth/colour pass
   /// resolves into this, the blur reads it, and readPixels copies it out.
   [[nodiscard]] VkImageView colorView() const noexcept { return colorView_; }
@@ -69,11 +79,15 @@ class OffscreenTarget {
   [[nodiscard]] Result<std::vector<std::uint8_t>> readPixels() const;
 
  private:
-  Result<void> allocate(const VulkanContext& ctx);
+  Result<void> allocate(const VulkanContext& ctx, bool allocateColor);
 
   const VulkanContext* ctx_{nullptr};
   std::uint32_t width_{0};
   std::uint32_t height_{0};
+  VkFormat colorFormat_{kColorFormat};
+  /// False for a wrapped swapchain image: the colour image is the window's, so only the
+  /// view this target created is destroyed here.
+  bool ownsColor_{true};
   VkImage color_{VK_NULL_HANDLE};
   VkDeviceMemory colorMem_{VK_NULL_HANDLE};
   VkImageView colorView_{VK_NULL_HANDLE};

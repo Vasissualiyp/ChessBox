@@ -319,6 +319,16 @@ void Session::setBoardAspect(float aspect) {
   applyViewMode();
 }
 
+void Session::frameOn(const view::Bounds& b) {
+  const float yaw = camera_.yaw;
+  const float pitch = camera_.pitch;
+  camera_ = view::OrbitCamera::frame(b, boardAspect_);
+  camera_.yaw = yaw;
+  camera_.pitch = pitch;
+  framedOnce_ = true;
+  applyViewMode();
+}
+
 const Move* Session::findMove(CellId from, CellId to) const {
   const Move* best = nullptr;
   for (const Move& m : game_->legalMoves()) {

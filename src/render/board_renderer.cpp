@@ -6,6 +6,9 @@
 #include <map>
 
 #include "shaders.hpp"
+#ifdef CB_HAVE_IMGUI
+#include "render/play_surface.hpp"  // the board as its shape (M17)
+#endif
 
 namespace cb::render {
 namespace {
@@ -90,9 +93,11 @@ view::Vec3 BoardRenderer::cellHalfExtent() {
   return view::Vec3{0.46f, 0.46f, 0.055f};
 }
 
-Result<BoardRenderer> BoardRenderer::create(const VulkanContext& ctx) {
+Result<BoardRenderer> BoardRenderer::create(const VulkanContext& ctx,
+                                            VkFormat colorFormat) {
   BoardRenderer r;
   r.ctx_ = &ctx;
+  r.colorFormat_ = colorFormat;
   r.meshes_ = MeshLibrary::build();
   if (auto ok = r.buildPipeline(); !ok.has_value())
     return fail(ok.error().code, ok.error().message);
@@ -126,23 +131,25 @@ Result<void> BoardRenderer::buildPipeline() {
   const VkVertexInputBindingDescription bindings[2]{
       {0, sizeof(MeshVertex), VK_VERTEX_INPUT_RATE_VERTEX},
       {1, sizeof(Instance), VK_VERTEX_INPUT_RATE_INSTANCE}};
-  const VkVertexInputAttributeDescription attrs[10]{
+  const VkVertexInputAttributeDescription attrs[12]{
       {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, pos)},
       {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, normal)},
       {2, 0, VK_FORMAT_R32_SFLOAT, offsetof(MeshVertex, height)},
+      {11, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(MeshVertex, color)},
       {3, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Instance, center)},
       {4, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Instance, scale)},
       {5, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, color)},
       {6, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, edge)},
       {7, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, edgeMask)},
       {8, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, roll)},
-      {9, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, metal)}};
+      {9, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, metal)},
+      {10, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, quat)}};
 
   VkPipelineVertexInputStateCreateInfo vi{};
   vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
   vi.vertexBindingDescriptionCount = 2;
   vi.pVertexBindingDescriptions = bindings;
-  vi.vertexAttributeDescriptionCount = 10;
+  vi.vertexAttributeDescriptionCount = 12;
   vi.pVertexAttributeDescriptions = attrs;
 
   VkPipelineInputAssemblyStateCreateInfo ia{};
@@ -198,7 +205,7 @@ Result<void> BoardRenderer::buildPipeline() {
   stages[1].module = frag_;
   stages[1].pName = "main";
 
-  const VkFormat colorFormat = OffscreenTarget::kColorFormat;
+  const VkFormat colorFormat = colorFormat_;
   VkPipelineRenderingCreateInfo rendering{};
   rendering.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
   rendering.colorAttachmentCount = 1;
@@ -266,10 +273,11 @@ Result<void> BoardRenderer::buildBlurPipeline() {
     return fail(ErrorCode::Internal, "cannot create the blur set layout: " + describe(r));
   }
 
-  VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2};
+  VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                            2 * kFramesInFlight};
   VkDescriptorPoolCreateInfo dpci{};
   dpci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  dpci.maxSets = 2;
+  dpci.maxSets = 2 * kFramesInFlight;
   dpci.poolSizeCount = 1;
   dpci.pPoolSizes = &size;
   if (const VkResult r =
@@ -278,19 +286,24 @@ Result<void> BoardRenderer::buildBlurPipeline() {
     return fail(ErrorCode::Internal, "cannot create the blur pool: " + describe(r));
   }
 
-  const VkDescriptorSetLayout layouts[2]{blurSetLayout_, blurSetLayout_};
+  // Two sets per frame in flight: a frame that samples the colour image and one that
+  // samples the scratch, each rewritten only by its own slot.
+  std::array<VkDescriptorSetLayout, 2 * kFramesInFlight> layouts{};
+  layouts.fill(blurSetLayout_);
   VkDescriptorSetAllocateInfo dsai{};
   dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
   dsai.descriptorPool = blurPool_;
-  dsai.descriptorSetCount = 2;
-  dsai.pSetLayouts = layouts;
-  VkDescriptorSet sets[2]{};
-  if (const VkResult r = vkAllocateDescriptorSets(ctx_->device(), &dsai, sets);
+  dsai.descriptorSetCount = static_cast<std::uint32_t>(layouts.size());
+  dsai.pSetLayouts = layouts.data();
+  std::array<VkDescriptorSet, 2 * kFramesInFlight> sets{};
+  if (const VkResult r = vkAllocateDescriptorSets(ctx_->device(), &dsai, sets.data());
       r != VK_SUCCESS) {
     return fail(ErrorCode::Internal, "cannot allocate the blur sets: " + describe(r));
   }
-  blurFromColor_ = sets[0];
-  blurFromScratch_ = sets[1];
+  for (std::uint32_t f = 0; f < kFramesInFlight; ++f) {
+    blurFromColor_[f] = sets[2 * f];
+    blurFromScratch_[f] = sets[2 * f + 1];
+  }
 
   VkPushConstantRange push{};
   push.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -350,7 +363,7 @@ Result<void> BoardRenderer::buildBlurPipeline() {
   stages[1].module = blurFrag_;
   stages[1].pName = "main";
 
-  const VkFormat colorFormat = OffscreenTarget::kColorFormat;
+  const VkFormat colorFormat = colorFormat_;
   VkPipelineRenderingCreateInfo rendering{};
   rendering.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
   rendering.colorAttachmentCount = 1;
@@ -378,8 +391,9 @@ Result<void> BoardRenderer::buildBlurPipeline() {
   return {};
 }
 
-Result<void> BoardRenderer::bindBlurTarget(const OffscreenTarget& target) {
-  if (blurBoundColor_ == target.colorView()) return {};
+Result<void> BoardRenderer::bindBlurTarget(const OffscreenTarget& target,
+                                           std::uint32_t frame) {
+  if (blurBoundColor_[frame] == target.colorView()) return {};
 
   VkDescriptorImageInfo fromColor{blurSampler_, target.colorView(),
                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
@@ -388,15 +402,16 @@ Result<void> BoardRenderer::bindBlurTarget(const OffscreenTarget& target) {
   VkWriteDescriptorSet writes[2]{};
   for (int i = 0; i < 2; ++i) {
     writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[i].dstSet = i == 0 ? blurFromColor_ : blurFromScratch_;
+    writes[i].dstSet = i == 0 ? blurFromColor_[frame] : blurFromScratch_[frame];
     writes[i].descriptorCount = 1;
     writes[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     writes[i].pImageInfo = i == 0 ? &fromColor : &fromScratch;
   }
-  // The sets are rewritten only when the target itself was recreated - a window resize.
-  vkDeviceWaitIdle(ctx_->device());
+  // No device wait: the caller only records a frame after the slot's fence has signalled
+  // (or, on the synchronous path, after its own submit finished), so nothing can still be
+  // reading these sets.
   vkUpdateDescriptorSets(ctx_->device(), 2, writes, 0, nullptr);
-  blurBoundColor_ = target.colorView();
+  blurBoundColor_[frame] = target.colorView();
   return {};
 }
 
@@ -466,7 +481,7 @@ Result<void> BoardRenderer::buildBackdropPipeline() {
   stages[1].module = backdropFrag_;
   stages[1].pName = "main";
 
-  const VkFormat colorFormat = OffscreenTarget::kColorFormat;
+  const VkFormat colorFormat = colorFormat_;
   VkPipelineRenderingCreateInfo rendering{};
   rendering.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
   rendering.colorAttachmentCount = 1;
@@ -523,25 +538,62 @@ Result<void> BoardRenderer::uploadGeometry() {
   return {};
 }
 
-Result<void> BoardRenderer::ensureInstanceCapacity(std::size_t count) {
-  if (count <= instanceCapacity_) return {};
-  if (instanceBuffer_ != VK_NULL_HANDLE) {
+Result<void> BoardRenderer::ensureInstanceCapacity(std::uint32_t frame,
+                                                   std::size_t count) {
+  if (count <= instanceCapacity_[frame]) return {};
+  if (instanceBuffer_[frame] != VK_NULL_HANDLE) {
     vkDeviceWaitIdle(ctx_->device());
-    vkDestroyBuffer(ctx_->device(), instanceBuffer_, nullptr);
-    vkFreeMemory(ctx_->device(), instanceMem_, nullptr);
-    instanceBuffer_ = VK_NULL_HANDLE;
-    instanceMem_ = VK_NULL_HANDLE;
+    vkDestroyBuffer(ctx_->device(), instanceBuffer_[frame], nullptr);
+    vkFreeMemory(ctx_->device(), instanceMem_[frame], nullptr);
+    instanceBuffer_[frame] = VK_NULL_HANDLE;
+    instanceMem_[frame] = VK_NULL_HANDLE;
   }
   const std::size_t capacity = std::max<std::size_t>(count * 2, 4096);
   if (auto r = makeBuffer(
           *ctx_, capacity * sizeof(Instance), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-          instanceBuffer_, instanceMem_);
+          instanceBuffer_[frame], instanceMem_[frame]);
       !r.has_value()) {
     return r;
   }
-  instanceCapacity_ = capacity;
+  instanceCapacity_[frame] = capacity;
   return {};
+}
+
+Result<void> BoardRenderer::ensureSurfaceCapacity(std::uint32_t frame,
+                                                  std::size_t vertices,
+                                                  std::size_t indices) {
+  const auto grow = [&](std::size_t want, std::size_t unit, VkBufferUsageFlags usage,
+                        VkBuffer& buf, VkDeviceMemory& mem,
+                        std::size_t& cap) -> Result<void> {
+    if (want <= cap) return Result<void>{};
+    if (buf != VK_NULL_HANDLE) {
+      vkDeviceWaitIdle(ctx_->device());
+      vkDestroyBuffer(ctx_->device(), buf, nullptr);
+      vkFreeMemory(ctx_->device(), mem, nullptr);
+      buf = VK_NULL_HANDLE;
+      mem = VK_NULL_HANDLE;
+    }
+    const std::size_t capacity = std::max<std::size_t>(want * 2, 4096);
+    if (auto r = makeBuffer(
+            *ctx_, capacity * unit, usage,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            buf, mem);
+        !r.has_value()) {
+      return r;
+    }
+    cap = capacity;
+    return Result<void>{};
+  };
+  if (auto r = grow(vertices, sizeof(MeshVertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                    surfaceVertexBuffer_[frame], surfaceVertexMem_[frame],
+                    surfaceVertexCapacity_[frame]);
+      !r.has_value()) {
+    return r;
+  }
+  return grow(indices, sizeof(std::uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+              surfaceIndexBuffer_[frame], surfaceIndexMem_[frame],
+              surfaceIndexCapacity_[frame]);
 }
 
 InstanceSet BoardRenderer::buildInstances(
@@ -550,6 +602,195 @@ InstanceSet BoardRenderer::buildInstances(
     const std::function<bool(CellId)>& present,
     const std::vector<view::TimelineLink>& links) const {
   const VariantSpec& v = p.variant();
+#ifdef CB_HAVE_IMGUI
+  // The geometry view: the board *is* the surface. Each square is built as a patch of
+  // that surface - a curved quad with a little thickness, its corners the surface's own
+  // points - and the whole board goes down as one mesh with its colours in its vertices.
+  // Not instances: an instance is one shape repeated, and no two squares on a curved
+  // board are the same shape. The pieces stay instanced, because a piece *is* an object
+  // standing on the surface. `PlaySurface` owns every placement and the picker reads the
+  // same one, which is what makes a click land on the square under the cursor (M17).
+  if (options_.surface && hasPlaySurface(v)) {
+    InstanceSet out;
+    SurfacePose pose;
+    pose.slideU = options_.surfaceSlideU;
+    pose.slideV = options_.surfaceSlideV;
+    pose.evert = options_.surfaceEvert;
+    const PlaySurface surf = PlaySurface::build(v, pose);
+
+    std::vector<Archetype> shape(v.pieces.size(), Archetype::Tower);
+    std::vector<float> height(v.pieces.size(), 1.0f);
+    for (std::size_t i = 1; i < v.pieces.size(); ++i) {
+      shape[i] = archetypeFor(v.pieces[i]);
+      height[i] = heightFor(v.pieces[i]);
+    }
+    const auto highlighted = p.highlighted();
+    const auto isHighlighted = [&](CellId c) {
+      return std::find(highlighted.begin(), highlighted.end(), c) != highlighted.end();
+    };
+
+    // The square's colour comes from its lattice parity, exactly as on the flat board.
+    const auto fillFor = [&](CellId cell) {
+      const Coord co = v.dims.toCoord(cell);
+      view::Rgba fill =
+          ((co.c[0] + co.c[1]) % 2 == 0) ? theme_.boardDark : theme_.boardLight;
+      if (cell == p.selected()) return theme_.ember;
+      if (options_.showLegalMoves && isHighlighted(cell)) {
+        return p.at(cell).empty() ? mix(fill, theme_.moss, 0.72f)
+                                  : mix(fill, theme_.blood, 0.62f);
+      }
+      if (options_.showLastMove && (cell == lastFrom_ || cell == lastTo_)) {
+        return mix(fill, theme_.ember, 0.22f);
+      }
+      return fill;
+    };
+
+    constexpr int kSide = PlaySurface::kSubdiv + 1;
+    constexpr float kHalf = PlaySurface::kThickness * 0.5f;
+    const auto push = [&](const view::Vec3& at, const view::Vec3& n, float h,
+                          const float rgba[4]) {
+      MeshVertex mv{};
+      mv.pos[0] = at.x;
+      mv.pos[1] = at.y;
+      mv.pos[2] = at.z;
+      mv.normal[0] = n.x;
+      mv.normal[1] = n.y;
+      mv.normal[2] = n.z;
+      mv.height = h;
+      for (int c = 0; c < 4; ++c) mv.color[c] = rgba[c];
+      out.surfaceVertices.push_back(mv);
+      return static_cast<std::uint32_t>(out.surfaceVertices.size() - 1);
+    };
+    const auto quad = [&](std::uint32_t a, std::uint32_t b, std::uint32_t c,
+                          std::uint32_t d) {
+      for (const std::uint32_t i : {a, b, c, a, c, d}) out.surfaceIndices.push_back(i);
+    };
+
+    for (const SurfacePatch& patch : surf.patches()) {
+      const view::Rgba fill = fillFor(patch.cell);
+      float rgba[4]{};
+      toFloat4(fill, rgba);
+      // The square's sides and underside take the board's rim colour. Without that the
+      // gap between two squares shows the same tone as their faces and the line between
+      // them disappears - which on a curved board, where there is no shadow to help, is
+      // the difference between a chequerboard and a smooth grey ring.
+      float groove[4]{};
+      toFloat4(mix(fill, theme_.boardRim, 0.62f), groove);
+      const std::uint32_t base = static_cast<std::uint32_t>(out.surfaceVertices.size());
+      // The face a player looks at, then the same grid pushed in along its own normals.
+      // A square has thickness for the same reason the flat board's cells do: an edge you
+      // can see from a low angle is what makes the board an object rather than a stain.
+      for (int i = 0; i < kSide; ++i) {
+        for (int j = 0; j < kSide; ++j) {
+          const std::size_t k = static_cast<std::size_t>(i * kSide + j);
+          push(patch.pos[k] + patch.normal[k] * kHalf, patch.normal[k], 1.0f, rgba);
+        }
+      }
+      for (int i = 0; i < kSide; ++i) {
+        for (int j = 0; j < kSide; ++j) {
+          const std::size_t k = static_cast<std::size_t>(i * kSide + j);
+          push(patch.pos[k] - patch.normal[k] * kHalf,
+               view::Vec3{-patch.normal[k].x, -patch.normal[k].y, -patch.normal[k].z},
+               0.80f, groove);
+        }
+      }
+      const std::uint32_t backBase = base + kSide * kSide;
+      const auto top = [&](int i, int j) {
+        return base + static_cast<std::uint32_t>(i * kSide + j);
+      };
+      const auto bot = [&](int i, int j) {
+        return backBase + static_cast<std::uint32_t>(i * kSide + j);
+      };
+      for (int i = 0; i + 1 < kSide; ++i) {
+        for (int j = 0; j + 1 < kSide; ++j) {
+          quad(top(i, j), top(i + 1, j), top(i + 1, j + 1), top(i, j + 1));
+          quad(bot(i, j), bot(i, j + 1), bot(i + 1, j + 1), bot(i + 1, j));
+        }
+      }
+      // The rim, one band of quads round the patch's border. Its own vertices, so the
+      // edge stays a crease instead of smearing the face's shading round the corner.
+      const auto rim = [&](int i0, int j0, int i1, int j1) {
+        const std::size_t k0 = static_cast<std::size_t>(i0 * kSide + j0);
+        const std::size_t k1 = static_cast<std::size_t>(i1 * kSide + j1);
+        const view::Vec3 edge = patch.pos[k1] - patch.pos[k0];
+        const view::Vec3 side = view::cross(edge, patch.normal[k0]);
+        const view::Vec3 n =
+            view::length(side) > 1e-6f ? view::normalize(side) : patch.normal[k0];
+        const std::uint32_t a =
+            push(patch.pos[k0] + patch.normal[k0] * kHalf, n, 1.0f, groove);
+        const std::uint32_t b =
+            push(patch.pos[k1] + patch.normal[k1] * kHalf, n, 1.0f, groove);
+        const std::uint32_t c =
+            push(patch.pos[k1] - patch.normal[k1] * kHalf, n, 0.80f, groove);
+        const std::uint32_t d =
+            push(patch.pos[k0] - patch.normal[k0] * kHalf, n, 0.80f, groove);
+        quad(a, b, c, d);
+      };
+      for (int i = 0; i + 1 < kSide; ++i) {
+        rim(i, 0, i + 1, 0);
+        rim(i + 1, kSide - 1, i, kSide - 1);
+      }
+      for (int j = 0; j + 1 < kSide; ++j) {
+        rim(0, j + 1, 0, j);
+        rim(kSide - 1, j, kSide - 1, j + 1);
+      }
+    }
+
+    std::vector<std::vector<Instance>> byShape(
+        static_cast<std::size_t>(Archetype::Count));
+    for (const SurfaceSeat& seat : surf.seats()) {
+      const Piece piece = p.at(seat.cell);
+      if (piece.empty()) continue;
+      view::Rgba pc =
+          piece.colorOf() == Color::White ? theme_.whitePiece : theme_.blackPiece;
+      if (options_.showCheck && seat.cell == checkCell_)
+        pc = mix(pc, theme_.blood, 0.65f);
+      Instance body{};
+      // Standing on the square, not in it: the piece's foot is its own local z = 0.
+      body.center[0] = seat.centre.x + seat.normal.x * kHalf;
+      body.center[1] = seat.centre.y + seat.normal.y * kHalf;
+      body.center[2] = seat.centre.z + seat.normal.z * kHalf;
+      const float hgt = 1.0f + (height[piece.type] - 1.0f) * options_.pieceHeightScale;
+      // Never bigger than the flat board's piece, and smaller where the square is. The
+      // measure is the square's mean side rather than its shorter one: an embedding
+      // squeezes one axis and stretches the other - a Moebius square is four times longer
+      // than it is wide - and a piece sized to the short side there is a speck.
+      const float fit = std::min(std::sqrt(seat.stepU * seat.stepV), 1.0f);
+      body.scale[0] = 0.8f * fit;
+      body.scale[1] = 0.8f * fit;
+      body.scale[2] = 0.8f * fit * hgt;
+      body.quat[0] = seat.quat[0];
+      body.quat[1] = seat.quat[1];
+      body.quat[2] = seat.quat[2];
+      body.quat[3] = seat.quat[3];
+      toFloat4(pc, body.color);
+      byShape[static_cast<std::size_t>(shape[piece.type])].push_back(body);
+    }
+    (void)anim;  // the warped route is M17's remaining piece; a mover shows at its seat
+
+    std::size_t total = 0;
+    for (const auto& group : byShape) total += group.size();
+    out.instances.reserve(total + 1);
+    for (std::size_t sh = 0; sh < byShape.size(); ++sh) {
+      out.batches[sh].first = static_cast<std::uint32_t>(out.instances.size());
+      out.batches[sh].count = static_cast<std::uint32_t>(byShape[sh].size());
+      out.instances.insert(out.instances.end(), byShape[sh].begin(), byShape[sh].end());
+    }
+    // The board mesh is already in world space and already coloured, so its instance is
+    // the identity: no offset, unit scale, white, and no seam band.
+    Instance identity{};
+    identity.scale[0] = 1.0f;
+    identity.scale[1] = 1.0f;
+    identity.scale[2] = 1.0f;
+    identity.color[0] = 1.0f;
+    identity.color[1] = 1.0f;
+    identity.color[2] = 1.0f;
+    identity.color[3] = 1.0f;
+    out.surfaceInstance = static_cast<std::uint32_t>(out.instances.size());
+    out.instances.push_back(identity);
+    return out;
+  }
+#endif
   auto placements = view::layout(v.dims, cfg);
   // A temporal variant's lattice is mostly boards that do not exist yet; `visible` says
   // which are real, so the opening board is one board rather than a grid of empty ones.
@@ -1015,16 +1256,78 @@ Result<void> BoardRenderer::render(const OffscreenTarget& target, const Instance
                                    const view::OrbitCamera& camera,
                                    const std::function<void(VkCommandBuffer)>& overlay,
                                    BoardRect boardRect) {
-  if (auto r = ensureInstanceCapacity(set.instances.size()); !r.has_value()) return r;
+  // The synchronous path runs on frame slot 0: it submits and waits, so there is never a
+  // second frame overlapping it.
+  Result<void> outcome{};
+  const auto submitted = ctx_->submitAndWait([&](VkCommandBuffer cmd) {
+    if (auto r = record(cmd, target, set, camera, overlay, boardRect, 0);
+        !r.has_value()) {
+      outcome = fail(r.error().code, r.error().message);
+      return;
+    }
+    // Leave the colour image where readPixels and the window's blit expect it.
+    const auto barrier = [&](VkImage image, VkImageLayout from, VkImageLayout to,
+                             VkPipelineStageFlags2 srcStage, VkAccessFlags2 srcAccess,
+                             VkPipelineStageFlags2 dstStage, VkAccessFlags2 dstAccess) {
+      VkImageMemoryBarrier2 b{};
+      b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+      b.srcStageMask = srcStage;
+      b.srcAccessMask = srcAccess;
+      b.dstStageMask = dstStage;
+      b.dstAccessMask = dstAccess;
+      b.oldLayout = from;
+      b.newLayout = to;
+      b.image = image;
+      b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+      VkDependencyInfo dep{};
+      dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+      dep.imageMemoryBarrierCount = 1;
+      dep.pImageMemoryBarriers = &b;
+      vkCmdPipelineBarrier2(cmd, &dep);
+    };
+    barrier(target.colorImage(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            VK_ACCESS_2_TRANSFER_READ_BIT);
+  });
+  if (!submitted.has_value()) return submitted;
+  return outcome;
+}
+
+Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& target,
+                                   const InstanceSet& set,
+                                   const view::OrbitCamera& camera,
+                                   const std::function<void(VkCommandBuffer)>& overlay,
+                                   BoardRect boardRect, std::uint32_t frame) {
+  if (auto r = ensureInstanceCapacity(frame, set.instances.size()); !r.has_value())
+    return r;
   if (!set.instances.empty()) {
     void* mapped = nullptr;
-    vkMapMemory(ctx_->device(), instanceMem_, 0, set.instances.size() * sizeof(Instance),
-                0, &mapped);
+    vkMapMemory(ctx_->device(), instanceMem_[frame], 0,
+                set.instances.size() * sizeof(Instance), 0, &mapped);
     std::memcpy(mapped, set.instances.data(), set.instances.size() * sizeof(Instance));
-    vkUnmapMemory(ctx_->device(), instanceMem_);
+    vkUnmapMemory(ctx_->device(), instanceMem_[frame]);
   }
 
-  if (auto r = bindBlurTarget(target); !r.has_value()) return r;
+  if (auto r = ensureSurfaceCapacity(frame, set.surfaceVertices.size(),
+                                     set.surfaceIndices.size());
+      !r.has_value()) {
+    return r;
+  }
+  if (!set.surfaceIndices.empty()) {
+    void* mapped = nullptr;
+    const std::size_t vbytes = set.surfaceVertices.size() * sizeof(MeshVertex);
+    vkMapMemory(ctx_->device(), surfaceVertexMem_[frame], 0, vbytes, 0, &mapped);
+    std::memcpy(mapped, set.surfaceVertices.data(), vbytes);
+    vkUnmapMemory(ctx_->device(), surfaceVertexMem_[frame]);
+    const std::size_t ibytes = set.surfaceIndices.size() * sizeof(std::uint32_t);
+    vkMapMemory(ctx_->device(), surfaceIndexMem_[frame], 0, ibytes, 0, &mapped);
+    std::memcpy(mapped, set.surfaceIndices.data(), ibytes);
+    vkUnmapMemory(ctx_->device(), surfaceIndexMem_[frame]);
+  }
+
+  if (auto r = bindBlurTarget(target, frame); !r.has_value()) return r;
 
   const BoardRect board = boardRect.valid()
                               ? boardRect
@@ -1033,7 +1336,7 @@ Result<void> BoardRenderer::render(const OffscreenTarget& target, const Instance
   PushConstants push{};
   push.viewProj = camera.viewProj(board.width / board.height);
 
-  return ctx_->submitAndWait([&](VkCommandBuffer cmd) {
+  {
     const auto barrier = [&](VkImage image, VkImageAspectFlags aspectMask,
                              VkImageLayout from, VkImageLayout to,
                              VkPipelineStageFlags2 srcStage, VkAccessFlags2 srcAccess,
@@ -1122,7 +1425,7 @@ Result<void> BoardRenderer::render(const OffscreenTarget& target, const Instance
                          sizeof(PushConstants), &push);
       const VkDeviceSize zero = 0;
       vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer_, &zero);
-      vkCmdBindVertexBuffers(cmd, 1, 1, &instanceBuffer_, &zero);
+      vkCmdBindVertexBuffers(cmd, 1, 1, &instanceBuffer_[frame], &zero);
       vkCmdBindIndexBuffer(cmd, indexBuffer_, 0, VK_INDEX_TYPE_UINT16);
       // One draw per shape, not per piece: eight calls for any board of any size.
       for (std::size_t s = 0; s < set.batches.size(); ++s) {
@@ -1131,6 +1434,14 @@ Result<void> BoardRenderer::render(const OffscreenTarget& target, const Instance
         const MeshRange& range = meshes_.ranges[s];
         vkCmdDrawIndexed(cmd, range.indexCount, batch.count, range.firstIndex,
                          range.vertexOffset, batch.first);
+      }
+      // And one more for the geometry view's board, which is a mesh rather than a shape
+      // repeated: the same pipeline, a different vertex buffer, one identity instance.
+      if (!set.surfaceIndices.empty()) {
+        vkCmdBindVertexBuffers(cmd, 0, 1, &surfaceVertexBuffer_[frame], &zero);
+        vkCmdBindIndexBuffer(cmd, surfaceIndexBuffer_[frame], 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(cmd, static_cast<std::uint32_t>(set.surfaceIndices.size()), 1, 0,
+                         0, set.surfaceInstance);
       }
     }
     vkCmdEndRendering(cmd);
@@ -1196,7 +1507,7 @@ Result<void> BoardRenderer::render(const OffscreenTarget& target, const Instance
               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
       const float radius = 2.6f;
-      blurPass(target.scratchView(), blurFromColor_,
+      blurPass(target.scratchView(), blurFromColor_[frame],
                radius / static_cast<float>(target.width()), 0.0f);
 
       // And down, back into the image everything else expects to find the frame in.
@@ -1214,7 +1525,7 @@ Result<void> BoardRenderer::render(const OffscreenTarget& target, const Instance
               VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-      blurPass(target.colorView(), blurFromScratch_, 0.0f,
+      blurPass(target.colorView(), blurFromScratch_[frame], 0.0f,
                radius / static_cast<float>(target.height()));
     }
 
@@ -1239,14 +1550,8 @@ Result<void> BoardRenderer::render(const OffscreenTarget& target, const Instance
       overlay(cmd);
       vkCmdEndRendering(cmd);
     }
-
-    barrier(target.colorImage(), VK_IMAGE_ASPECT_COLOR_BIT,
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            VK_ACCESS_2_TRANSFER_READ_BIT);
-  });
+  }
+  return {};
 }
 
 Result<Image> BoardRenderer::renderToImage(const OffscreenTarget& target,
@@ -1269,6 +1574,7 @@ Result<Image> BoardRenderer::renderToImage(const OffscreenTarget& target,
 BoardRenderer& BoardRenderer::operator=(BoardRenderer&& o) noexcept {
   if (this == &o) return *this;
   std::swap(ctx_, o.ctx_);
+  std::swap(colorFormat_, o.colorFormat_);
   std::swap(theme_, o.theme_);
   std::swap(meshes_, o.meshes_);
   std::swap(lastFrom_, o.lastFrom_);
@@ -1300,6 +1606,12 @@ BoardRenderer& BoardRenderer::operator=(BoardRenderer&& o) noexcept {
   std::swap(instanceBuffer_, o.instanceBuffer_);
   std::swap(instanceMem_, o.instanceMem_);
   std::swap(instanceCapacity_, o.instanceCapacity_);
+  std::swap(surfaceVertexBuffer_, o.surfaceVertexBuffer_);
+  std::swap(surfaceVertexMem_, o.surfaceVertexMem_);
+  std::swap(surfaceVertexCapacity_, o.surfaceVertexCapacity_);
+  std::swap(surfaceIndexBuffer_, o.surfaceIndexBuffer_);
+  std::swap(surfaceIndexMem_, o.surfaceIndexMem_);
+  std::swap(surfaceIndexCapacity_, o.surfaceIndexCapacity_);
   return *this;
 }
 
@@ -1324,11 +1636,16 @@ BoardRenderer::~BoardRenderer() {
   if (backdropFrag_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, backdropFrag_, nullptr);
   if (vert_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, vert_, nullptr);
   if (frag_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, frag_, nullptr);
-  for (auto [buf, mem] :
-       {std::pair{vertexBuffer_, vertexMem_}, std::pair{indexBuffer_, indexMem_},
-        std::pair{instanceBuffer_, instanceMem_}}) {
+  const auto destroyBuffer = [&](VkBuffer buf, VkDeviceMemory mem) {
     if (buf != VK_NULL_HANDLE) vkDestroyBuffer(d, buf, nullptr);
     if (mem != VK_NULL_HANDLE) vkFreeMemory(d, mem, nullptr);
+  };
+  destroyBuffer(vertexBuffer_, vertexMem_);
+  destroyBuffer(indexBuffer_, indexMem_);
+  for (std::uint32_t f = 0; f < kFramesInFlight; ++f) {
+    destroyBuffer(instanceBuffer_[f], instanceMem_[f]);
+    destroyBuffer(surfaceVertexBuffer_[f], surfaceVertexMem_[f]);
+    destroyBuffer(surfaceIndexBuffer_[f], surfaceIndexMem_[f]);
   }
 }
 

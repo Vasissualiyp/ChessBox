@@ -149,7 +149,7 @@ void drawPieceGlyph(ImDrawList* dl, ImVec2 c, float r, ImU32 col, ImU32 behind,
 }  // namespace
 
 Result<std::unique_ptr<Ui>> Ui::create(const VulkanContext& ctx, SDL_Window* window,
-                                       const view::Theme& theme) {
+                                       const view::Theme& theme, VkFormat colorFormat) {
   auto ui = std::unique_ptr<Ui>(new Ui());
   ui->ctx_ = &ctx;
   ui->window_ = window;
@@ -187,11 +187,11 @@ Result<std::unique_ptr<Ui>> Ui::create(const VulkanContext& ctx, SDL_Window* win
     return fail(ErrorCode::Unsupported, "cannot attach the interface to the window");
   }
 
-  const VkFormat colorFormat = OffscreenTarget::kColorFormat;
+  const VkFormat targetFormat = colorFormat;
   VkPipelineRenderingCreateInfo rendering{};
   rendering.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
   rendering.colorAttachmentCount = 1;
-  rendering.pColorAttachmentFormats = &colorFormat;
+  rendering.pColorAttachmentFormats = &targetFormat;
   rendering.depthAttachmentFormat = OffscreenTarget::kDepthFormat;
 
   ImGui_ImplVulkan_InitInfo info{};
@@ -358,6 +358,17 @@ bool Ui::capturesMouse() const {
 }
 bool Ui::capturesKeyboard() const {
   return ImGui::GetIO().WantCaptureKeyboard;
+}
+
+void Ui::setTheme(const view::Theme& t) noexcept {
+  theme_ = t;
+  // ImGui's own text, panel and border colours are copied out of the theme in
+  // `applyStyle`, so a palette change has to re-run it. Without this the old theme's
+  // colours stay behind - manifold's dark type on console's dark page, which is where a
+  // retheme "not applying" was first noticed.
+  applyStyle();
+  // The cached scene has the old theme's seam and event colours baked into it.
+  overtureCacheValid_ = false;
 }
 
 void Ui::tick(float dt) {
@@ -957,26 +968,53 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   request.boardRect[2] = vp->Size.x;
   request.boardRect[3] = vp->Size.y;
 
-  // File and rank labels on a flat board's near edges, when the setting asks. Projected
-  // through the same camera the board is drawn with, so a label sits on its cell.
-  if (shell.settings().showCoordinates && v.dims.dims() == 2) {
+  // File and rank labels, on the board's near edges rather than on its cells: a label
+  // *inside* the edge cell is covered by whatever stands there and reads as graffiti on
+  // the board. Projected through the same camera the board is drawn with, extrapolated
+  // one cell outward from the edge, in the machine face so a coordinate reads as a
+  // measurement. The geometry view is skipped: it has its own shape and offers no flat
+  // edge to label.
+  const bool surfaceView =
+      shell.settings().geometryView && hasPlaySurface(session.variant());
+  if (shell.settings().showCoordinates && v.dims.dims() == 2 && !surfaceView) {
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
     const view::OrbitCamera cam = session.camera();
     const float w = vp->Size.x;
     const float h = vp->Size.y;
+    auto* mono = static_cast<ImFont*>(fontMono_ != nullptr ? fontMono_ : fontBody_);
+    const float size = mono != nullptr ? mono->FontSize * 0.92f : ImGui::GetFontSize();
+    std::vector<view::OrbitCamera::ScreenPoint> screenOf(session.snapshot().cellCount());
     for (const view::Placement& pl : session.placements()) {
-      const Coord co = v.dims.toCoord(pl.cell);
-      const view::OrbitCamera::ScreenPoint sp =
-          cam.project(view::Vec3{pl.x, pl.y, pl.z}, w / h, w, h);
-      if (!sp.visible) continue;
-      if (co.c[1] == 0) {
-        const std::string file(1, static_cast<char>('a' + co.c[0]));
-        dl->AddText(ImVec2(sp.x - px(4), sp.y + px(9)), u32(t.boneFaint), file.c_str());
+      screenOf[pl.cell] = cam.project(view::Vec3{pl.x, pl.y, pl.z}, w / h, w, h);
+    }
+    const auto drawLabel = [&](const std::string& text,
+                               const view::OrbitCamera::ScreenPoint& at,
+                               const view::OrbitCamera::ScreenPoint& inward) {
+      if (!at.visible || !inward.visible) return;
+      // One cell further out than the edge cell, so the label clears the board.
+      const float ox = at.x + (at.x - inward.x) * 0.65f;
+      const float oy = at.y + (at.y - inward.y) * 0.65f;
+      const ImVec2 sz = mono != nullptr
+                            ? mono->CalcTextSizeA(size, FLT_MAX, 0.0f, text.c_str())
+                            : ImGui::CalcTextSize(text.c_str());
+      const ImVec2 pos(ox - sz.x * 0.5f, oy - sz.y * 0.5f);
+      if (mono != nullptr) {
+        dl->AddText(mono, size, pos, u32(t.boneDim), text.c_str());
+      } else {
+        dl->AddText(pos, u32(t.boneDim), text.c_str());
       }
-      if (co.c[0] == 0) {
-        const std::string rank = std::to_string(co.c[1] + 1);
-        dl->AddText(ImVec2(sp.x - px(12), sp.y - px(5)), u32(t.boneFaint), rank.c_str());
-      }
+    };
+    const int nx = static_cast<int>(v.dims.extent(0));
+    const int nz = static_cast<int>(v.dims.extent(1));
+    for (int f = 0; f < nx && nz > 1; ++f) {
+      const CellId edge = v.dims.toCell(Coord::of({f, 0}));
+      const CellId in = v.dims.toCell(Coord::of({f, 1}));
+      drawLabel(std::string(1, static_cast<char>('a' + f)), screenOf[edge], screenOf[in]);
+    }
+    for (int r = 0; r < nz && nx > 1; ++r) {
+      const CellId edge = v.dims.toCell(Coord::of({0, r}));
+      const CellId in = v.dims.toCell(Coord::of({1, r}));
+      drawLabel(std::to_string(r + 1), screenOf[edge], screenOf[in]);
     }
   }
 
@@ -1176,6 +1214,17 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       shell.settings().flatView = flat;
       request.settingsChanged = true;
     }
+    // Turn the board into the shape its geometry describes (M17). Offered only where
+    // there is a surface to become: a glued two-dimensional variant names one, and
+    // nothing else does - so `standard` never shows a control that could not act.
+    if (hasPlaySurface(session.variant())) {
+      ImGui::SameLine();
+      const bool on = shell.settings().geometryView;
+      if (button("SHAPE", t, px(84), on, true, true, display)) {
+        shell.settings().geometryView = !on;
+        request.settingsChanged = true;
+      }
+    }
     ImGui::SameLine();
     if (button("MENU", t, px(78), false, false, true, display)) shell.pause();
 
@@ -1196,8 +1245,12 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       ImGui::TextUnformatted(line.c_str());
     } else if (game.plyCount() == 0) {
       // Only while it is still useful; a permanent instruction line is clutter.
+      // On the shape the seams need no explaining - they are the shape - so the line
+      // spends itself on the one control nothing else hints at.
       ImGui::TextUnformatted(
-          v.geom.isBox()
+          surfaceView ? "middle-drag to slide the board round its shape   -   "
+                        "right-drag to orbit"
+          : v.geom.isBox()
               ? "click a piece, then a lit cell   -   right-drag to orbit"
               : "cyan edges are joined to each other   -   right-drag to orbit");
     } else if (!session.message().empty()) {
@@ -1294,8 +1347,9 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   // A flat board's pieces are drawn here rather than by the renderer: a circle token and
   // the piece's own icon, in screen space, which is also what lets the token follow the
   // move animation exactly. The background draw list puts them over the board but under
-  // the panels, so a pause menu covers them rather than the other way round.
-  if (session.flatView()) {
+  // the panels, so a pause menu covers them rather than the other way round. The geometry
+  // view draws its own pieces, so this stays out of the way there.
+  if (session.flatView() && !surfaceView) {
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
     // These are drawn after the board, and therefore after the defocus pass. Fading them
     // out as the board goes soft is what stops a paused board showing sharp pieces

@@ -18,6 +18,9 @@
 #include "render/board_renderer.hpp"
 #include "render/offscreen_target.hpp"
 #include "render/vulkan_context.hpp"
+#ifdef CB_HAVE_IMGUI
+#include "render/overture_scene.hpp"  // derivedSurfaceAt, for the geometry view (M17)
+#endif
 #include "support/variants.hpp"
 #include "view/theme.hpp"
 
@@ -431,5 +434,164 @@ TEST_CASE("a board renders a picture, not a fill", "[render][gpu]") {
     }
   }
 }
+
+TEST_CASE("the renderer draws straight into an image it does not own", "[render][gpu]") {
+  // The interactive path no longer renders offscreen and blits: it draws into the
+  // acquired swapchain image, whose colour-attachment, sampled and transfer-source usages
+  // this image imitates. Without a window this is the closest a test can get to it
+  // (ADR-0018); only `vkAcquireNextImageKHR` / `vkQueuePresentKHR` themselves go
+  // unexercised. The async `record` path is driven here, including both frame slots, so
+  // the per-frame instance buffer and blur descriptors are covered too.
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+
+  constexpr std::uint32_t w = 256;
+  constexpr std::uint32_t h = 192;
+
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("torus"));
+  const Position p = Position::startPosition(v);
+  const view::PositionView snap = view::PositionView::capture(p);
+  const view::ViewConfig cfg = view::ViewConfig::forBoard(v.dims);
+  const view::OrbitCamera cam =
+      view::OrbitCamera::frame(view::boundsOf(view::layout(v.dims, cfg)));
+  const InstanceSet set = BoardRenderer{}.buildInstances(snap, cfg);
+
+  VkImageCreateInfo ici{};
+  ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  ici.imageType = VK_IMAGE_TYPE_2D;
+  ici.format = OffscreenTarget::kColorFormat;
+  ici.extent = {w, h, 1};
+  ici.mipLevels = 1;
+  ici.arrayLayers = 1;
+  ici.samples = VK_SAMPLE_COUNT_1_BIT;
+  ici.tiling = VK_IMAGE_TILING_OPTIMAL;
+  ici.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+              VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  VkImage image = VK_NULL_HANDLE;
+  REQUIRE(vkCreateImage(gpu().ctx.device(), &ici, nullptr, &image) == VK_SUCCESS);
+  VkMemoryRequirements req{};
+  vkGetImageMemoryRequirements(gpu().ctx.device(), image, &req);
+  const auto type =
+      gpu().ctx.findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  REQUIRE(type.has_value());
+  VkMemoryAllocateInfo mai{};
+  mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  mai.allocationSize = req.size;
+  mai.memoryTypeIndex = *type;
+  VkDeviceMemory mem = VK_NULL_HANDLE;
+  REQUIRE(vkAllocateMemory(gpu().ctx.device(), &mai, nullptr, &mem) == VK_SUCCESS);
+  REQUIRE(vkBindImageMemory(gpu().ctx.device(), image, mem, 0) == VK_SUCCESS);
+
+  auto target =
+      OffscreenTarget::wrapColor(gpu().ctx, image, OffscreenTarget::kColorFormat, w, h);
+  REQUIRE(target.has_value());
+  CHECK(target->width() == w);
+  CHECK(target->colorFormat() == OffscreenTarget::kColorFormat);
+
+  auto renderer = BoardRenderer::create(gpu().ctx, OffscreenTarget::kColorFormat);
+  REQUIRE(renderer.has_value());
+
+  (void)gpu().ctx.takeValidationMessages();
+  std::vector<std::uint8_t> first;
+  for (std::uint32_t frame = 0; frame < BoardRenderer::kFramesInFlight; ++frame) {
+    VkCommandBufferAllocateInfo ai{};
+    ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    ai.commandPool = gpu().ctx.commandPool();
+    ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ai.commandBufferCount = 1;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    REQUIRE(vkAllocateCommandBuffers(gpu().ctx.device(), &ai, &cmd) == VK_SUCCESS);
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &bi);
+
+    REQUIRE(renderer->record(cmd, *target, set, cam, {}, {}, frame).has_value());
+
+    // The renderer leaves the image a colour attachment; the test wants it readable.
+    VkImageMemoryBarrier2 b{};
+    b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    b.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    b.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    b.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    b.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+    b.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    b.image = image;
+    b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    VkDependencyInfo dep{};
+    dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dep.imageMemoryBarrierCount = 1;
+    dep.pImageMemoryBarriers = &b;
+    vkCmdPipelineBarrier2(cmd, &dep);
+    vkEndCommandBuffer(cmd);
+
+    VkFenceCreateInfo fci{};
+    fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkFence fence = VK_NULL_HANDLE;
+    REQUIRE(vkCreateFence(gpu().ctx.device(), &fci, nullptr, &fence) == VK_SUCCESS);
+    VkSubmitInfo si{};
+    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &cmd;
+    REQUIRE(vkQueueSubmit(gpu().ctx.queue(), 1, &si, fence) == VK_SUCCESS);
+    vkWaitForFences(gpu().ctx.device(), 1, &fence, VK_TRUE, UINT64_MAX);
+    vkDestroyFence(gpu().ctx.device(), fence, nullptr);
+    vkFreeCommandBuffers(gpu().ctx.device(), gpu().ctx.commandPool(), 1, &cmd);
+
+    auto pixels = target->readPixels();
+    REQUIRE(pixels.has_value());
+    if (frame == 0) {
+      first = std::move(*pixels);
+    } else {
+      // Both frame slots must produce the identical board: the per-frame resources are
+      // interchangeable.
+      REQUIRE(*pixels == first);
+    }
+  }
+
+  CAPTURE(gpu().ctx.takeValidationMessages());
+  REQUIRE(gpu().ctx.validationErrorCount() == 0);
+
+  Image img;
+  img.width = w;
+  img.height = h;
+  img.rgba = std::move(first);
+  CHECK(img.distinctColors() > 8);
+
+  vkDestroyImage(gpu().ctx.device(), image, nullptr);
+  vkFreeMemory(gpu().ctx.device(), mem, nullptr);
+}
+
+#ifdef CB_HAVE_IMGUI
+// The surface's own placement, frames, sizes, seams, eversion and picking are pinned
+// in `test_play_surface.cpp`: they are arithmetic and need no device. What is left here
+// is the one thing that does - that the instances it produces actually draw.
+TEST_CASE("the geometry view renders the board on its surface", "[render][gpu]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("torus"));
+  const Position p = Position::startPosition(v);
+  const view::PositionView snap = view::PositionView::capture(p);
+  auto target = OffscreenTarget::create(gpu().ctx, 512, 384);
+  REQUIRE(target.has_value());
+  auto renderer = BoardRenderer::create(gpu().ctx);
+  REQUIRE(renderer.has_value());
+  BoardOptions options = renderer->options();
+  options.surface = true;
+  renderer->setOptions(options);
+  const view::ViewConfig cfg = view::ViewConfig::forBoard(v.dims);
+  const view::OrbitCamera cam =
+      view::OrbitCamera::frame(view::boundsOf(view::layout(v.dims, cfg)));
+
+  (void)gpu().ctx.takeValidationMessages();
+  auto img = renderer->renderToImage(*target, snap, cfg, cam);
+  REQUIRE(img.has_value());
+  CAPTURE(gpu().ctx.takeValidationMessages());
+  REQUIRE(gpu().ctx.validationErrorCount() == 0);
+  CHECK(img->distinctColors() > 8);
+  CHECK(img->luminanceVariance() > 20.0);
+  REQUIRE(writePpm(*img, capturePath("surface-torus")).has_value());
+}
+#endif  // CB_HAVE_IMGUI
 
 #endif  // CB_HAVE_VULKAN

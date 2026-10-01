@@ -113,11 +113,44 @@ struct OvertureScene {
 [[nodiscard]] OvertureScene derivedOvertureScene(const VariantSpec& v, float t,
                                                  const view::Theme& theme);
 
+/// How far a surface has been turned through itself, and nothing else about it (M17).
+///
+/// A shape is rigid; a surface is not. `evert` runs 0 to 1 and pulls the embedding
+/// through its own middle: a torus's hole closes and reopens with what was inside it now
+/// outside, a Moebius band is drawn through its own loop, and a cylinder - which no
+/// rotation can turn inside out, being open at both ends - is rolled back over itself
+/// the way a sock is. At 0 the surface is exactly the one the library screen draws, so
+/// every existing capture still holds; the whole family is a pure function of the
+/// number, like an overture, which is what makes a drag reversible and a still
+/// reproducible.
+struct SurfacePose {
+  /// Where the board sits *on* the surface, in lattice cells - the whole board slid
+  /// along, not the shape moved. Sliding one cell along the files puts a1 where b1 was;
+  /// keep going and a1 arrives back at a1 having been all the way round, which on a
+  /// Moebius band takes two laps and comes home mirrored. The surface functions are
+  /// defined for every real `u` and `v` and already satisfy the variant's gluing there,
+  /// so this is sampling, not a special case.
+  float slideU{0.0f};
+  float slideV{0.0f};
+  float evert{0.0f};
+  /// How much of the Moebius ribbon's stretch to keep, 0 to 1, where 1 is the shape the
+  /// library screen draws. The ribbon is the one surface in the catalogue whose two axes
+  /// can be traded against each other freely - area is preserved either way - and the
+  /// library spends all of it on the twist being unmistakable, which leaves each cell
+  /// nine times longer than it is wide. A board has to be played on as well as looked at,
+  /// so `PlaySurface` spends less. Nothing else reads it.
+  float stretch{1.0f};
+};
+
 /// Where a lattice point lands on a derived overture's fully-formed surface, keyed by the
 /// surface the geometry implies. Exposed so the differential test can assert it equals
 /// the hand-authored surface for the same topology - the shipped scenes are the oracle
 /// the generated ones are checked against.
 [[nodiscard]] OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v);
+
+/// The same surface, posed. `SurfacePose{}` is the line above, to the bit.
+[[nodiscard]] OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v,
+                                      SurfacePose pose);
 
 /// Where a lattice point lands on an overture's fully-formed surface.
 ///
@@ -130,6 +163,12 @@ struct OvertureScene {
 ///
 /// Overtures that form no closed surface return the flat board.
 [[nodiscard]] OvVec3 overtureSurfaceAt(app::Overture which, float u, float v);
+
+/// Whether a variant's play board has a surface to become (M17). True exactly when the
+/// geometry names a non-flat 2-D surface; `standard`, mirrors and every non-glued variant
+/// return false, and the interface must offer no toggle for them - a setting that did
+/// nothing would be a lie.
+[[nodiscard]] bool hasPlaySurface(const VariantSpec& v) noexcept;
 
 /// Draw one, sorted far to near, into the rectangle it has been given.
 ///

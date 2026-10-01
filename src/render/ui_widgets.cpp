@@ -165,6 +165,15 @@ bool rowControl(const char* id, const char* label, const view::Theme& theme, ImF
     }
   } else {
     dl->AddText(ImVec2(textX, top), labelColor, caption.c_str());
+    // The far-end value is drawn here too, so a control without a display font - the
+    // settings rows - still shows what it is set to.
+    if (tail != nullptr) {
+      const ImVec2 w = ImGui::CalcTextSize(upper(tail).c_str());
+      dl->AddText(
+          ImVec2(max.x - 10.0f * s - w.x, min.y + (max.y - min.y - w.y) * 0.5f),
+          u32(enabled ? (hovered ? theme.ember : theme.boneDim) : theme.boneFaint),
+          upper(tail).c_str());
+    }
   }
   return pressed && enabled;
 }
@@ -406,6 +415,16 @@ bool button(const char* label, const view::Theme& theme, float width, bool prima
   const float s = uiScale();
   return rowControl(label, label, theme, font, width, controlHeight(), s, enabled,
                     primary, cold, -1, nullptr);
+}
+
+bool cycleButton(const char* label, const std::string& value, const view::Theme& theme,
+                 float scale, float width) {
+  // The row draws the name on the left and the value on the right, so the control states
+  // its setting without being opened. The value is upper-cased the same way the name is.
+  const std::string tail = upper(value);
+  const float s = scale;
+  return rowControl(label, label, theme, nullptr, width, controlHeight(), s, true, false,
+                    true, -1, tail.c_str());
 }
 
 float controlHeight() {

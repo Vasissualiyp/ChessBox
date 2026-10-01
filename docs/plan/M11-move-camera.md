@@ -331,10 +331,16 @@ renderer's instance building is tested headlessly.
 - **Dimension:** the same move replayed at D=2,3,4,6 changes only the world positions,
   not the shot *kinds*; a grid-axis crossing produces a `Cut` and a screen-axis crossing
   a `Track`. This is the generalisation claim, pinned.
-- **Golden frames:** `--shot` of a chosen move at `t=0, .25, .5, .75, 1` for `klein`,
-  `cube5`, `hyper4` and `t6`, compared against committed images (with the existing
-  validation-layer exit code). A change to the camera must explain itself in the commit,
-  per the golden rule.
+- **Golden frames:** *decided against committing pixel images* (2026-09-30). `--shot` of a
+  chosen move at `t=0, .25, .5, .75, 1` for `klein`, `cube5`, `hyper4` and `t6` was the
+  plan, but a committed PNG/PPM is a function of the GPU driver *and* the compiler, and
+  `nix flake check` runs gcc and clang; a pixel golden would be flaky or pinned to one
+  machine, exactly what ADR-0011's "Alternatives considered" already rejected. The
+  driver-independent strength is already here: the frame-the-cell oracle pins the pose at
+  every shot boundary, the safe-zone property pins the invariant over a sweep, and the
+  topology and dimension tests pin the shot *kinds*. A camera change that is not an
+  improvement fails one of those. If a snapshot golden is wanted later, pin quantised
+  **poses** (or shot kinds and counts), not pixels, and keep it under a tolerance.
 - **Interaction:** while a shot is in flight, a click does nothing; after it settles,
   picking resolves to the same cell as the settled pose. This is the `clickPixel` test.
 - **Refactor safety:** the `routeRuns` extraction leaves `MoveAnimation`'s sampled path

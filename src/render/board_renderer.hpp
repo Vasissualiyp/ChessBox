@@ -30,10 +30,15 @@ struct Instance {
   /// of a timeline connector - be placed in any of the four quadrants without four
   /// copies of the geometry.
   float roll{0};
+  /// Full orientation as a quaternion (x,y,z,w), applied after `roll`. Identity on the
+  /// flat board; on the geometry view it turns a cell's local +Z onto the surface normal,
+  /// so a tile or a piece stands on the warped board with the ordinary camera and depth
+  /// buffer (M17).
+  float quat[4]{0.0f, 0.0f, 0.0f, 1.0f};
   /// 1 for a mirror face, which is shaded as polished metal; 0 for everything else.
   float metal{0};
 };
-static_assert(sizeof(Instance) == 68);
+static_assert(sizeof(Instance) == 84);
 
 /// The sub-rectangle of the target the board is drawn into, in pixels. Zero width means
 /// the whole target. At namespace scope because a nested class's default member
@@ -56,6 +61,18 @@ struct BoardOptions {
   /// models. Fewer triangles, no orbiting, and - the point of it - readable on a
   /// machine that cannot comfortably draw the three-dimensional scene.
   bool flat{false};
+  /// Draw the board as the surface its geometry describes: cells become tiles on the
+  /// warped surface and pieces ride its normals, all through the ordinary camera (M17).
+  /// Only meaningful for a glued 2-D variant; `buildInstances` ignores it otherwise.
+  bool surface{false};
+  /// Where the board sits on that surface, in cells: slide it one along the files and a1
+  /// is where b1 was. A pose, not a shape - the cells, the moves and the position are
+  /// untouched at any value (M17).
+  float surfaceSlideU{0.0f};
+  float surfaceSlideV{0.0f};
+  /// How far the surface has been turned through itself, 0 to 1 - a torus pulled inside
+  /// out through its own hole, a cylinder rolled back over itself.
+  float surfaceEvert{0.0f};
 };
 
 /// Instances grouped by the shape that draws them - one draw call per shape.
@@ -67,6 +84,16 @@ struct InstanceSet {
   };
   std::array<Batch, static_cast<std::size_t>(Archetype::Count)> batches{};
 
+  /// The geometry view's board, as one mesh (M17). A square on a curved surface is a
+  /// patch of that surface, not a slab turned to face it, so it cannot be an instance of
+  /// anything: it is built fresh each frame with its colour in its vertices. Empty
+  /// everywhere else, which is every screen but one.
+  std::vector<MeshVertex> surfaceVertices;
+  std::vector<std::uint32_t> surfaceIndices;
+  /// Which instance carries the transform for that mesh - an identity one, because the
+  /// vertices are already in world space. The pipeline needs *an* instance bound.
+  std::uint32_t surfaceInstance{0};
+
   [[nodiscard]] std::size_t size() const noexcept { return instances.size(); }
 };
 
@@ -74,7 +101,13 @@ struct InstanceSet {
 /// never generates a move of its own - a highlight it draws came from the engine.
 class BoardRenderer {
  public:
-  static Result<BoardRenderer> create(const VulkanContext& ctx);
+  static Result<BoardRenderer> create(
+      const VulkanContext& ctx, VkFormat colorFormat = OffscreenTarget::kColorFormat);
+
+  /// How many frames may be in flight at once. Two: the interactive path renders into a
+  /// freshly acquired swapchain image while the previous frame is still being presented,
+  /// which is the whole of M4.8's pipelining (ADR-0018).
+  static constexpr std::uint32_t kFramesInFlight = 2;
 
   BoardRenderer() = default;
   ~BoardRenderer();
@@ -124,6 +157,17 @@ class BoardRenderer {
                       const std::function<void(VkCommandBuffer)>& overlay = {},
                       BoardRect boardRect = {});
 
+  /// Record one frame into a command buffer the caller owns and submits. Nothing is
+  /// waited on, so the caller can keep `kFramesInFlight` frames overlapping; `frame`
+  /// selects the per-frame instance buffer and blur descriptors, and must be
+  /// `0 .. kFramesInFlight-1`. The colour image is left in COLOR_ATTACHMENT_OPTIMAL for
+  /// the caller's own final transition. `render` above is the synchronous wrapper used by
+  /// captures and tests, which leaves the image in TRANSFER_SRC_OPTIMAL.
+  Result<void> record(VkCommandBuffer cmd, const OffscreenTarget& target,
+                      const InstanceSet& instances, const view::OrbitCamera& camera,
+                      const std::function<void(VkCommandBuffer)>& overlay,
+                      BoardRect boardRect, std::uint32_t frame);
+
   Result<Image> renderToImage(const OffscreenTarget& target, const view::PositionView& p,
                               const view::ViewConfig& cfg,
                               const view::OrbitCamera& camera);
@@ -134,13 +178,17 @@ class BoardRenderer {
   Result<void> buildPipeline();
   Result<void> buildBackdropPipeline();
   Result<void> buildBlurPipeline();
-  /// Point the two descriptor sets at this target's images. Cheap and idempotent: it
-  /// only does work when the target has been recreated, which happens on a resize.
-  Result<void> bindBlurTarget(const OffscreenTarget& target);
+  /// Point the frame's two descriptor sets at this target's images. Rewritten only when
+  /// the target's colour view changes; the frame slot's fence is what makes that safe
+  /// while the previous frame of the same slot may still have been reading them.
+  Result<void> bindBlurTarget(const OffscreenTarget& target, std::uint32_t frame);
   Result<void> uploadGeometry();
-  Result<void> ensureInstanceCapacity(std::size_t count);
+  Result<void> ensureInstanceCapacity(std::uint32_t frame, std::size_t count);
+  Result<void> ensureSurfaceCapacity(std::uint32_t frame, std::size_t vertices,
+                                     std::size_t indices);
 
   const VulkanContext* ctx_{nullptr};
+  VkFormat colorFormat_{OffscreenTarget::kColorFormat};
   view::Theme theme_{view::Theme::manifold()};
   BoardOptions options_{};
   MeshLibrary meshes_;
@@ -168,9 +216,11 @@ class BoardRenderer {
   VkDescriptorSetLayout blurSetLayout_{VK_NULL_HANDLE};
   VkDescriptorPool blurPool_{VK_NULL_HANDLE};
   VkSampler blurSampler_{VK_NULL_HANDLE};
-  VkDescriptorSet blurFromColor_{VK_NULL_HANDLE};
-  VkDescriptorSet blurFromScratch_{VK_NULL_HANDLE};
-  VkImageView blurBoundColor_{VK_NULL_HANDLE};
+  /// Two sets per frame in flight - one sampling the colour image, one the scratch -
+  /// because a frame in flight must not have its descriptors rewritten underneath it.
+  std::array<VkDescriptorSet, kFramesInFlight> blurFromColor_{};
+  std::array<VkDescriptorSet, kFramesInFlight> blurFromScratch_{};
+  std::array<VkImageView, kFramesInFlight> blurBoundColor_{};
   float blur_{0.0f};
 
   VkBuffer vertexBuffer_{VK_NULL_HANDLE};
@@ -178,9 +228,20 @@ class BoardRenderer {
   VkBuffer indexBuffer_{VK_NULL_HANDLE};
   VkDeviceMemory indexMem_{VK_NULL_HANDLE};
 
-  VkBuffer instanceBuffer_{VK_NULL_HANDLE};
-  VkDeviceMemory instanceMem_{VK_NULL_HANDLE};
-  std::size_t instanceCapacity_{0};
+  /// The instance buffer is per frame in flight: frame N+1 is uploaded while frame N's
+  /// draws may still be reading it.
+  std::array<VkBuffer, kFramesInFlight> instanceBuffer_{};
+  std::array<VkDeviceMemory, kFramesInFlight> instanceMem_{};
+  std::array<std::size_t, kFramesInFlight> instanceCapacity_{};
+
+  /// And so is the geometry view's board mesh, for the same reason: it is rebuilt every
+  /// frame, because the shape can be slid or turned every frame.
+  std::array<VkBuffer, kFramesInFlight> surfaceVertexBuffer_{};
+  std::array<VkDeviceMemory, kFramesInFlight> surfaceVertexMem_{};
+  std::array<std::size_t, kFramesInFlight> surfaceVertexCapacity_{};
+  std::array<VkBuffer, kFramesInFlight> surfaceIndexBuffer_{};
+  std::array<VkDeviceMemory, kFramesInFlight> surfaceIndexMem_{};
+  std::array<std::size_t, kFramesInFlight> surfaceIndexCapacity_{};
 };
 
 }  // namespace cb::render

@@ -31,50 +31,87 @@ committed and the fast suite is green at the time of writing.
 
 ## The next steps, in order
 
-### 1. M4.8 remainder: two frames in flight, and rendering into the swapchain
+### 1. M4.8 remainder: two frames in flight, and rendering into the swapchain — BUILT
 
-This is the one Wave-1 item left and the riskiest. Details and the full rationale are in
-`docs/plan/M4-renderer.md` under "M4.8 as built … Deferred". The shape of it:
+**Built 2026-09-30, ADR-0018 superseding ADR-0011.** The interactive path renders straight
+into the acquired swapchain image (each image wraps it in a target that owns its MSAA,
+depth and scratch), `Window` carries a two-slot frame ring, and the renderer records into
+the caller's buffer so two frames overlap. The colour format is now a runtime property.
+Files: `src/render/window.*`, `src/render/board_renderer.*`, `src/render/offscreen_target.*`,
+`src/render/ui.*`, `src/gui/main.cpp`. A headless test drives the recording path into an
+image with the swapchain's usages, both frame slots, validation-clean; all `render` and
+`gui-*` tests pass.
 
-- The interactive path renders into an `OffscreenTarget` and blits to the swapchain; that is
-  ADR-0011, so removing the blit **supersedes an accepted ADR** and needs a new one that
-  supersedes it.
-- The gain is input-to-photon latency only (the plan says so: under FIFO vsync it does not
-  raise the frame rate), and the interactive `present` path has **no headless test** -
-  `--shot` and every `gui-*` test exercise the offscreen render, not `Window::present`. Plan
-  on running the game on a real display before trusting it.
-- Sketch: give `BoardRenderer` a small frame ring (2 command buffers, fences and semaphores,
-  one per in-flight frame), double the `OffscreenTarget` in `gui/main.cpp`, have the render
-  submission signal a semaphore and `Window::present` wait it; or render straight into the
-  acquired swapchain image with a per-image depth image and a resolve target for MSAA.
-  Files: `src/render/vulkan_context.*`, `src/render/board_renderer.*`, `src/render/window.*`,
-  `src/gui/main.cpp`.
+**Needs a run on a real display before it is trusted.** `vkAcquireNextImageKHR` and
+`vkQueuePresentKHR` need a surface, so the acquire/present sequence is the one part not
+covered by a test. Run `./build/dev/src/gui/chessbox_gui standard` and check: the board
+draws, the interface lays out, resizing works, pause (the defocus pass, now into the
+swapchain image) looks right, and the validation layers stay silent.
 
-### 2. M4.9 remainder: concrete `Pos`
+### 2. M4.9 remainder: concrete `Pos` — MEASURED, DEFERRED
 
-`render/overture_scene.cpp` still uses `using Pos = std::function<OvVec3(float, float)>`, the
-one indirect call in the overture build. The plan asks for a small variant/template that
-`addGrid` can inline. **Measure first** with `--bench-frame`: a `quinticPoint` call is
-~112 ns and the memo already removed most of them, so this may not be worth the churn; if it
-is, the refactor is mechanical but touches every builder in the file. Adaptive subdivision
-is already done.
+`render/overture_scene.cpp` still uses `using Pos = std::function<OvVec3(float, float)>`,
+the one indirect call in the overture build. **Measured 2026-09-30 and deliberately not
+done.** With the quintic memo and the built-scene cache in, `Pos` is off the steady-state
+path: a pinned `t` reuses one build. Forcing a rebuild every frame via a `--clip`, the worst
+case (`t6`, all 1600 quads) costs about **5 ms/frame more than a variant with no overture**,
+at Debug `-O0` and including PPM IO. Making `Pos` concrete touches every builder in a
+3100-line file to recover a fraction of a frame at `-O2`; the plan records the measurement
+and defers it to the instanced-path rewrite (M4.9's "long-term fix").
 
-### 3. M11.7: golden frames (decide, do not blindly commit images)
+### 3. M11.7: golden frames — DECIDED (no pixel images)
 
-The plan asks for committed reference frames. A committed frame depends on the GPU driver
-**and** the compiler, and `nix flake check` runs gcc and clang, so a pixel golden would be
-flaky. The driver-independent half is in (the safe-zone property test); if a golden is still
-wanted, pin integer/quantised **poses**, not pixels, and say so in the plan.
+The plan asked for committed reference frames. **Decided against committing pixels**
+(2026-09-30). A committed frame depends on the GPU driver **and** the compiler, and
+`nix flake check` runs gcc and clang, so a pixel golden would be flaky or pinned to one
+machine - the objection ADR-0011 already recorded. The driver-independent strength is
+already in: the frame-the-cell oracle pins the pose at every shot boundary, the safe-zone
+property sweeps random moves, and the topology/dimension tests pin the shot kinds. The
+plan (`docs/plan/M11-move-camera.md`, M11.7) now records this; if a snapshot is wanted
+later, pin quantised poses, not pixels.
 
-### 4. M17: play on the shape (the geometry view)
+### 4. M17: play on the shape (the geometry view) — BUILT for the glued 2-D case
 
-New milestone, planned in [`M17-geometry-view.md`](M17-geometry-view.md). A button turns the
-play board into its own topology (the torus is a donut, the Klein bottle a bottle) and the
-game stays playable on it. It reuses the M13 warps, so it is small on top of work already
-done, and it is placed **before M16.1** in the release sequence because it is the strongest
-possible trailer. The hard part is picking on a curved, possibly non-orientable surface;
-the choice to make there is documented in the plan (ray-cast the drawn quads, which cannot
-disagree with the drawing).
+New milestone, planned in [`M17-geometry-view.md`](M17-geometry-view.md). **Built
+2026-09-30, reworked to the renderer after a first cut that drew the surface in the
+interface over the flat board (no camera control, labels showed through).**
+
+- `render::PlaySurface` (`src/render/play_surface.cpp`, new) owns every placement: the
+  **patch of surface each square is**, the seat a piece stands on, and the ray a click is
+  tested against - one sampling, so the pick cannot disagree with the picture.
+  `BoardRenderer::buildInstances` turns the patches into one mesh with its colours in its
+  vertices and leaves the pieces instanced; the session's own camera, depth and MSAA apply
+  and orbit and zoom work. `standard --geometry` is a strict no-op.
+- A square is a *patch*, not a rectangle: a flat tile is tangent at one point, so on a
+  fast-curving surface the squares cut into each other at one end and gape at the other.
+  Earlier cuts also got the frame (shortest-arc normals spun every square), the scale order
+  (`board.vert` scaled the world axes, not the mesh's) and the size (the metric is not
+  constant) wrong. See **ADR-0019**.
+- **The board is posed on its surface:** `slideU`/`slideV` slide it *along* the surface -
+  middle-drag on the shape, or `--slide`/`--slide-v` - so a1 rides to b1, round, and home
+  (mirrored, on a Moebius band, after two laps). `evert` turns the surface through itself
+  (`[`/`]`, `--evert`). Presentation only; neither enters `VariantId`.
+- `Settings::geometryView`, `geometrySlideU`/`geometrySlideV` and `geometryEvert`, a
+  `SHAPE` button and the `G` key, offered only where `render::hasPlaySurface` holds.
+- Two surfaces were corrected in the shared catalogue: the Klein bottle's figure-eight is
+  now walked at constant speed (8 files had been landing in pairs), and the Moebius
+  ribbon's stretch is a pose field so the play board can keep less of it than the library
+  screen does.
+- Coordinate labels moved to the board's near edges in the machine face (flat/3-D only),
+  and changing the palette now re-applies the ImGui style (console had been keeping
+  manifold's dark type). Settings drop-downs became press-to-cycle buttons.
+
+**Deferred** (see the M17 status section): the move animation is not warped, the surface
+has no coordinate labels or seam rails yet, and the eversion passes through genuinely
+degenerate embeddings (the spindle torus, the cylinder's own fold), drawn honestly.
+
+**Next, and specified**: M17.7-M17.12 in the same plan - an INVERT control with the pieces
+staying on the outside, the drag axes swapped, the slide's lap fixed (it wraps every two
+*cells* instead of two laps, one line in `wrapSlide`), semi-transparent squares (the board
+pipeline has blending off today), the shape centred, and the shapes above two dimensions:
+`torus3d` as nested shells, `hyper4` as a hypercube, `t6` as the quintic. The last one
+generalises `PlaySurface` into a `PlayShape` and should wait for the other five. D ≥ 3 stays a no-op because the
+ordinary extruded view already is the lattice.
 
 ### 5. Then Wave 2
 

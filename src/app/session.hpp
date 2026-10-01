@@ -117,6 +117,12 @@ class Session {
   /// the default camera frames the board in the space the interface leaves it.
   void setBoardAspect(float aspect);
 
+  /// Frame the camera on a box of world space, keeping the angle the player is looking
+  /// from. The geometry view needs this: the shape is a different size from the flat
+  /// board and sits somewhere else entirely, so framing on the layout's own bounds
+  /// leaves the board off in a corner of the window.
+  void frameOn(const view::Bounds& b);
+
   /// Look straight down with no perspective, for a machine that would rather not draw
   /// the scene in three dimensions - and for a player who simply prefers a diagram.
   void setFlatView(bool flat);

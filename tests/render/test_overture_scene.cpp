@@ -21,6 +21,7 @@
 
 #include "io/variant_toml.hpp"
 #include "render/overture_scene.hpp"
+#include "support/variants.hpp"
 
 using namespace cb;
 using namespace cb::render;
@@ -692,6 +693,19 @@ TEST_CASE("a detonation spends no geometry colour", "[render]") {
       }
     }
   }
+}
+
+TEST_CASE("only a glued two-dimensional variant has a play surface", "[render]") {
+  // The gate the interface reads before offering the toggle. `standard`, a mirror box and
+  // every board above two dimensions have no second shape to become, and a button that
+  // did nothing there would be a lie (M17.5).
+  CHECK_FALSE(hasPlaySurface(test::loadVariant("standard")));
+  CHECK_FALSE(hasPlaySurface(test::loadVariant("mirrorbox")));
+  CHECK_FALSE(hasPlaySurface(test::loadVariant("cube5")));
+  CHECK(hasPlaySurface(test::loadVariant("cylinder")));
+  CHECK(hasPlaySurface(test::loadVariant("torus")));
+  CHECK(hasPlaySurface(test::loadVariant("mobius")));
+  CHECK(hasPlaySurface(test::loadVariant("klein")));
 }
 
 #endif

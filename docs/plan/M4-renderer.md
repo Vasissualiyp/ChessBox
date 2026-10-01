@@ -285,14 +285,34 @@ work.
 
 **Deferred: two frames in flight, and rendering straight into the swapchain image.**
 Both are one change: the interactive path deliberately renders into an offscreen target and
-blits to the swapchain, which is ADR-0011 ("Headless-first renderer; the window is a
-blit"), so removing the blit supersedes an accepted ADR and needs its own. The gain is
+blits to the swapchain, which is ADR-0011 ("Headless-first renderer; the window is a blit"),
+so removing the blit supersedes an accepted ADR and needs its own. The gain is
 input-to-photon latency only - under the default FIFO vsync it does not raise the frame
 rate (the plan says so) - while the interactive `present` path has **no headless test**:
 `--shot` and every `gui-*` test exercise the offscreen render, not the swapchain present,
 so a regression there is caught only by a human opening the game. Doing it blind is the
 risk the rest of M4 exists to avoid. It is the one Wave-1 item left, and it wants an ADR
 and a run on a real display.
+
+### M4.8 remainder as built (2026-09-30)
+
+Built, with **ADR-0018** superseding ADR-0011's blit. The interactive path now renders
+straight into the acquired swapchain image - each image gets a render target that wraps it
+and owns its own MSAA, depth and scratch - and `Window` carries a two-slot frame ring
+(command buffer, fence and acquire semaphore per slot), with the renderer recording into
+the caller's buffer instead of submitting. The per-frame instance buffer and blur
+descriptors moved to per-slot storage, and no full-queue wait remains. The colour format
+became a runtime property, since a multisample resolve and a dynamic-rendering pipeline
+both require the attachment format to match the surface.
+
+**Still needs a display.** The offscreen path is unchanged and all `render`/`gui-*` tests
+pass, and a new headless test drives the exact interactive recording path into an image
+with the swapchain's usages (both frame slots, validation-clean). But
+`vkAcquireNextImageKHR`/`vkQueuePresentKHR` need a surface, so the acquire/present sequence
+is verified only by running the game on a real compositor. Run
+`./build/dev/src/gui/chessbox_gui standard` and confirm: the board draws, the interface
+lays out, no validation messages, resizing works, and pause (which exercises the defocus
+pass into the swapchain image) looks right.
 
 ## M4.9 - The animation budget (follow-up to M4.5)
 
@@ -318,3 +338,21 @@ all rebuilt and re-emitted every frame. Cheapest wins first:
   shader: per-pixel depth removes the painter's-sort artefacts the translucent glued
   surfaces show today, and MSAA applies to it. This is the shape M13's generic overtures
   should be built on, rather than a larger `ImDrawList`.
+
+### M4.9 remainder: measured, and deferred (2026-09-30)
+
+**Make `Pos` concrete - deferred.** Measured with `--bench-frame` and a `--clip` that
+forces the scene to rebuild every frame (a pinned `t` does not, because the built-scene
+cache holds). The worst case, `t6` with all 1600 quads rebuilding, costs about **5 ms/frame
+more than a variant with no overture** - and that is Debug `-O0`, including PPM IO. With
+the quintic memo and the scene cache in, `Pos` is off the steady-state path entirely; the
+indirection only matters on the frames where `t` is actually changing, and even then it is
+a fraction of a frame.
+
+A concrete `Pos` means templating `addGrid` and every builder or writing a type-erased
+`Pos` of our own - both touch essentially every function in a 3100-line file - to recover
+under a millisecond at `-O2`. Not worth the churn. The long-term fix (the instanced path
+above) is the one that should replace this code, not a micro-optimisation of a path about
+to be rewritten.
+
+Adaptive subdivision and the scene cache are already in (M4.8/M4.9 as built).

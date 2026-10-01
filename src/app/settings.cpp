@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
@@ -95,6 +96,14 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.theme = value;
     else if (key == "flat_view")
       s.flatView = asBool(value);
+    else if (key == "geometry_view")
+      s.geometryView = asBool(value);
+    else if (key == "geometry_evert")
+      s.geometryEvert = asFloat(value, s.geometryEvert);
+    else if (key == "geometry_slide_u")
+      s.geometrySlideU = asFloat(value, s.geometrySlideU);
+    else if (key == "geometry_slide_v")
+      s.geometrySlideV = asFloat(value, s.geometrySlideV);
     else if (key == "animate_moves")
       s.animateMoves = asBool(value);
     else if (key == "animation_speed")
@@ -152,6 +161,10 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "piece_icons = " << pieceIcons << '\n';
   out << "theme = " << theme << '\n';
   out << "flat_view = " << boolText(flatView) << '\n';
+  out << "geometry_view = " << boolText(geometryView) << '\n';
+  out << "geometry_evert = " << geometryEvert << '\n';
+  out << "geometry_slide_u = " << geometrySlideU << '\n';
+  out << "geometry_slide_v = " << geometrySlideV << '\n';
   out << "animate_moves = " << boolText(animateMoves) << '\n';
   out << "animation_speed = " << animationSpeed << '\n';
   out << "overture_speed = " << overtureSpeed << '\n';
@@ -175,6 +188,11 @@ void Settings::sanitize() {
   guiScale = std::clamp(guiScale, 0.6f, 3.0f);
   frameCap = std::clamp(frameCap, 0, 360);
   pieceHeightScale = std::clamp(pieceHeightScale, 0.0f, 2.0f);
+  geometryEvert = std::clamp(geometryEvert, 0.0f, 1.0f);
+  // The surfaces repeat after two laps of either axis, so anything outside that is the
+  // same pose written longhand.
+  geometrySlideU = std::fmod(geometrySlideU, 16.0f);
+  geometrySlideV = std::fmod(geometrySlideV, 16.0f);
   animationSpeed = std::clamp(animationSpeed, 0.25f, 4.0f);
   overtureSpeed = std::clamp(overtureSpeed, 0.25f, 4.0f);
   orbitSensitivity = std::clamp(orbitSensitivity, 0.1f, 4.0f);

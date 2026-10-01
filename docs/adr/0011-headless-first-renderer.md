@@ -1,6 +1,7 @@
 # ADR-0011: The renderer is headless first; the window is a blit
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0018 (the window no longer blits; the interactive path
+  renders into the swapchain image)
 - **Date:** 2026-09-28
 
 ## Context

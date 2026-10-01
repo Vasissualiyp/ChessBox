@@ -51,8 +51,9 @@ struct UiRequest {
 /// variant carry its own palette, never means touching this file.
 class Ui {
  public:
-  static Result<std::unique_ptr<Ui>> create(const VulkanContext& ctx, SDL_Window* window,
-                                            const view::Theme& theme);
+  static Result<std::unique_ptr<Ui>> create(
+      const VulkanContext& ctx, SDL_Window* window, const view::Theme& theme,
+      VkFormat colorFormat = VK_FORMAT_R8G8B8A8_UNORM);
   ~Ui();
   Ui(const Ui&) = delete;
   Ui& operator=(const Ui&) = delete;
@@ -96,11 +97,7 @@ class Ui {
   void pickVariant(const std::string& name) { pickedVariant_ = name; }
   /// Swap the palette. The theme is read every frame, so a change is immediate - and a
   /// retheme never touches the renderer.
-  void setTheme(const view::Theme& t) noexcept {
-    theme_ = t;
-    // The cached scene has the old theme's seam and event colours baked into it.
-    overtureCacheValid_ = false;
-  }
+  void setTheme(const view::Theme& t) noexcept;
   /// Finish the frame and record its draw commands into the board's render pass.
   void endFrame();
   void record(VkCommandBuffer cmd);

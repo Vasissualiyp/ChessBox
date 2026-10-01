@@ -59,6 +59,9 @@ tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID 
                                  # a gameplay shot: the move camera, no interface
 ./build/dev/src/gui/chessbox_gui standard --shot o.ppm --screen body   # the designer tabs
 ./build/dev/src/gui/chessbox_gui standard --shot o.ppm --screen designer --dims 4
+./build/dev/src/gui/chessbox_gui torus --shot o.ppm --geometry        # the board as its shape
+./build/dev/src/gui/chessbox_gui torus --shot o.ppm --geometry --evert 1  # ...turned inside out
+./build/dev/src/gui/chessbox_gui torus --shot o.ppm --geometry --slide 2.5  # ...slid round it
 ```
 
 **A build directory remembers which shell configured it.** One configured under
@@ -161,7 +164,8 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | A menu's decorative object | `src/render/deco.cpp` + `decoForScreen` | |
 | How a menu object answers a drag | `Ui::updateObjectDrag`; the turn is an offset on the object's own animation | |
 | A variant's library animation | `src/render/overture_scene.cpp`; which one, and its cycle, in `src/app/overture.cpp` | |
-| A variant with no bespoke overture | nothing - it gets `derivedOvertureScene` from its geometry (`app::overtureSignature`), keyed by `SurfaceKind`, never its name. See `docs/overtures.md` | |
+| A variant with no bespoke overture | nothing - it gets `derivedOvertureScene` from its geometry (`app::overtureSignature`), keyed by `SurfaceKind`, never its name. See `docs/overtures.md` |
+| Playing on the shape (a glued 2-D board warped to its surface) | `render::PlaySurface` in `src/render/play_surface.cpp` - seats, frames, sizes, tiles and picking, all off one sampling; `BoardRenderer::buildInstances` draws them. The mode is `Settings::geometryView`, offered only where `render::hasPlaySurface`; `Settings::geometryEvert` is the pose. See ADR-0019 | |
 | New module in a layer | that layer's dir + CMake edge + test + this table | `cb-new-module` |
 | A decision | `docs/adr/` | `cb-adr` |
 | Perft mismatch | bisect with `divide` against the oracle | `cb-perft-golden` |
@@ -308,3 +312,35 @@ These are the ones that have actually cost time here, not hypotheticals.
   real ones: the first lets a screen change reset the pane transition (after the tick),
   the second advances it to done. With one, the library draws at alpha zero; with the
   pane left unsettled the frames come out blank.
+- **The geometry view is the renderer drawing the board on its surface (M17).** A glued
+  2-D variant with `Settings::geometryView` on builds its cells from `render::PlaySurface`
+  and draws them as ordinary instances in `BoardRenderer::buildInstances` - so the
+  session's own camera, depth buffer and MSAA apply, and orbit and zoom work with no
+  special path. `render::hasPlaySurface` is the gate: only a glued 2-D variant has a
+  surface to become, so nothing else offers the toggle. Picking ray-tests the *same*
+  sampling the instances came from, so a click can never select a different cell than the
+  one under the cursor. `standard --geometry` is a strict no-op. Read ADR-0019 before
+  touching any of it; each bullet below was a bug first.
+- **A square on a surface is a patch *of* it, never a rectangle placed on it.** A flat
+  tile is tangent at one point, so on anything that curves fast the squares cut into each
+  other at one end and stand off it at the other - fish scales, not a board. Each cell is
+  built as a grid of corners lying on the surface, with thickness, and the whole board
+  goes down as **one mesh** with its colours in its vertices (`MeshVertex::color`, white
+  on every authored shape). Pieces stay instanced: a piece *is* an object standing on the
+  surface, and it keeps the seat's frame - +X along the files, +Y across the ranks, +Z
+  out - as a quaternion.
+- **An instance's scale is applied in the mesh's own frame, before its orientation.**
+  Scaling after a rotation scales the *world* axes; the two agree only where the
+  orientation is identity, which is the whole of the flat board and none of the pieces
+  standing on this one.
+- **The pose is `SurfacePose`, and it is presentation only** - it never enters
+  `VariantId`. `slideU`/`slideV` move the board *along* its surface (middle-drag on the
+  shape, `--slide`/`--slide-v`): sliding one cell along the files is sampling at
+  `u + 1/nx`, so a1 lands exactly where b1 was and a lap of a Moebius band comes home
+  mirrored. `evert` turns the surface through itself (`[`/`]`, `--evert`). Each is pure in
+  its number, like an overture.
+- **An 8-cell figure-eight is aliased, and that is why `lemniscateAngle` exists.** Equally
+  spaced values of the Klein cross-section's angle land in pairs, which made every other
+  file twice the width of its neighbour. The curve is walked at constant speed instead;
+  the reparametrisation is odd in the angle, which is what keeps the rank seam's file
+  reversal closing.

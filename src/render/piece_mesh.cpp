@@ -19,7 +19,7 @@ void pushTri(MeshLibrary& m, std::uint32_t a, std::uint32_t b, std::uint32_t c) 
 std::uint32_t pushVertex(MeshLibrary& m, float x, float y, float z, float nx, float ny,
                          float nz, float h) {
   const auto index = static_cast<std::uint32_t>(m.vertices.size());
-  m.vertices.push_back(MeshVertex{{x, y, z}, {nx, ny, nz}, h});
+  m.vertices.push_back(MeshVertex{{x, y, z}, {nx, ny, nz}, h, {1.0f, 1.0f, 1.0f, 1.0f}});
   return index;
 }
 

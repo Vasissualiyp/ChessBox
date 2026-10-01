@@ -59,4 +59,33 @@ if(TARGET chessbox_gui)
     set_tests_properties(gui-${screen} PROPERTIES LABELS "render;gui" TIMEOUT 120
       ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
   endforeach()
+  # The play board as its own shape (M17): a glued variant drawn on its surface, still
+  # validation-clean and still a picture. `standard --geometry` is a no-op, checked in the
+  # scene tests rather than here because it is about geometry, not about the window.
+  add_test(NAME gui-geometry
+    COMMAND chessbox_gui torus
+            --shot ${CMAKE_BINARY_DIR}/render-captures/gui-geometry.ppm
+            --geometry --script "click h1"
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(gui-geometry PROPERTIES LABELS "render;gui" TIMEOUT 120
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  # And turned through itself: at the far end of the eversion the hole has been pulled
+  # inside out. Halfway is the interesting frame to keep validation-clean, because that is
+  # where the surface passes through its own degenerate moment.
+  add_test(NAME gui-evert
+    COMMAND chessbox_gui torus
+            --shot ${CMAKE_BINARY_DIR}/render-captures/gui-evert.ppm
+            --geometry --evert 0.5
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(gui-evert PROPERTIES LABELS "render;gui" TIMEOUT 120
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  # And slid round itself: half a cell along each axis, which is where no square sits
+  # where the unposed board put it and every one of them is still on the surface.
+  add_test(NAME gui-slide
+    COMMAND chessbox_gui klein
+            --shot ${CMAKE_BINARY_DIR}/render-captures/gui-slide.ppm
+            --geometry --slide 2.5 --slide-v 1.5
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(gui-slide PROPERTIES LABELS "render;gui" TIMEOUT 120
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
 endif()

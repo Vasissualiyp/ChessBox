@@ -120,10 +120,11 @@ using Pos = std::function<OvVec3(float, float)>;
 /// function with different arguments, which is the same "the next case is data" claim
 /// the engine makes about variants.
 struct TubeOpt {
-  float th{0};    ///< 0..2pi, how far the files have rolled (2pi closes the tube)
-  float ph{0};    ///< 0..2pi, how far the tube has bent into a ring
-  float tau{0};   ///< half-turn of the cross-section around the ring
-  float open{1};  ///< ring-radius multiplier; see the horn-torus note below
+  float th{0};     ///< 0..2pi, how far the files have rolled (2pi closes the tube)
+  float ph{0};     ///< 0..2pi, how far the tube has bent into a ring
+  float tau{0};    ///< half-turn of the cross-section around the ring
+  float open{1};   ///< ring-radius multiplier; see the horn-torus note below
+  float evert{0};  ///< 0..1, how far the surface has been turned through itself
 };
 
 /// Roll the files into a tube whose axis runs along the ranks, then optionally bend that
@@ -135,19 +136,39 @@ struct TubeOpt {
 /// 1 : 1.
 OvVec3 tube(float u, float v, const TubeOpt& o) {
   const float xl = (u - 0.5f) * kW;
-  const float zl = (v - 0.5f) * kH;
+  float zl = (v - 0.5f) * kH;
+  // An open tube cannot be turned inside out by any rotation - it has two rims and a
+  // rotation keeps them where they are - so it is turned the way a sock is: the far rim
+  // rolls back down over the outside, and the fold travels the whole length as `evert`
+  // runs 0 to 1. `swell` is how far clear of the tube the returning sleeve stands, and
+  // the softened absolute value is what makes the turn a fold rather than a crease.
+  float swell = 0.0f;
+  if (o.evert > 1e-4f && o.ph <= 1e-4f) {
+    const float m = zl + kH * 0.5f;            // 0 at the near rim, kH at the far one
+    const float fold = (1.0f - o.evert) * kH;  // where the material turns back
+    const float k = 0.5f;                      // the fold's own radius
+    const float d = m - fold;
+    const float soft = std::sqrt(d * d + k * k) - k;
+    zl = (fold - soft) - kH * 0.5f;
+    swell = 0.62f * 0.5f * (1.0f + d / std::sqrt(d * d + k * k));
+  }
   float a = xl;
   float b = 0.0f;
   if (o.th > 1e-4f) {
     const float R = kW / o.th;
     const float t = xl / R;
-    a = R * std::sin(t);
+    a = (R + swell) * std::sin(t);
     // Centred on the tube rather than on the seam the tube was rolled from.
-    b = R * std::cos(t) - R * sinc(o.th * 0.5f);
+    b = (R + swell) * std::cos(t) - R * sinc(o.th * 0.5f);
   }
   if (o.ph > 1e-4f) {
+    // A closed ring *can* be turned inside out by a rotation, and this is the one: the
+    // ring radius is swept through zero to its own negative, which carries the cross
+    // section round the axis and leaves what was the inner equator on the outside. The
+    // way through is the spindle torus, where the hole has closed to a point - which is
+    // exactly the moment a player sees the inside come out.
     const float base = kH / o.ph;
-    const float Rr = base * o.open;
+    const float Rr = base * o.open * (1.0f - 2.0f * o.evert);
     const float p = zl / base;
     const float chi = o.tau * p * 0.5f;
     const float a2 = a * std::cos(chi) - b * std::sin(chi);
@@ -167,15 +188,16 @@ OvVec3 tube(float u, float v, const TubeOpt& o) {
 /// direction runs parallel to its axis and has no way to reverse itself, which is why
 /// the Moebius overture has to leave the tube to close its seam - and why watching it
 /// fail is the most useful thing in that overture.
-OvVec3 band(float u, float v, float th, float tau) {
+OvVec3 band(float u, float v, float th, float tau, float evert = 0.0f) {
   const float xl = (u - 0.5f) * kW;
   const float zl = (v - 0.5f) * kH;
   if (th <= 1e-4f) return {xl, 0.0f, zl};
   const float R = kW / th;
   const float t = xl / R;
+  const float Rp = R * (1.0f - 2.0f * evert);  // through the middle of its own loop
   const float psi = tau * t * 0.5f;
-  return {R * std::sin(t) + zl * std::cos(psi) * std::sin(t), zl * std::sin(psi),
-          R * std::cos(t) - R * sinc(th * 0.5f) + zl * std::cos(psi) * std::cos(t)};
+  return {Rp * std::sin(t) + zl * std::cos(psi) * std::sin(t), zl * std::sin(psi),
+          Rp * std::cos(t) - Rp * sinc(th * 0.5f) + zl * std::cos(psi) * std::cos(t)};
 }
 
 /// The classical Mobius strip, as a long ribbon.
@@ -191,16 +213,70 @@ OvVec3 band(float u, float v, float th, float tau) {
 /// At `th = 2pi, tau = 1` the two ends meet with the width reversed - `stripSurface(0,
 /// v)` and `stripSurface(1, 1 - v)` are the same point - which is this variant's gluing
 /// exactly: the files periodic, the ranks flipped.
-OvVec3 stripSurface(float u, float v, float len, float wid, float th, float tau) {
+OvVec3 stripSurface(float u, float v, float len, float wid, float th, float tau,
+                    float evert = 0.0f) {
   const float s = (u - 0.5f) * len;
   const float w = (v - 0.5f) * wid;
   if (th <= 1e-4f) return {s, 0.0f, w};  // still flat, before the bend
   const float R = len / th;
   const float t = s / R;
+  // The loop radius is swept through zero to its negative while the *angle* keeps
+  // running off the unchanged arc length, so the ribbon is drawn through the middle of
+  // its own loop and comes back with its width on the other side. The band is one-sided
+  // to begin with; what the turn moves is which way the ribbon faces the room.
+  const float Rp = R * (1.0f - 2.0f * evert);
   const float psi = tau * t * 0.5f;
   const float cw = std::cos(psi);
-  return {R * std::sin(t) + w * cw * std::sin(t), w * std::sin(psi),
-          R * std::cos(t) - R * sinc(th * 0.5f) + w * cw * std::cos(t)};
+  return {Rp * std::sin(t) + w * cw * std::sin(t), w * std::sin(psi),
+          Rp * std::cos(t) - Rp * sinc(th * 0.5f) + w * cw * std::cos(t)};
+}
+
+/// Where on the figure-eight cross-section a file sits, as an angle.
+///
+/// (sin a, sin 2a) is a lemniscate, and a *very* unevenly parametrised one: the second
+/// coordinate runs round twice while the first runs round once, so eight equally spaced
+/// values of `a` land in pairs - the chord from one file to the next alternates between
+/// under a third of a unit and over two. On a menu that is a wobble; on a board it is a
+/// row of squares of two quite different sizes, which is what the geometry view made
+/// impossible to ignore. Walking the curve at constant speed instead spaces the files
+/// evenly and moves not one point of the shape: it changes only which parameter names
+/// which point.
+///
+/// Both symmetries the gluing needs survive, which is the whole reason this is safe: the
+/// speed is even in `a`, so the arc length is odd in `a`, so `u -> 1 - u` still maps to
+/// `a -> -a` - the file reversal the rank seam closes with - and one lap of `u` is still
+/// one lap of `a`.
+float lemniscateAngle(float u) {
+  // Cumulative arc length over a in [-pi, pi], built once. A table rather than a series:
+  // the integrand has no elementary antiderivative, and 512 steps of it is exact to far
+  // more than a pixel.
+  static const std::array<float, 513> kArc = [] {
+    std::array<float, 513> arc{};
+    float total = 0.0f;
+    for (std::size_t i = 1; i < arc.size(); ++i) {
+      const float a0 = (static_cast<float>(i - 1) / 512.0f - 0.5f) * kTau;
+      const float a1 = (static_cast<float>(i) / 512.0f - 0.5f) * kTau;
+      const auto speed = [](float a) {
+        const float dx = std::cos(a);
+        const float dy = 2.0f * std::cos(2.0f * a);
+        return std::sqrt(dx * dx + dy * dy);
+      };
+      total += 0.5f * (speed(a0) + speed(a1)) * (a1 - a0);
+      arc[i] = total;
+    }
+    for (float& x : arc) x /= total;  // 0 at a = -pi, 1 at a = +pi
+    return arc;
+  }();
+  // `u` is a fraction of the way round the curve; find the angle that far along it.
+  const float target = u - std::floor(u);
+  const auto it = std::lower_bound(kArc.begin(), kArc.end(), target);
+  const std::size_t hi = std::max<std::size_t>(
+      1, std::min<std::size_t>(kArc.size() - 1,
+                               static_cast<std::size_t>(it - kArc.begin())));
+  const float span = kArc[hi] - kArc[hi - 1];
+  const float frac = span > 1e-9f ? (target - kArc[hi - 1]) / span : 0.0f;
+  const float idx = (static_cast<float>(hi - 1) + frac) / 512.0f;
+  return (idx - 0.5f) * kTau;
 }
 
 /// The Klein bottle, as the figure-eight immersion.
@@ -214,8 +290,8 @@ OvVec3 stripSurface(float u, float v, float len, float wid, float th, float tau)
 /// A figure-eight can. Rotating the lemniscate (sin a, sin 2a) by pi gives
 /// (-sin a, -sin 2a) = (sin -a, sin -2a), which is exactly a -> -a: the file reversed.
 /// So the cross-section pinches first, and then both seams close to machine precision.
-OvVec3 kleinSurf(float u, float v, float th, float pinch, float ph, float tau,
-                 float open) {
+OvVec3 kleinSurf(float u, float v, float th, float pinch, float ph, float tau, float open,
+                 float evert = 0.0f) {
   const float xl = (u - 0.5f) * kW;
   const float zl = (v - 0.5f) * kH;
   float cr = xl;
@@ -230,13 +306,16 @@ OvVec3 kleinSurf(float u, float v, float th, float pinch, float ph, float tau,
     // Comfortably smaller than the ring it will travel round, or the bottle closes
     // into a disc and the self-intersection - the whole point - has nowhere to show.
     const float rho = (kW / kTau) * 1.05f;
-    const float a = (u - 0.5f) * kTau;
+    const float a = lemniscateAngle(u);
     cr = lerpf(cr, rho * std::sin(a), pinch);
     ca = lerpf(ca, rho * std::sin(2.0f * a), pinch);
   }
   if (ph > 1e-4f) {
     const float base = kH / ph;
-    const float Rr = base * open;
+    // Swept through zero to its negative, the bottle is pulled through its own neck and
+    // comes back with the inside out - the same turn a torus makes, on a surface that
+    // had no outside to begin with.
+    const float Rr = base * open * (1.0f - 2.0f * evert);
     const float p = zl / base;
     const float chi = tau * p * 0.5f;
     const float r2 = cr * std::cos(chi) - ca * std::sin(chi);
@@ -2425,11 +2504,11 @@ std::optional<DemoMove> demoMoveFor(const VariantSpec& v, const Position& pos) {
   return fallback;
 }
 
-/// The derived overture for a board of three or more dimensions: the board's own grid, laid
-/// out by `view::layout` and extruded from stacked to spaced as the cycle forms it. Above
-/// 2-D there is no faithful embedding to warp into - the hand-authored `cube5`/`hyper4`/`t6`
-/// are stylised for the same reason - so the honest generalisation is to animate into the
-/// very lattice the game will draw (M13.4).
+/// The derived overture for a board of three or more dimensions: the board's own grid,
+/// laid out by `view::layout` and extruded from stacked to spaced as the cycle forms it.
+/// Above 2-D there is no faithful embedding to warp into - the hand-authored
+/// `cube5`/`hyper4`/`t6` are stylised for the same reason - so the honest generalisation
+/// is to animate into the very lattice the game will draw (M13.4).
 OvertureScene derivedGridOverture(const VariantSpec& v, float t, const view::Theme& th) {
   (void)th;  // tones are `Light`/`Dark`; the draw layer colours them from the theme
   OvertureScene s;
@@ -2445,9 +2524,9 @@ OvertureScene derivedGridOverture(const VariantSpec& v, float t, const view::The
   cfg.gridGap = lerpf(0.35f, 2.2f, form);
   const std::vector<view::Placement> places = view::layout(v.dims, cfg);
 
-  // `layout` numbers cells from zero; centre each axis so the lattice sits in the middle of
-  // the pane. The overture world is Y-up with the board in X-Z; layout is X-Y with depth in
-  // Z, so the level axis becomes height.
+  // `layout` numbers cells from zero; centre each axis so the lattice sits in the middle
+  // of the pane. The overture world is Y-up with the board in X-Z; layout is X-Y with
+  // depth in Z, so the level axis becomes height.
   const float midX = (fi(v.dims.extent(0)) - 1.0f) * 0.5f;
   const float midZ = (fi(v.dims.extent(1)) - 1.0f) * 0.5f;
   const float midY = (fi(v.dims.extent(2)) - 1.0f) * cfg.depthSpacing * 0.5f;
@@ -2528,10 +2607,16 @@ OvVec3 overtureSurfaceAt(app::Overture which, float u, float v) {
 }
 
 OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v) {
+  return derivedSurfaceAt(kind, u, v, SurfacePose{});
+}
+
+OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v, SurfacePose pose) {
+  const float e = std::clamp(pose.evert, 0.0f, 1.0f);
   switch (kind) {
     case app::SurfaceKind::Tube: {
       TubeOpt o;
       o.th = kTau;
+      o.evert = e;
       return tube(u, v, o);
     }
     case app::SurfaceKind::Torus: {
@@ -2539,14 +2624,16 @@ OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v) {
       o.th = kTau;
       o.ph = kTau;
       o.open = 2.2f;
+      o.evert = e;
       return tube(u, v, o);
     }
-    case app::SurfaceKind::Band:
-      return kMobiusStrip ? stripSurface(u, v, kW * kMobiusStretch, kH / kMobiusStretch,
-                                         kTau, 1.0f)
-                          : band(u, v, kTau, 1.0f);
+    case app::SurfaceKind::Band: {
+      const float stretch = lerpf(1.0f, kMobiusStretch, clampf(pose.stretch, 0.0f, 1.0f));
+      return kMobiusStrip ? stripSurface(u, v, kW * stretch, kH / stretch, kTau, 1.0f, e)
+                          : band(u, v, kTau, 1.0f, e);
+    }
     case app::SurfaceKind::Klein:
-      return kleinSurf(u, v, kTau, 1.0f, kTau, 1.0f, 2.05f);
+      return kleinSurf(u, v, kTau, 1.0f, kTau, 1.0f, 2.05f, e);
     case app::SurfaceKind::FlatGrid:
     case app::SurfaceKind::MirrorBox:
       return flatBoard()(u, v);
@@ -2554,12 +2641,23 @@ OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v) {
   return flatBoard()(u, v);
 }
 
+bool hasPlaySurface(const VariantSpec& v) noexcept {
+  const app::OvertureSignature sig = app::overtureSignature(v);
+  // Only a *glued* two-dimensional board has a surface to become. A mirror box reflects
+  // rather than glues, so there is nothing to close into a shape - and above two
+  // dimensions the board already is its lattice, drawn by the ordinary view (M17.4).
+  const bool glued =
+      sig.surface == app::SurfaceKind::Tube || sig.surface == app::SurfaceKind::Torus ||
+      sig.surface == app::SurfaceKind::Band || sig.surface == app::SurfaceKind::Klein;
+  return sig.dims == 2 && glued;
+}
+
 OvertureScene derivedOvertureScene(const VariantSpec& variant, float t,
                                    const view::Theme& th) {
   const app::OvertureSignature sig = app::overtureSignature(variant);
   // Above 2-D the surface catalogue does not apply - nothing embeds faithfully - so the
-  // overture is the board's own lattice, extruded (M13.4). A temporal board keeps the flat
-  // path: its unfilled boards are not a surface either way.
+  // overture is the board's own lattice, extruded (M13.4). A temporal board keeps the
+  // flat path: its unfilled boards are not a surface either way.
   if (sig.dims >= 3 && !sig.temporal) {
     return derivedGridOverture(variant, t, th);
   }
@@ -2893,6 +2991,69 @@ void addDashed(ImDrawList* dl, const ImVec2* pts, int n, ImU32 col, float width)
   }
 }
 
+// The projection `drawOverture` uses, pulled out so picking can share it exactly. A pick
+// that recomputed the framing its own way could disagree with the drawing at the pane's
+// edges, which is the one bug M17.3 exists to prevent.
+struct OvProjection {
+  ImVec2 centre{};
+  float scale{1.0f};
+  float cy{1.0f}, sy{0.0f}, ce{1.0f}, se{0.0f}, persp{0.0f};
+  bool valid{false};
+
+  struct Shot {
+    ImVec2 at;
+    float depth{0};
+    float k{1};
+  };
+
+  // Y is up and `elev` is the angle above the board, so the far rank is both higher on
+  // screen and deeper in the sort - which is the pair of facts a flat drawing of a solid
+  // has to keep consistent.
+  [[nodiscard]] Shot raw(const OvVec3& p) const {
+    const float x1 = p.x * cy + p.z * sy;
+    const float z1 = -p.x * sy + p.z * cy;
+    const float y2 = p.y * ce + z1 * se;
+    const float z2 = -p.y * se + z1 * ce;
+    const float k = 1.0f / std::max(0.2f, 1.0f + z2 * persp);
+    return {ImVec2(x1 * k, -y2 * k), z2, k};
+  }
+  [[nodiscard]] Shot project(const OvVec3& p) const {
+    const Shot sh = raw(p);
+    return {ImVec2(centre.x + sh.at.x * scale, centre.y + sh.at.y * scale), sh.depth,
+            sh.k};
+  }
+};
+
+OvProjection makeOvProjection(const OvertureScene& scene, ImVec2 min, ImVec2 max,
+                              float zoom) {
+  OvProjection P;
+  P.centre = ImVec2((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
+  const float paneW = max.x - min.x;
+  const float paneH = max.y - min.y;
+  if (std::min(paneW, paneH) <= 1.0f) return P;
+  P.cy = std::cos(scene.cam.yaw);
+  P.sy = std::sin(scene.cam.yaw);
+  P.ce = std::cos(scene.cam.elev);
+  P.se = std::sin(scene.cam.elev);
+  P.persp = scene.cam.persp;
+
+  // Fit by measuring, not by guessing a constant - the lesson the lattice decoration
+  // already learned. Measured on the cells only: a flung piece must not shrink the board.
+  float extX = 1e-3f;
+  float extY = 1e-3f;
+  for (const OvQuad& q : scene.quads) {
+    for (const OvVec3& p : q.p) {
+      const OvProjection::Shot sh = P.raw(p);
+      extX = std::max(extX, std::abs(sh.at.x));
+      extY = std::max(extY, std::abs(sh.at.y));
+    }
+  }
+  constexpr float kFill = 0.40f * 0.70f;
+  P.scale = std::min(paneW * kFill / extX, paneH * kFill / extY) * zoom;
+  P.valid = true;
+  return P;
+}
+
 }  // namespace
 
 void drawOverture(ImDrawList* dl, const OvertureScene& scene, ImVec2 min, ImVec2 max,
@@ -2902,62 +3063,11 @@ void drawOverture(ImDrawList* dl, const OvertureScene& scene, ImVec2 min, ImVec2
   // decoration keeps.
   if (alpha <= 0.001f) return;
 
-  const ImVec2 centre((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
-  const float paneW = max.x - min.x;
-  const float paneH = max.y - min.y;
-  if (std::min(paneW, paneH) <= 1.0f) return;
-  const float cy = std::cos(scene.cam.yaw);
-  const float sy = std::sin(scene.cam.yaw);
-  const float ce = std::cos(scene.cam.elev);
-  const float se = std::sin(scene.cam.elev);
-
-  struct Shot {
-    ImVec2 at;
-    float depth{0};
-    float k{1};
-  };
-  // Y is up and `elev` is the angle above the board, so the far rank is both higher on
-  // screen and deeper in the sort - which is the pair of facts a flat drawing of a solid
-  // has to keep consistent.
-  const auto raw = [&](const OvVec3& p) -> Shot {
-    const float x1 = p.x * cy + p.z * sy;
-    const float z1 = -p.x * sy + p.z * cy;
-    const float y2 = p.y * ce + z1 * se;
-    const float z2 = -p.y * se + z1 * ce;
-    const float k = 1.0f / std::max(0.2f, 1.0f + z2 * scene.cam.persp);
-    return {ImVec2(x1 * k, -y2 * k), z2, k};
-  };
-
-  // Fit by measuring, not by guessing a constant - the lesson the lattice decoration
-  // already learned. A shape under perspective is a very different size on screen from
-  // the same shape flat, so a per-overture radius that suits a donut runs a Klein bottle
-  // off the top of the pane. Measured on the cells only: a detonation throws pieces
-  // clear of the board on purpose, and letting that shrink the board would be the tail
-  // wagging the dog.
-  float extX = 1e-3f;
-  float extY = 1e-3f;
-  for (const OvQuad& q : scene.quads) {
-    for (const OvVec3& p : q.p) {
-      const Shot sh = raw(p);
-      extX = std::max(extX, std::abs(sh.at.x));
-      extY = std::max(extY, std::abs(sh.at.y));
-    }
-  }
-  // A little under half would fill the pane; the object sits at 70% of that instead, so
-  // it reads as something standing beside the menu rather than as the screen's subject -
-  // and so what the fit leaves out, a flung piece or a shockwave ring, still has
-  // somewhere to go.
-  constexpr float kFill = 0.40f * 0.70f;
-  const float scale = std::min(paneW * kFill / extX, paneH * kFill / extY) * zoom;
-  const auto project = [&](const OvVec3& p) -> Shot {
-    // `raw` has already flipped y into screen space - adding here rather than
-    // subtracting. Negating twice turns the board upside down, which does not look like
-    // a bug so much as like standing under the board: the far edge comes out wider than
-    // the near one and the whole trapezoid is inverted.
-    const Shot sh = raw(p);
-    return {ImVec2(centre.x + sh.at.x * scale, centre.y + sh.at.y * scale), sh.depth,
-            sh.k};
-  };
+  const OvProjection P = makeOvProjection(scene, min, max, zoom);
+  if (!P.valid) return;
+  const float scale = P.scale;
+  using Shot = OvProjection::Shot;
+  const auto project = [&](const OvVec3& p) -> Shot { return P.project(p); };
 
   enum class Kind : std::uint8_t { Quad, Token, Trail, Burst };
   struct Item {

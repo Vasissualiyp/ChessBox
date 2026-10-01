@@ -21,8 +21,10 @@ Template: [`template.md`](template.md).
 | [0008](0008-license.md) | GPL-3.0-or-later | Accepted |
 | [0009](0009-tdd-and-oracle.md) | Naive oracle + differential/property testing | Accepted |
 | [0010](0010-closed-surface-ray-semantics.md) | Ray termination, dedup, and attack queries on glued boards | Accepted |
-| [0011](0011-headless-first-renderer.md) | Headless-first renderer; the window is a blit | Accepted |
+| [0011](0011-headless-first-renderer.md) | Headless-first renderer; the window is a blit | Superseded by ADR-0018 |
 | [0012](0012-quantum-chess.md) | Quantum chess needs an ensemble; not built, and why | Accepted |
 | [0013](0013-axis-pitch.md) | An axis may be sampled more finely than a piece moves along it | Accepted |
 | [0016](0016-move-camera-is-pure-over-the-trace.md) | The move camera is a pure function of the generalised move trace | Accepted |
 | [0017](0017-camera-policy-is-data-keyed-by-geometry.md) | Camera policy is data, keyed by geometry kind, not by dimension | Accepted |
+| [0018](0018-interactive-renders-into-the-swapchain.md) | The interactive path renders into the swapchain; two frames in flight | Accepted |
+| [0019](0019-the-play-surface-is-posed-not-only-shaped.md) | A square on the play surface is a patch of it, and the board is posed | Accepted |

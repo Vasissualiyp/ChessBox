@@ -16,6 +16,12 @@ struct MeshVertex {
   /// The shader uses it to shade a piece from its foot upward, which is what stops a
   /// tall piece reading as a flat slab.
   float height;
+  /// Multiplied into the instance's colour. White for every authored shape, where the
+  /// instance is what carries the colour and one mesh is one thing. The geometry view's
+  /// board is the exception it exists for: there the whole board is a single mesh with
+  /// sixty-four colours in it, because the squares are patches of one surface rather
+  /// than sixty-four copies of a slab.
+  float color[4]{1.0f, 1.0f, 1.0f, 1.0f};
 };
 
 /// A range inside the shared vertex and index buffers.

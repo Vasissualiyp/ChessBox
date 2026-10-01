@@ -815,19 +815,17 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   heading("LOOKS", t, small);
   {
     // Two sets, and the choice is stored by name so a settings file stays readable and
-    // a set added later needs no migration.
-    const char* kSets[]{"faceted", "primitive"};
-    int current = s.pieceIcons == "primitive" ? 1 : 0;
-    if (ImGui::Combo("Piece icons", &current, kSets, 2)) {
-      s.pieceIcons = kSets[current];
+    // a set added later needs no migration. A press cycles; there is no drop-down.
+    if (cycleButton("Piece icons", s.pieceIcons, t, scale_, px(230))) {
+      s.pieceIcons = s.pieceIcons == "primitive" ? "faceted" : "primitive";
       request.applyLooks = true;
     }
   }
   {
     // The two palettes, chosen by name for the same reason as the icon set.
-    const char* kThemes[]{"manifold", "console"};
-    int current = s.theme == "console" ? 1 : 0;
-    if (ImGui::Combo("Palette", &current, kThemes, 2)) s.theme = kThemes[current];
+    if (cycleButton("Palette", s.theme, t, scale_, px(230))) {
+      s.theme = s.theme == "console" ? "manifold" : "console";
+    }
   }
   ImGui::PushFont(small);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
@@ -856,11 +854,14 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::Checkbox("Invert vertical orbit", &s.invertOrbitY);
   {
     // The move camera: off keeps the player's own view; the other two let the shot lead
-    // it.
-    const char* kModes[]{"off", "follow the piece", "follow the route"};
-    int mode = s.cameraMode == "piece" ? 1 : (s.cameraMode == "route" ? 2 : 0);
-    if (ImGui::Combo("Move camera", &mode, kModes, 3)) {
-      s.cameraMode = mode == 1 ? "piece" : (mode == 2 ? "route" : "off");
+    // it. A press cycles off -> piece -> route -> off.
+    const std::string shown = s.cameraMode == "piece"   ? "follow the piece"
+                              : s.cameraMode == "route" ? "follow the route"
+                                                        : "off";
+    if (cycleButton("Move camera", shown, t, scale_, px(230))) {
+      s.cameraMode = s.cameraMode == "off"     ? "piece"
+                     : s.cameraMode == "piece" ? "route"
+                                               : "off";
     }
   }
   ImGui::BeginDisabled(s.cameraMode == "off");
@@ -904,7 +905,8 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::PopFont();
   {
     // The promotion list belongs to the variant, so the choices are read from it rather
-    // than hardcoded; with no game loaded there is nothing to promote to yet.
+    // than hardcoded; with no game loaded there is nothing to promote to yet. A press
+    // cycles through them, "always ask" first.
     std::vector<std::string> options{"always ask"};
     if (const app::Session* session = shell.session(); session != nullptr) {
       const VariantSpec& v = session->variant();
@@ -913,17 +915,14 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
         options.push_back(v.pieces[i].name);
       }
     }
-    int current = 0;
+    std::size_t current = 0;
     for (std::size_t i = 1; i < options.size(); ++i) {
-      if (options[i] == s.autoPromoteTo) current = static_cast<int>(i);
+      if (options[i] == s.autoPromoteTo) current = i;
     }
-    std::vector<const char*> items;
-    items.reserve(options.size());
-    for (const std::string& o : options) items.push_back(o.c_str());
-    if (ImGui::Combo("Promote to", &current, items.data(),
-                     static_cast<int>(items.size()))) {
-      s.autoPromoteTo =
-          current == 0 ? std::string{} : options[static_cast<std::size_t>(current)];
+    const std::string shown = s.autoPromoteTo.empty() ? options.front() : s.autoPromoteTo;
+    if (cycleButton("Promote to", shown, t, scale_, px(230))) {
+      current = (current + 1) % options.size();
+      s.autoPromoteTo = current == 0 ? std::string{} : options[current];
     }
   }
   ImGui::Dummy(ImVec2(0, px(8)));
