@@ -448,3 +448,13 @@ captures. `tests/render/test_play_surface.cpp`, `tests/render/test_offscreen_ren
 `hyper4` as a hypercube, `t6` as the quintic, with the adjacency invariant deciding whether
 each embedding is a board or merely a picture. It is its own milestone-sized step and is
 not started.
+
+**M17.12, first pass (2026-09-30):** `torus3d` and `hyper4` now play on their own shapes.
+The shape is *authored*, keyed by the variant's name (`playShapePosition`), because above
+two dimensions it is not read off the gluing - `hyper4` is a plain 4-D box. `PlaySurface`
+grows a stacked branch: one flat tile per cell from those positions, sized by neighbours,
+with a per-tile picker. See [`M17.12-shapes-above-two-dimensions.md`](M17.12-shapes-above-two-dimensions.md)
+for the limits (the level/aeon axes are not adjacent-in-the-drawing; slide/invert are not
+offered yet) and for the `t6` verdict: **a faithful playable quintic is impossible** - the
+6-torus projects ~10 lattice cells onto each drawn tile - so `t6` stays on the lattice, and
+a playable quintic, if wanted, must be a *sliced* view.

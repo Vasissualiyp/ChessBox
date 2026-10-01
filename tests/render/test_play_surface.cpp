@@ -468,4 +468,64 @@ TEST_CASE("the shape is framed on its own centre", "[render]") {
   }
 }
 
+TEST_CASE("a three- and four-dimensional variant plays on its own shape", "[render]") {
+  // M17.12, first two shapes: `torus3d`'s nested shells and `hyper4`'s tesseract. The
+  // shape is authored, not derived, so it is keyed by name; `cube5` has none and stays on
+  // the ordinary lattice. Every cell gets a tile and a seat, sized from its neighbours.
+  for (const char* name : {"torus3d", "hyper4"}) {
+    CAPTURE(name);
+    const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
+    CHECK(hasPlaySurface(v));
+    const PlaySurface s = PlaySurface::build(v);
+    REQUIRE(s.seats().size() == v.dims.cellCount());
+    REQUIRE(s.patches().size() == v.dims.cellCount());
+    for (const SurfaceSeat& seat : s.seats()) {
+      CHECK(seat.stepU > 0.01f);
+      CHECK(seat.stepV > 0.01f);
+      CHECK_THAT(view::length(seat.normal), WithinAbs(1.0f, 1e-4f));
+    }
+    // A real extent, so the camera can frame it.
+    const view::Bounds b = s.bounds();
+    CHECK(b.maxX - b.minX > 1.0f);
+    CHECK(b.maxY - b.minY > 1.0f);
+  }
+  CHECK_FALSE(hasPlaySurface(test::loadVariant("cube5")));
+  CHECK(PlaySurface::build(test::loadVariant("cube5")).empty());
+}
+
+TEST_CASE("picking a three- and four-dimensional shape finds the tile", "[render]") {
+  for (const char* name : {"torus3d", "hyper4"}) {
+    CAPTURE(name);
+    const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
+    const PlaySurface s = PlaySurface::build(v);
+    const float w = 1000.0f;
+    const float h = 760.0f;
+    const view::OrbitCamera cam = view::OrbitCamera::frame(s.bounds(), w / h, 0.0f);
+    int hits = 0;
+    int agreed = 0;
+    for (const SurfaceSeat& t : s.seats()) {
+      const view::OrbitCamera::ScreenPoint sp = cam.project(t.centre, w / h, w, h);
+      if (!sp.visible) continue;
+      const CellId got = s.pick(cam, w, h, sp.x, sp.y);
+      if (got == kInvalidCell) continue;
+      ++hits;
+      if (got == t.cell) {
+        ++agreed;
+        continue;
+      }
+      // Otherwise it is the sheet of the shape in front of this one, which is the right
+      // answer - and it is still under the pixel.
+      const auto it = std::find_if(s.seats().begin(), s.seats().end(),
+                                   [&](const SurfaceSeat& o) { return o.cell == got; });
+      REQUIRE(it != s.seats().end());
+      const view::OrbitCamera::ScreenPoint gp = cam.project(it->centre, w / h, w, h);
+      CHECK(std::hypot(gp.x - sp.x, gp.y - sp.y) < 120.0f);
+    }
+    CHECK(hits > 30);
+    CHECK(agreed > hits / 3);
+    // A pixel off the shape is nothing.
+    CHECK(s.pick(cam, w, h, 2.0f, 2.0f) == kInvalidCell);
+  }
+}
+
 #endif  // CB_HAVE_IMGUI

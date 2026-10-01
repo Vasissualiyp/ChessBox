@@ -100,11 +100,21 @@ class PlaySurface {
                             float px, float py) const;
 
  private:
+  /// The three- and four-dimensional shapes (M17.12): one flat tile per cell from
+  /// `playShapePosition`, since above two dimensions the "surface" is a stack of sheets
+  /// rather than one parametrised sheet.
+  void buildStacked(const VariantSpec& v);
+
   std::vector<SurfaceSeat> seats_;
   std::vector<SurfacePatch> patches_;
   /// A gapless grid of surface points, `nx * kSubdiv + 1` by `nz * kSubdiv + 1`, that
   /// the pick ray is tested against.
   std::vector<view::Vec3> corners_;
+  /// The D >= 3 shapes' tiles: one quad per cell, the surface the pick ray is tested
+  /// against. Empty on a two-dimensional board, which uses `corners_`.
+  bool stacked_{false};
+  std::vector<std::array<view::Vec3, 4>> quads_;
+  std::vector<CellId> quadCells_;
   int nx_{0};
   int nz_{0};
   view::Bounds bounds_{};

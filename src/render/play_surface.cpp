@@ -94,6 +94,12 @@ bool PlaySurface::slidesAlongRanks(const VariantSpec& v) noexcept {
 
 PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
   PlaySurface s;
+  // Above two dimensions the shape is authored, not a parametrised surface (M17.12).
+  OvVec3 probe;
+  if (v.dims.dims() >= 3 && playShapePosition(v, 0, probe)) {
+    s.buildStacked(v);
+    return s;
+  }
   if (!hasPlaySurface(v)) return s;
   // How much of the ribbon's stretch a *board* can afford. At the library screen's full
   // stretch each cell is nine times longer than it is wide, which reads beautifully as a
@@ -245,15 +251,106 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
   return s;
 }
 
-CellId PlaySurface::pick(const view::OrbitCamera& camera, float width, float height,
-                         float px, float py) const {
-  if (corners_.empty()) return kInvalidCell;
-  const view::OrbitCamera::Ray ray = camera.pickRay(px, py, width, height);
-  const int cv = nz_ * kSubdiv + 1;
-  const auto corner = [&](int i, int j) -> const view::Vec3& {
-    return corners_[static_cast<std::size_t>(i * cv + j)];
+void PlaySurface::buildStacked(const VariantSpec& v) {
+  stacked_ = true;
+  const DimSpec& d = v.dims;
+  const int nx = static_cast<int>(d.extent(0));
+  const int nz = static_cast<int>(d.extent(1));
+  nx_ = nx;
+  nz_ = nz;
+  const auto uprightSite = [&](const Coord& base, int df, int dr, view::Vec3& out) {
+    Coord c = base;
+    c.c[0] = static_cast<std::int16_t>(std::clamp(base.c[0] + df, 0, nx - 1));
+    c.c[1] = static_cast<std::int16_t>(std::clamp(base.c[1] + dr, 0, nz - 1));
+    OvVec3 p;
+    if (!playShapePosition(v, d.toCell(c), p)) return false;
+    out = {p.x, -p.z, p.y};  // into the board's Z-up world, as the 2-D shapes are
+    return true;
   };
 
+  view::Bounds b;
+  bool first = true;
+  const auto eat = [&](const view::Vec3& p) {
+    if (first) {
+      b = {p.x, p.y, p.z, p.x, p.y, p.z};
+      first = false;
+      return;
+    }
+    b.minX = std::min(b.minX, p.x);
+    b.minY = std::min(b.minY, p.y);
+    b.minZ = std::min(b.minZ, p.z);
+    b.maxX = std::max(b.maxX, p.x);
+    b.maxY = std::max(b.maxY, p.y);
+    b.maxZ = std::max(b.maxZ, p.z);
+  };
+
+  constexpr int kSide = kSubdiv + 1;
+  const int total = static_cast<int>(d.cellCount());
+  for (int id = 0; id < total; ++id) {
+    const CellId cell = static_cast<CellId>(id);
+    OvVec3 raw;
+    if (!playShapePosition(v, cell, raw)) continue;
+    const Coord c = d.toCoord(cell);
+    const view::Vec3 centre{raw.x, -raw.z, raw.y};
+    view::Vec3 pu{}, mu{}, pv{}, mv{};
+    if (!uprightSite(c, +1, 0, pu) || !uprightSite(c, -1, 0, mu) ||
+        !uprightSite(c, 0, +1, pv) || !uprightSite(c, 0, -1, mv)) {
+      continue;
+    }
+    const view::Vec3 tangentU = pu - mu;
+    const view::Vec3 tangentV = pv - mv;
+    view::Vec3 normal = view::cross(tangentV, tangentU);
+    normal = view::length(normal) > 1e-6f ? view::normalize(normal)
+                                          : view::Vec3{0.0f, 0.0f, 1.0f};
+    const float cellU = 0.5f * view::length(tangentU);
+    const float cellV = 0.5f * view::length(tangentV);
+    const view::Vec3 ex =
+        view::length(tangentU) > 1e-6f ? view::normalize(tangentU) : view::Vec3{1, 0, 0};
+    const view::Vec3 ey = view::cross(normal, ex);
+
+    SurfaceSeat seat;
+    seat.cell = cell;
+    seat.centre = centre;
+    seat.normal = normal;
+    seat.stepU = cellU;
+    seat.stepV = cellV;
+    seat.quat = quatOf(ex, ey, normal);
+    seats_.push_back(seat);
+
+    SurfacePatch patch;
+    patch.cell = cell;
+    for (int i = 0; i < kSide; ++i) {
+      for (int j = 0; j < kSide; ++j) {
+        const float a = (static_cast<float>(i) / kSubdiv - 0.5f) * kCoverage * cellU;
+        const float bb = (static_cast<float>(j) / kSubdiv - 0.5f) * kCoverage * cellV;
+        const std::size_t k = static_cast<std::size_t>(i * kSide + j);
+        patch.pos[k] = centre + ex * a + ey * bb;
+        patch.normal[k] = normal;
+      }
+    }
+    patches_.push_back(patch);
+
+    const view::Vec3 hu = ex * (0.5f * kCoverage * cellU);
+    const view::Vec3 hv = ey * (0.5f * kCoverage * cellV);
+    quads_.push_back(
+        {centre - hu - hv, centre + hu - hv, centre + hu + hv, centre - hu + hv});
+    quadCells_.push_back(cell);
+    eat(centre);
+  }
+
+  const float pad = 0.9f;
+  b.minX -= pad;
+  b.minY -= pad;
+  b.minZ -= pad;
+  b.maxX += pad;
+  b.maxY += pad;
+  b.maxZ += pad;
+  bounds_ = b;
+}
+
+CellId PlaySurface::pick(const view::OrbitCamera& camera, float width, float height,
+                         float px, float py) const {
+  const view::OrbitCamera::Ray ray = camera.pickRay(px, py, width, height);
   // Moeller-Trumbore, nearest hit wins: a cell round the back of the shape is behind the
   // one in front of it, and the one in front is the answer.
   const auto hit = [&](const view::Vec3& a, const view::Vec3& b, const view::Vec3& c,
@@ -272,6 +369,28 @@ CellId PlaySurface::pick(const view::OrbitCamera& camera, float width, float hei
     if (vv < 0.0f || uu + vv > 1.0f) return false;
     t = view::dot(e2, qv) * inv;
     return t > 1e-4f;
+  };
+
+  // A D >= 3 shape is a set of tiles rather than one gapless sheet: test each cell's own
+  // quad, nearest first (M17.12).
+  if (stacked_) {
+    CellId best = kInvalidCell;
+    float bestT = 1e30f;
+    for (std::size_t i = 0; i < quads_.size(); ++i) {
+      const std::array<view::Vec3, 4>& q = quads_[i];
+      float t = 0.0f;
+      if ((hit(q[0], q[1], q[2], t) || hit(q[0], q[2], q[3], t)) && t < bestT) {
+        bestT = t;
+        best = quadCells_[i];
+      }
+    }
+    return best;
+  }
+
+  if (corners_.empty()) return kInvalidCell;
+  const int cv = nz_ * kSubdiv + 1;
+  const auto corner = [&](int i, int j) -> const view::Vec3& {
+    return corners_[static_cast<std::size_t>(i * cv + j)];
   };
 
   CellId best = kInvalidCell;

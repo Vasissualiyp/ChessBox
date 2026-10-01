@@ -639,6 +639,39 @@ TEST_CASE("a ghosted board shows the far side through the near side", "[render][
   REQUIRE(restored.has_value());
   CHECK(restored->rgba == opaquePixels.rgba);
 }
+
+TEST_CASE("the shapes above two dimensions render on the board", "[render][gpu]") {
+  // M17.12: `torus3d`'s nested shells and `hyper4`'s tesseract, drawn through the same
+  // renderer and camera as the 2-D surfaces.
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  for (const char* name : {"torus3d", "hyper4"}) {
+    CAPTURE(name);
+    const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
+    const Position p = Position::startPosition(v);
+    const view::PositionView snap = view::PositionView::capture(p);
+    auto target = OffscreenTarget::create(gpu().ctx, 512, 384);
+    REQUIRE(target.has_value());
+    auto renderer = BoardRenderer::create(gpu().ctx);
+    REQUIRE(renderer.has_value());
+    BoardOptions options = renderer->options();
+    options.surface = true;
+    renderer->setOptions(options);
+    const view::ViewConfig cfg = view::ViewConfig::forBoard(v.dims);
+    const PlaySurface surf = PlaySurface::build(v);
+    REQUIRE_FALSE(surf.empty());
+    const view::OrbitCamera cam =
+        view::OrbitCamera::frame(surf.bounds(), 512.0f / 384.0f, 0.0f);
+
+    (void)gpu().ctx.takeValidationMessages();
+    const auto img = renderer->renderToImage(*target, snap, cfg, cam);
+    REQUIRE(img.has_value());
+    CAPTURE(gpu().ctx.takeValidationMessages());
+    REQUIRE(gpu().ctx.validationErrorCount() == 0);
+    CHECK(img->distinctColors() > 8);
+    CHECK(img->luminanceVariance() > 20.0);
+    REQUIRE(writePpm(*img, capturePath(std::string("surface-") + name)).has_value());
+  }
+}
 #endif  // CB_HAVE_IMGUI
 
 #endif  // CB_HAVE_VULKAN

@@ -2643,13 +2643,46 @@ OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v, SurfacePose pos
 
 bool hasPlaySurface(const VariantSpec& v) noexcept {
   const app::OvertureSignature sig = app::overtureSignature(v);
-  // Only a *glued* two-dimensional board has a surface to become. A mirror box reflects
-  // rather than glues, so there is nothing to close into a shape - and above two
-  // dimensions the board already is its lattice, drawn by the ordinary view (M17.4).
+  // A glued two-dimensional board has a surface derived from its identifications.
   const bool glued =
       sig.surface == app::SurfaceKind::Tube || sig.surface == app::SurfaceKind::Torus ||
       sig.surface == app::SurfaceKind::Band || sig.surface == app::SurfaceKind::Klein;
-  return sig.dims == 2 && glued;
+  if (sig.dims == 2 && glued) return true;
+  // Above two dimensions the shape is authored, not derived, so it is keyed by name
+  // (M17.12): `torus3d`'s nested shells, `hyper4`'s tesseract. Anything else - `cube5`,
+  // `t6` for now - has no play shape and stays on the ordinary lattice.
+  OvVec3 ignored;
+  return playShapePosition(v, 0, ignored);
+}
+
+bool playShapePosition(const VariantSpec& v, CellId cell, OvVec3& out) {
+  const DimSpec& d = v.dims;
+  if (d.dims() == 3 && v.name == "torus3d") {
+    // The nested shells, at the point the library screen has fully rolled: two of the
+    // three gluings close T^2 as the shell's surface, the level axis becomes the shell's
+    // radius, and four levels come out as four shells about one core circle.
+    const Coord c = d.toCoord(cell);
+    out = shellTube((fi(c.c[0]) + 0.5f) / 4.0f, (fi(c.c[1]) + 0.5f) / 4.0f, kTau, kTau,
+                    0.62f + fi(c.c[2]) * 0.82f, 10.5f);
+    return true;
+  }
+  if (d.dims() == 4 && v.name == "hyper4") {
+    // The tesseract: the 4-cube projected as two nested cubes joined corner to corner,
+    // the aeon axis being the nesting. `spin` is fixed, so the play board does not turn
+    // under the player the way the library's does.
+    constexpr float kSpin = 0.9f;
+    const Coord c = d.toCoord(cell);
+    const float cx = fi(c.c[0]) - 1.5f;
+    const float cy = fi(c.c[2]) - 1.5f;
+    const float cz = fi(c.c[1]) - 1.5f;
+    const float cw = fi(c.c[3]) - 1.5f;
+    const float nx = cx * std::cos(kSpin) - cw * std::sin(kSpin);
+    const float nw = cx * std::sin(kSpin) + cw * std::cos(kSpin);
+    const float k = 2.35f / (3.5f - nw);
+    out = OvVec3{nx * k * 2.15f, cy * k * 2.15f * 1.05f, cz * k * 2.15f};
+    return true;
+  }
+  return false;
 }
 
 OvertureScene derivedOvertureScene(const VariantSpec& variant, float t,

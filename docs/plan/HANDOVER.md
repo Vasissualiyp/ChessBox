@@ -116,10 +116,15 @@ and the outward normal is chosen away from the shape's axis so pieces stay outsi
 eversion (M17.7); a `GHOST` button and `--ghost` blend the board through a second pipeline
 with depth writes off (M17.10). Tests and `gui-invert`/`gui-ghost` captures are in.
 
-**Remaining: M17.12, the shapes above two dimensions** - `torus3d` as nested shells,
-`hyper4` as a hypercube, `t6` as the quintic, with the adjacency invariant deciding whether
-each embedding is a board or merely a picture. It generalises `PlaySurface` into a
-`PlayShape` and is its own milestone-sized step; not started.
+**Remaining: M17.12, the shapes above two dimensions.** First pass done (2026-09-30):
+`torus3d` (nested shells) and `hyper4` (tesseract) play on their own shapes via an authored,
+name-keyed `playShapePosition` and a stacked branch of `PlaySurface`. Limits and the `t6`
+verdict are in [`M17.12-shapes-above-two-dimensions.md`](M17.12-shapes-above-two-dimensions.md):
+the level/aeon axes are not adjacent-in-the-drawing, slide/invert are not offered for these
+shapes yet, and **a faithful playable quintic is impossible** (the 6-torus projects ~10
+lattice cells per drawn tile), so `t6` stays on the lattice and any playable quintic must be
+a sliced view. Finish the 3-D shapes (slide/invert, hidden-sheet handling, adjacency tests)
+before the sliced quintic.
 
 ### 5. Then Wave 2
 

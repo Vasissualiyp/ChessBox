@@ -9,6 +9,7 @@
 
 #include "app/overture.hpp"
 #include "render/piece_icon.hpp"
+#include "space/dims.hpp"
 #include "view/theme.hpp"
 
 namespace cb::render {
@@ -174,6 +175,16 @@ struct SurfacePose {
 /// return false, and the interface must offer no toggle for them - a setting that did
 /// nothing would be a lie.
 [[nodiscard]] bool hasPlaySurface(const VariantSpec& v) noexcept;
+
+/// A cell of a three- or four-dimensional variant placed on its hand-authored play shape
+/// - the nested shells of `torus3d`, the tesseract of `hyper4` (M17.12) - in the same
+/// Y-up world the two-dimensional surfaces use. False for anything without one.
+///
+/// Keyed by the variant's own identity, unlike the derived 2-D surfaces: a shape above
+/// two dimensions is *authored*, not read off the gluing - `hyper4` is a plain 4-D box
+/// with no identifications at all, and its shape is the projection a tesseract is always
+/// drawn with. `PlaySurface` turns these positions into a tile per cell.
+[[nodiscard]] bool playShapePosition(const VariantSpec& v, CellId cell, OvVec3& out);
 
 /// Draw one, sorted far to near, into the rectangle it has been given.
 ///

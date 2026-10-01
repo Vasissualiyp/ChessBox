@@ -166,7 +166,7 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | How a menu object answers a drag | `Ui::updateObjectDrag`; the turn is an offset on the object's own animation | |
 | A variant's library animation | `src/render/overture_scene.cpp`; which one, and its cycle, in `src/app/overture.cpp` | |
 | A variant with no bespoke overture | nothing - it gets `derivedOvertureScene` from its geometry (`app::overtureSignature`), keyed by `SurfaceKind`, never its name. See `docs/overtures.md` |
-| Playing on the shape (a glued 2-D board warped to its surface) | `render::PlaySurface` in `src/render/play_surface.cpp` - seats, frames, sizes, tiles and picking, all off one sampling; `BoardRenderer::buildInstances` draws them. The mode is `Settings::geometryView`, offered only where `render::hasPlaySurface`; `Settings::geometryEvert` is the pose. See ADR-0019 | |
+| Playing on the shape (a glued 2-D board warped to its surface, or a `torus3d`/`hyper4` authored shape) | `render::PlaySurface` in `src/render/play_surface.cpp` - seats, frames, sizes, tiles and picking, all off one sampling; the D>=3 shapes come from `playShapePosition` in `src/render/overture_scene.cpp`. `BoardRenderer::buildInstances` draws them. The mode is `Settings::geometryView`, offered only where `render::hasPlaySurface`; `Settings::geometryEvert` is the pose. See ADR-0019 and `docs/plan/M17.12-shapes-above-two-dimensions.md` | |
 | New module in a layer | that layer's dir + CMake edge + test + this table | `cb-new-module` |
 | A decision | `docs/adr/` | `cb-adr` |
 | Perft mismatch | bisect with `divide` against the oracle | `cb-perft-golden` |
@@ -359,6 +359,15 @@ These are the ones that have actually cost time here, not hypotheticals.
   `MeshVertex::color.a` and draws it, after the opaque pieces, with `blendEnable` and
   `depthWriteEnable = false` (`BoardRenderer::surfaceBlendPipeline_`). The pieces stay
   opaque. Alpha 1 is bit-identical to the opaque path (M17.10).
+- **Shapes above two dimensions are authored and keyed by name, and cannot be faithful.**
+  `playShapePosition` gives `torus3d`'s nested shells and `hyper4`'s tesseract; they are
+  *not* read off the gluing (`hyper4` has none), so they are keyed by the variant's name,
+  unlike the derived 2-D surfaces. A `d > 3` manifold cannot embed in 3-D, so these are
+  self-intersecting immersions: overlapping cells, hidden sheets, and axes whose adjacency
+  is not visual nearness. **A faithful playable `t6` quintic is impossible** - the 6-torus
+  folds ~10 lattice cells onto each drawn tile - so `t6` stays on the lattice and any
+  playable quintic must be sliced. Read `docs/plan/M17.12-shapes-above-two-dimensions.md`
+  before extending this.
 - **An 8-cell figure-eight is aliased, and that is why `lemniscateAngle` exists.** Equally
   spaced values of the Klein cross-section's angle land in pairs, which made every other
   file twice the width of its neighbour. The curve is walked at constant speed instead;

@@ -104,4 +104,15 @@ if(TARGET chessbox_gui)
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(gui-ghost PROPERTIES LABELS "render;gui" TIMEOUT 120
     ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  # The shapes above two dimensions (M17.12): `torus3d`'s nested shells and `hyper4`'s
+  # tesseract, validation-clean and a picture.
+  foreach(shape torus3d hyper4)
+    add_test(NAME gui-geometry-${shape}
+      COMMAND chessbox_gui ${shape}
+              --shot ${CMAKE_BINARY_DIR}/render-captures/gui-geometry-${shape}.ppm
+              --geometry
+      WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(gui-geometry-${shape} PROPERTIES LABELS "render;gui"
+      TIMEOUT 120 ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  endforeach()
 endif()
