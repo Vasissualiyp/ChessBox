@@ -381,23 +381,18 @@ SurfaceMoveSample surfaceMoveSample(const view::MovePath& path, const PlaySurfac
 
 view::OrbitCamera surfaceChaseCamera(const SurfaceMoveSample& piece,
                                      const view::Vec3& travel, float distance,
-                                     bool upright) {
+                                     bool upright, float lift) {
   view::OrbitCamera cam;
   cam.target = piece.position;
   cam.distance = std::max(0.5f, distance);
   view::Vec3 forward = travel;
   if (view::length(forward) < 1e-5f) forward = view::Vec3{0.0f, -1.0f, 0.0f};
   forward = view::normalize(forward);
-  // Behind the piece *along the surface*, a good way above it: the travel is projected
-  // onto the surface's tangent plane and the eye lifted along the normal. Taking the raw
-  // travel would let the eye dip below the board wherever the route leans at the normal
-  // - the camera then looks almost straight at the pole, its yaw flips, and the follow
-  // is jerky. The projection keeps the eye on the outward side and the direction a
-  // continuous function of the route.
-  // Behind the piece along the travel, a little above the surface (along the normal):
-  // the shipped chase's own eye direction. The travel is already smoothed by the
-  // caller, so a cell corner does not swivel it.
-  const view::Vec3 toEye = view::normalize(forward * -1.0f + piece.normal * 0.35f);
+  // Behind the piece along the travel and above the surface (along the normal) by the
+  // caller's elevation. `lift` is tan(elevation), so the eye's angle above the tangent
+  // plane is exactly the requested one. The travel is already smoothed by the caller, so
+  // a cell corner does not swivel it.
+  const view::Vec3 toEye = view::normalize(forward * -1.0f + piece.normal * lift);
   cam.pitch = std::asin(std::clamp(toEye.z, -0.99f, 0.99f));
   cam.yaw = std::atan2(toEye.x, -toEye.y);
   if (!upright) return cam;  // the tilt mode: no roll, so the piece rides the shape
@@ -424,7 +419,7 @@ view::OrbitCamera surfaceChaseCamera(const SurfaceMoveSample& piece,
 }
 
 view::OrbitCamera surfaceFollowCamera(const view::MovePath& path, const PlaySurface& surf,
-                                      float t, float distance, bool upright) {
+                                      float t, float distance, bool upright, float lift) {
   t = std::clamp(t, 0.0f, 1.0f);
   const SurfaceMoveSample here = surfaceMoveSample(path, surf, t);
   view::Vec3 travel;
@@ -448,7 +443,7 @@ view::OrbitCamera surfaceFollowCamera(const view::MovePath& path, const PlaySurf
   }
   if (view::length(travel) < 1e-5f)
     travel = here.normal;  // any tangent; the piece stands
-  return surfaceChaseCamera(here, travel, distance, upright);
+  return surfaceChaseCamera(here, travel, distance, upright, lift);
 }
 
 namespace {
@@ -460,36 +455,49 @@ namespace {
 /// leaving it in front of a wall. Only a closed ring has an inner/outer side to turn, so
 /// an open tube or ribbon has nothing to search.
 template <typename ToEye>
-float searchSlide(const VariantSpec& v, CellId target, float eyeDistance,
-                  ToEye toEyeFor) {
-  if (!PlaySurface::slidesAlongRanks(v)) return 0.0f;
+SlideOffset searchSlide(const VariantSpec& v, CellId target, float eyeDistance,
+                        ToEye toEyeFor) {
+  if (!PlaySurface::slidesAlongRanks(v)) return {};
   const int nx = static_cast<int>(v.dims.extent(0));
-  const float period = 2.0f * static_cast<float>(nx);
-  float best = 0.0f;
+  const int nz = static_cast<int>(v.dims.extent(1));
+  const float periodU = 2.0f * static_cast<float>(nx);
+  const float periodV = 2.0f * static_cast<float>(nz);
+  // A coarse grid on both axes. Twelve steps each is a cell and a half at the board's
+  // usual eight, and the result is eased into, so the exact grid point does not show.
+  //
+  // On a non-orientable board the U axis is not searched: measured on the Klein bottle's
+  // rank seam its tile-corner gap grew to about ten times an ordinary gap, while the V
+  // axis stayed near one, so only V is offered there.
+  const bool orientable = v.geom.isOrientable();
+  constexpr int kSteps = 12;
+  SlideOffset best{};
   float bestScore = -1e9f;
-  for (int i = 0; i < 16; ++i) {
-    SurfacePose pose;
-    pose.slideU = period * static_cast<float>(i) / 16.0f;
-    const PlaySurface s = PlaySurface::build(v, pose);
-    const SurfaceSeat* seat = nullptr;
-    for (const SurfaceSeat& t : s.seats()) {
-      if (t.cell == target) {
-        seat = &t;
-        break;
+  for (int iu = 0; iu < (orientable ? kSteps : 1); ++iu) {
+    for (int iv = 0; iv < kSteps; ++iv) {
+      SurfacePose pose;
+      pose.slideU = periodU * static_cast<float>(iu) / static_cast<float>(kSteps);
+      pose.slideV = periodV * static_cast<float>(iv) / static_cast<float>(kSteps);
+      const PlaySurface s = PlaySurface::build(v, pose);
+      const SurfaceSeat* seat = nullptr;
+      for (const SurfaceSeat& t : s.seats()) {
+        if (t.cell == target) {
+          seat = &t;
+          break;
+        }
       }
-    }
-    if (seat == nullptr) continue;
-    view::Vec3 toEye = toEyeFor(*seat);
-    toEye = view::length(toEye) > 1e-6f ? view::normalize(toEye) : view::Vec3{0, 0, 1};
-    // The eye the camera would sit at for this candidate, and whether the shape comes
-    // between it and the piece.
-    const view::Vec3 eye = seat->centre + toEye * eyeDistance;
-    const bool occluded = s.blocked(eye, seat->centre, 0.02f);
-    const float facing = view::dot(seat->normal, toEye);
-    const float score = (occluded ? -10.0f : 0.0f) + facing;
-    if (score > bestScore) {
-      bestScore = score;
-      best = pose.slideU;
+      if (seat == nullptr) continue;
+      view::Vec3 toEye = toEyeFor(*seat);
+      toEye = view::length(toEye) > 1e-6f ? view::normalize(toEye) : view::Vec3{0, 0, 1};
+      // The eye the camera would sit at for this candidate, and whether the shape comes
+      // between it and the piece.
+      const view::Vec3 eye = seat->centre + toEye * eyeDistance;
+      const bool occluded = s.blocked(eye, seat->centre, 0.02f);
+      const float facing = view::dot(seat->normal, toEye);
+      const float score = (occluded ? -10.0f : 0.0f) + facing;
+      if (score > bestScore) {
+        bestScore = score;
+        best = {pose.slideU, pose.slideV};
+      }
     }
   }
   return best;
@@ -497,20 +505,20 @@ float searchSlide(const VariantSpec& v, CellId target, float eyeDistance,
 
 }  // namespace
 
-float alignSlideU(const VariantSpec& v, CellId target, const view::Vec3& travel,
-                  float eyeDistance) {
+SlideOffset alignSlideU(const VariantSpec& v, CellId target, const view::Vec3& travel,
+                        float eyeDistance, float lift) {
   view::Vec3 fwd = travel;
   if (view::length(fwd) < 1e-5f) fwd = view::Vec3{0.0f, -1.0f, 0.0f};
   fwd = view::normalize(fwd);
   // Where the chase camera would sit for each candidate: behind the piece along the
-  // travel, a little above the surface.
+  // travel and above the surface by the same elevation the camera uses.
   return searchSlide(v, target, eyeDistance, [&](const SurfaceSeat& seat) {
-    return fwd * -1.0f + seat.normal * 0.35f;
+    return fwd * -1.0f + seat.normal * lift;
   });
 }
 
-float alignSlideToFace(const VariantSpec& v, CellId target, const view::Vec3& toCamera,
-                       float eyeDistance) {
+SlideOffset alignSlideToFace(const VariantSpec& v, CellId target,
+                             const view::Vec3& toCamera, float eyeDistance) {
   view::Vec3 toCam = toCamera;
   if (view::length(toCam) < 1e-5f) toCam = view::Vec3{0.0f, 0.0f, 1.0f};
   toCam = view::normalize(toCam);

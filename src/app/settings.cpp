@@ -106,10 +106,16 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.geometryInvert = asBool(value);
     else if (key == "geometry_ghost")
       s.geometryGhost = asFloat(value, s.geometryGhost);
+    else if (key == "klein_twist")
+      s.kleinTwist = asFloat(value, s.kleinTwist);
+    else if (key == "geometry_width")
+      s.geometryWidth = asFloat(value, s.geometryWidth);
     else if (key == "geometry_align")
       s.geometryAlign = asBool(value);
     else if (key == "follow_upright")
       s.followUpright = asBool(value);
+    else if (key == "follow_elevation")
+      s.followElevationDeg = asFloat(value, s.followElevationDeg);
     else if (key == "shape_follow")
       s.shapeFollow = value;
     else if (key == "geometry_slide_u")
@@ -180,8 +186,11 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "geometry_evert = " << geometryEvert << '\n';
   out << "geometry_invert = " << boolText(geometryInvert) << '\n';
   out << "geometry_ghost = " << geometryGhost << '\n';
+  out << "klein_twist = " << kleinTwist << '\n';
+  out << "geometry_width = " << geometryWidth << '\n';
   out << "geometry_align = " << boolText(geometryAlign) << '\n';
   out << "follow_upright = " << boolText(followUpright) << '\n';
+  out << "follow_elevation = " << followElevationDeg << '\n';
   out << "shape_follow = " << shapeFollow << '\n';
   out << "geometry_slide_u = " << geometrySlideU << '\n';
   out << "geometry_slide_v = " << geometrySlideV << '\n';
@@ -212,6 +221,8 @@ void Settings::sanitize() {
   geometryEvert = std::clamp(geometryEvert, 0.0f, 1.0f);
   // Never fully transparent: a board you cannot see is not a ghost, it is gone.
   geometryGhost = std::clamp(geometryGhost, 0.35f, 1.0f);
+  kleinTwist = std::clamp(kleinTwist, 0.0f, 6.0f);
+  geometryWidth = std::clamp(geometryWidth, 0.4f, 4.0f);
   // The slide is not wrapped here: its period is two laps of the *board*, which this
   // layer does not know. `PlaySurface` wraps it against the board's own extent (M17.9).
   animationSpeed = std::clamp(animationSpeed, 0.25f, 4.0f);
@@ -222,6 +233,7 @@ void Settings::sanitize() {
   volumeMusic = std::clamp(volumeMusic, 0.0f, 1.0f);
   volumeEffects = std::clamp(volumeEffects, 0.0f, 1.0f);
   followStrength = std::clamp(followStrength, 0.0f, 1.0f);
+  followElevationDeg = std::clamp(followElevationDeg, 5.0f, 80.0f);
   if (cameraMode != "off" && cameraMode != "piece" && cameraMode != "route") {
     cameraMode = "off";
   }

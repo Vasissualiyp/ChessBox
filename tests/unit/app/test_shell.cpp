@@ -326,6 +326,9 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
     shell->settings().cameraMode = "route";
     shell->settings().followStrength = 0.4f;
     shell->settings().shapeFollow = "chase";
+    shell->settings().followElevationDeg = 45.0f;
+    shell->settings().kleinTwist = 3.0f;
+    shell->settings().geometryWidth = 1.5f;
     shell->settings().frameCap = 60;
     REQUIRE(shell->startGame("klein").has_value());  // also records the last variant
     shell->applySettings();
@@ -344,6 +347,9 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
     REQUIRE(shell->settings().cameraMode == "route");
     REQUIRE(shell->settings().followStrength == 0.4f);
     REQUIRE(shell->settings().shapeFollow == "chase");
+    REQUIRE(shell->settings().followElevationDeg == 45.0f);
+    REQUIRE(shell->settings().kleinTwist == 3.0f);
+    REQUIRE(shell->settings().geometryWidth == 1.5f);
     REQUIRE(shell->settings().frameCap == 60);
   }
 }
@@ -373,11 +379,17 @@ TEST_CASE("settings are clamped to usable values", "[unit][app]") {
   s.orbitSensitivity = -4.0f;
   s.volumeMaster = 5.0f;
   s.shapeFollow = "sideways";
+  s.followElevationDeg = 200.0f;
+  s.kleinTwist = 99.0f;
+  s.geometryWidth = 99.0f;
   s.lastVariant.clear();
   s.sanitize();
   REQUIRE(s.guiScale <= 3.0f);
   REQUIRE(s.orbitSensitivity >= 0.1f);
   REQUIRE(s.volumeMaster <= 1.0f);
+  REQUIRE(s.followElevationDeg <= 80.0f);
+  REQUIRE(s.kleinTwist <= 6.0f);
+  REQUIRE(s.geometryWidth <= 4.0f);
   REQUIRE(s.shapeFollow == "chase");
   REQUIRE_FALSE(s.lastVariant.empty());
 }

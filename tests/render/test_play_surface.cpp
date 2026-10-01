@@ -728,7 +728,8 @@ TEST_CASE("align turns an inner-ring cell toward the camera", "[render]") {
   // Where the chase camera would sit for a piece travelling along `travel`, and the
   // direction from the piece to it.
   const auto eyeFor = [](const SurfaceSeat& seat, const view::Vec3& travel) {
-    const view::Vec3 toEye = view::normalize(travel * -1.0f + seat.normal * 0.35f);
+    const view::Vec3 toEye =
+        view::normalize(travel * -1.0f + seat.normal * kDefaultFollowLift);
     return std::pair{seat.centre + toEye * 6.0f, toEye};
   };
 
@@ -748,9 +749,10 @@ TEST_CASE("align turns an inner-ring cell toward the camera", "[render]") {
   const SurfaceSeat* base = seatFor(rest, inner);
   REQUIRE(base != nullptr);
   const view::Vec3 travel = byQuat(base->quat, view::Vec3{1, 0, 0});  // a real tangent
-  const float offset = alignSlideU(v, inner, travel, 6.0f);
+  const SlideOffset offset = alignSlideU(v, inner, travel, 6.0f);
   SurfacePose pose;
-  pose.slideU = offset;
+  pose.slideU = offset.u;
+  pose.slideV = offset.v;
   const PlaySurface turned = PlaySurface::build(v, pose);
   const SurfaceSeat* fixed = seatFor(turned, inner);
   REQUIRE(fixed != nullptr);
@@ -761,8 +763,10 @@ TEST_CASE("align turns an inner-ring cell toward the camera", "[render]") {
   CHECK_FALSE(turned.blocked(eye, fixed->centre, 0.02f));  // nothing between the two
 
   // An open tube/ribbon has nothing to align.
-  CHECK(alignSlideU(test::loadVariant("cylinder"), 0, travel, 6.0f) == 0.0f);
-  CHECK(alignSlideU(test::loadVariant("mobius"), 0, travel, 6.0f) == 0.0f);
+  const SlideOffset none = alignSlideU(test::loadVariant("cylinder"), 0, travel, 6.0f);
+  CHECK(none.u == 0.0f);
+  CHECK(none.v == 0.0f);
+  CHECK(alignSlideU(test::loadVariant("mobius"), 0, travel, 6.0f).u == 0.0f);
 }
 
 TEST_CASE("Klein's normal field is continuous except at its seam", "[render]") {
@@ -870,9 +874,8 @@ TEST_CASE("the chase camera centres a piece, and stands it up or lets it tilt",
 TEST_CASE("the chase camera's up really is the piece's up", "[render]") {
   // The stronger form of the claim above: not merely that the normal points *roughly*
   // up the screen, but that the view's up axis is the piece's normal projected
-  // perpendicular to the view direction - the vectors are aligned. The loose check
-  // above let a roll that was the wrong way round pass whenever the seat happened to
-  // stand near a pole; this is exact, at every seat and for both surface tangents.
+  // perpendicular to the view direction - the vectors are aligned. The loose check above
+  // did not catch the inverted roll; this checks every seat and both surface tangents.
   for (const std::string& name : kShapes) {
     const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
     const PlaySurface surf = PlaySurface::build(v);
@@ -1014,9 +1017,11 @@ TEST_CASE("the turntable align turns the piece to face the camera, unoccluded",
     int unoccluded = 0;
     int facing = 0;
     for (const SurfaceSeat& seat : rest.seats()) {
-      const float offset = alignSlideToFace(v, seat.cell, toCamera, 0.6f * restSpan);
+      const SlideOffset offset =
+          alignSlideToFace(v, seat.cell, toCamera, 0.6f * restSpan);
       SurfacePose pose;
-      pose.slideU = offset;
+      pose.slideU = offset.u;
+      pose.slideV = offset.v;
       const PlaySurface turned = PlaySurface::build(v, pose);
       const SurfaceSeat* fixed = [&]() -> const SurfaceSeat* {
         for (const SurfaceSeat& s : turned.seats()) {
@@ -1036,11 +1041,11 @@ TEST_CASE("the turntable align turns the piece to face the camera, unoccluded",
     // Every cell can be brought clear of the shape on a closed ring: the search prefers
     // an unoccluded seat over a better-facing one, so nothing clips.
     CHECK(unoccluded == checked);
-    // ...and on the orientable torus every cell also faces the camera. A Klein bottle's
-    // normal field cannot be globally consistent, so a handful show their back - still
-    // unoccluded, which is the property that matters.
+    // ...and on the orientable torus every cell also faces the camera. On the Klein
+    // bottle only the V offset is searched (the U offset was measured to tear the
+    // tiling), so its cells are not all turned to face the eye - but none is hidden.
     const bool orientable = std::string(name) == "torus";
-    CHECK(facing >= (orientable ? checked : checked * 3 / 4));
+    CHECK(facing >= (orientable ? checked : checked / 2));
   }
 }
 
@@ -1060,9 +1065,10 @@ TEST_CASE("the chase align clears the shape at the camera's own distance", "[ren
     int unoccluded = 0;
     for (const SurfaceSeat& seat : rest.seats()) {
       const view::Vec3 travel = byQuat(seat.quat, view::Vec3{1, 0, 0});
-      const float offset = alignSlideU(v, seat.cell, travel, eyeDistance);
+      const SlideOffset offset = alignSlideU(v, seat.cell, travel, eyeDistance);
       SurfacePose pose;
-      pose.slideU = offset;
+      pose.slideU = offset.u;
+      pose.slideV = offset.v;
       const PlaySurface turned = PlaySurface::build(v, pose);
       const SurfaceSeat* fixed = nullptr;
       for (const SurfaceSeat& s : turned.seats()) {
@@ -1070,7 +1076,8 @@ TEST_CASE("the chase align clears the shape at the camera's own distance", "[ren
       }
       REQUIRE(fixed != nullptr);
       ++checked;
-      const view::Vec3 toEye = view::normalize(travel * -1.0f + fixed->normal * 0.35f);
+      const view::Vec3 toEye =
+          view::normalize(travel * -1.0f + fixed->normal * kDefaultFollowLift);
       const view::Vec3 eye = fixed->centre + toEye * eyeDistance;
       if (!turned.blocked(eye, fixed->centre, 0.02f)) ++unoccluded;
     }
@@ -1078,6 +1085,105 @@ TEST_CASE("the chase align clears the shape at the camera's own distance", "[ren
     // A Klein bottle passes through itself, so a cell or two can have a nearer sheet over
     // them whatever the slide; the orientable torus must be clear everywhere.
     CHECK(unoccluded >= (std::string(name) == "torus" ? checked : checked * 9 / 10));
+  }
+}
+
+TEST_CASE("a V slide keeps the Klein rank seam whole", "[render]") {
+  // Measured on the Klein bottle's rank seam: sliding U grew the tile-corner gap to about
+  // ten times an ordinary gap, while sliding V kept it near one. That is why only V is
+  // offered on a non-orientable board.
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("klein"));
+  const int nx = static_cast<int>(v.dims.extent(0));
+  const int nz = static_cast<int>(v.dims.extent(1));
+  constexpr int kSide = kSurfaceSubdiv + 1;
+  const auto rankRowGap = [&](const PlaySurface& s, int f, int r0, int r1, bool mirror) {
+    const SurfacePatch& a = patchAt(s, v, f, r0);
+    const SurfacePatch& b = patchAt(s, v, r1 < 0 ? nx - 1 - f : f, r1 < 0 ? 0 : r1);
+    float gap = 0.0f;
+    for (int i = 0; i < kSide; ++i) {
+      const int bi = mirror ? kSide - 1 - i : i;
+      gap = std::max(gap, dist(cornerOf(a, i, kSurfaceSubdiv), cornerOf(b, bi, 0)));
+    }
+    return gap;
+  };
+  for (float slide : {0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f}) {
+    SurfacePose pose;
+    pose.slideV = slide;
+    const PlaySurface s = PlaySurface::build(v, pose);
+    const float ordinary = rankRowGap(s, 0, 2, 3, false);
+    for (int f = 0; f < nx; ++f) {
+      const float seam = rankRowGap(s, f, nz - 1, -1, true);
+      CAPTURE(slide, f, seam, ordinary);
+      CHECK(seam < 2.0f * ordinary);
+    }
+  }
+}
+
+TEST_CASE("the Klein surface closes its gluing", "[render]") {
+  // Before anything about tiles: does the immersion actually join? The variant glues
+  // the ranks with a file flip, so the point at rank 1 must be the point at rank 0 with
+  // the file coordinate reversed; the files are glued straight, so u+1 is u. A join that
+  // reversed the wrong axis, or by the wrong amount, would not match.
+  const float eps = 2e-3f;
+  for (int i = 0; i <= 8; ++i) {
+    const float u = static_cast<float>(i) / 8.0f;
+    const OvVec3 rank = derivedSurfaceAt(app::SurfaceKind::Klein, u, 1.0f);
+    const OvVec3 back = derivedSurfaceAt(app::SurfaceKind::Klein, 1.0f - u, 0.0f);
+    CAPTURE(u, rank.x, rank.y, rank.z, back.x, back.y, back.z);
+    CHECK(std::abs(rank.x - back.x) < eps);
+    CHECK(std::abs(rank.y - back.y) < eps);
+    CHECK(std::abs(rank.z - back.z) < eps);
+
+    const OvVec3 file = derivedSurfaceAt(app::SurfaceKind::Klein, u + 1.0f, 0.5f);
+    const OvVec3 here = derivedSurfaceAt(app::SurfaceKind::Klein, u, 0.5f);
+    CHECK(std::abs(file.x - here.x) < eps);
+    CHECK(std::abs(file.y - here.y) < eps);
+    CHECK(std::abs(file.z - here.z) < eps);
+  }
+}
+
+TEST_CASE("the Klein gluing seams are ordinary cell steps, not gaps", "[render]") {
+  // A gluing seam is where the board continues, so the two cells either side must sit
+  // about one lattice step apart - not half a board, and not on top of each other.
+  // Checked at a range of slides: the seam stays within the ordinary steps' own spread.
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("klein"));
+  const int nx = static_cast<int>(v.dims.extent(0));
+  const int nz = static_cast<int>(v.dims.extent(1));
+  for (float slide : {0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f}) {
+    SurfacePose pose;
+    pose.slideU = slide;
+    const PlaySurface s = PlaySurface::build(v, pose);
+    // The yardstick is the widest *ordinary* step on the axis, not the step next to the
+    // seam: a swept figure-eight makes file steps vary by nearly two to one, and the
+    // claim is that the seam is no worse than an ordinary cell, not that every cell is
+    // the same size.
+    float widestU = 0.0f;
+    float widestV = 0.0f;
+    for (int f = 0; f < nx; ++f) {
+      for (int r = 0; r < nz; ++r) {
+        if (f + 1 < nx)
+          widestU = std::max(
+              widestU, dist(seatAt(s, v, f, r).centre, seatAt(s, v, f + 1, r).centre));
+        if (r + 1 < nz)
+          widestV = std::max(
+              widestV, dist(seatAt(s, v, f, r).centre, seatAt(s, v, f, r + 1).centre));
+      }
+    }
+    // The rank seam: (f, nz-1) joins (nx-1-f, 0).
+    for (int f = 0; f < nx; ++f) {
+      const float seam =
+          dist(seatAt(s, v, f, nz - 1).centre, seatAt(s, v, nx - 1 - f, 0).centre);
+      CAPTURE(slide, f, seam, widestV);
+      CHECK(seam < 1.25f * widestV);
+      CHECK(seam > 0.4f * widestV);
+    }
+    // The file seam: (nx-1, r) joins (0, r).
+    for (int r = 0; r < nz; ++r) {
+      const float seam = dist(seatAt(s, v, nx - 1, r).centre, seatAt(s, v, 0, r).centre);
+      CAPTURE(slide, r, seam, widestU);
+      CHECK(seam < 1.25f * widestU);
+      CHECK(seam > 0.4f * widestU);
+    }
   }
 }
 

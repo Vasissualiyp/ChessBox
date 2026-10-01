@@ -13,10 +13,12 @@ layout(location = 4) in float fragEdgeMask;
 layout(location = 5) in float fragHeight;
 layout(location = 6) in vec2 fragEdgeInset;
 layout(location = 7) in float fragMetal;
+layout(location = 8) in vec3 fragWorld;
 
 layout(push_constant) uniform Push {
     mat4 viewProj;
     vec4 lightDir;
+    vec4 eyePos;
 } push;
 
 layout(location = 0) out vec4 outColor;
@@ -26,7 +28,10 @@ bool maskHas(float mask, int bit) {
 }
 
 void main() {
+    // Two-sided: turn the normal toward the viewer before lighting, so a fragment on
+    // either side of the surface is shaded the same.
     vec3 n = normalize(fragNormal);
+    if (dot(n, push.eyePos.xyz - fragWorld) < 0.0) n = -n;
     float lambert = max(dot(n, normalize(-push.lightDir.xyz)), 0.0);
 
     // A warm key and a cool fill, so vertical faces stay distinct from horizontal ones

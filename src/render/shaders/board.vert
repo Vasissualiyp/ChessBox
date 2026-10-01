@@ -25,6 +25,7 @@ layout(location = 10) in vec4 instQuat;     // full orientation (x,y,z,w); ident
 layout(push_constant) uniform Push {
     mat4 viewProj;
     vec4 lightDir;
+    vec4 eyePos;
 } push;
 
 layout(location = 0) out vec4 fragColor;
@@ -35,6 +36,7 @@ layout(location = 4) out float fragEdgeMask;
 layout(location = 5) out float fragHeight;
 layout(location = 6) out vec2 fragEdgeInset;
 layout(location = 7) out float fragMetal;
+layout(location = 8) out vec3 fragWorld;
 
 // Rotate a vector by a unit quaternion.
 vec3 rotateByQuat(vec3 v, vec4 q) {
@@ -66,6 +68,7 @@ void main() {
     // The normal takes the inverse scale, in the same frame the scale was applied in.
     fragNormal = normalize(rotateByQuat(
         vec3(nspun, inNormal.z) / max(abs(instScale), vec3(1e-6)), instQuat));
+    fragWorld = world;
     fragLocal = inPosition.xy;
     fragEdge = instEdge;
     fragEdgeMask = instEdgeMask;

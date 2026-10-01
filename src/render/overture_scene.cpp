@@ -2623,17 +2623,22 @@ OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v, SurfacePose pos
       TubeOpt o;
       o.th = kTau;
       o.ph = kTau;
-      o.open = 2.2f;
+      // The ring radius is the surface's "width"; the cross-section is its thickness and
+      // does not change with `openness`.
+      o.open = 2.2f * pose.openness;
       o.evert = e;
       return tube(u, v, o);
     }
     case app::SurfaceKind::Band: {
       const float stretch = lerpf(1.0f, kMobiusStretch, clampf(pose.stretch, 0.0f, 1.0f));
-      return kMobiusStrip ? stripSurface(u, v, kW * stretch, kH / stretch, kTau, 1.0f, e)
+      // `len` sets the ribbon's loop radius, so widening it opens the loop and leaves the
+      // ribbon width (`kH / stretch`) alone.
+      return kMobiusStrip ? stripSurface(u, v, kW * stretch * pose.openness, kH / stretch,
+                                         kTau, 1.0f, e)
                           : band(u, v, kTau, 1.0f, e);
     }
     case app::SurfaceKind::Klein:
-      return kleinSurf(u, v, kTau, 1.0f, kTau, 1.0f, 2.05f, e);
+      return kleinSurf(u, v, kTau, 1.0f, kTau, pose.twist, 2.05f * pose.openness, e);
     case app::SurfaceKind::FlatGrid:
     case app::SurfaceKind::MirrorBox:
       return flatBoard()(u, v);

@@ -925,6 +925,12 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::TextUnformatted("height encodes value; 0 makes every piece the same");
   ImGui::PopStyleColor();
   ImGui::PopFont();
+  // A diagnostic knob for the Klein bottle's ring twist. Only whole half-turns close the
+  // figure-eight cross-section, so the slider steps by one half-turn.
+  ImGui::SliderFloat("Klein twist (half-turns)", &s.kleinTwist, 0.0f, 6.0f, "%.0f");
+  // The ring/loop radius: opens a tight torus or Klein bottle (a wider hole) or lengthens
+  // the Moebius loop, leaving the cross-section thickness alone.
+  ImGui::SliderFloat("Shape width", &s.geometryWidth, 0.4f, 3.0f, "%.2fx");
   ImGui::Dummy(ImVec2(0, px(8)));
 
   heading("CAMERA", t, small);
@@ -954,6 +960,8 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
     }
   }
   ImGui::SliderFloat("Follow strength", &s.followStrength, 0.0f, 1.0f, "%.2f");
+  ImGui::SliderFloat("Camera above the piece", &s.followElevationDeg, 5.0f, 80.0f,
+                     "%.0f deg");
   ImGui::Checkbox("Keep the followed piece upright", &s.followUpright);
   ImGui::Checkbox("Stop the shape clipping the followed piece", &s.geometryAlign);
   ImGui::EndDisabled();
@@ -1078,7 +1086,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       before.showLegalMoves != s.showLegalMoves ||
       before.showLastMove != s.showLastMove || before.showCheck != s.showCheck ||
       before.showSeams != s.showSeams || before.showSeamLegend != s.showSeamLegend ||
-      before.showCoordinates != s.showCoordinates ||
+      before.showCoordinates != s.showCoordinates || before.kleinTwist != s.kleinTwist ||
       before.pieceHeightScale != s.pieceHeightScale || before.flatView != s.flatView ||
       before.pieceIcons != s.pieceIcons || before.animateMoves != s.animateMoves ||
       before.theme != s.theme || before.animationSpeed != s.animationSpeed ||
@@ -1087,6 +1095,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       before.zoomSensitivity != s.zoomSensitivity ||
       before.invertOrbitY != s.invertOrbitY || before.cameraMode != s.cameraMode ||
       before.followStrength != s.followStrength ||
+      before.followElevationDeg != s.followElevationDeg ||
       before.followUpright != s.followUpright ||
       before.geometryAlign != s.geometryAlign || before.shapeFollow != s.shapeFollow ||
       before.confirmMoves != s.confirmMoves || before.autoPromoteTo != s.autoPromoteTo ||

@@ -16,8 +16,13 @@ namespace {
 struct PushConstants {
   view::Mat4 viewProj{};
   float lightDir[4]{-0.42f, -0.55f, -0.72f, 0.0f};
+  /// The camera position, so a fragment can turn its normal toward the eye. A
+  /// non-orientable shape (a Klein bottle) cannot have a globally consistent outward
+  /// normal, so shading by its sign would show the unavoidable flip as a seam; facing
+  /// the normal at the viewer makes the flip invisible.
+  float eyePos[4]{0.0f, 0.0f, 0.0f, 1.0f};
 };
-static_assert(sizeof(PushConstants) == 80);
+static_assert(sizeof(PushConstants) == 96);
 
 struct BackdropPush {
   float inner[4]{};
@@ -643,6 +648,8 @@ InstanceSet BoardRenderer::buildInstances(
     pose.slideU = options_.surfaceSlideU;
     pose.slideV = options_.surfaceSlideV;
     pose.evert = options_.surfaceEvert;
+    pose.twist = options_.surfaceTwist;
+    pose.openness = options_.surfaceOpenness;
     const PlaySurface surf = PlaySurface::build(v, pose);
 
     std::vector<Archetype> shape(v.pieces.size(), Archetype::Tower);
@@ -697,10 +704,11 @@ InstanceSet BoardRenderer::buildInstances(
       const view::Rgba fill = fillFor(patch.cell);
       float rgba[4]{};
       toFloat4(fill, rgba);
-      // The square's sides and underside take the board's rim colour. Without that the
-      // gap between two squares shows the same tone as their faces and the line between
-      // them disappears - which on a curved board, where there is no shadow to help, is
-      // the difference between a chequerboard and a smooth grey ring.
+      // The square's *sides* take the board's rim colour: that is what keeps the gap
+      // between two squares a line rather than a seamless smear of chequerboard. The
+      // underside is the square's own colour, the same as its face, so a board turned
+      // over - or a shape seen from inside, as on a Klein bottle - still reads as the
+      // same board rather than a uniform grey shell.
       float groove[4]{};
       toFloat4(mix(fill, theme_.boardRim, 0.62f), groove);
       // The ghost alpha rides in the vertex colour (M17.10); the pieces are separate
@@ -722,7 +730,7 @@ InstanceSet BoardRenderer::buildInstances(
           const std::size_t k = static_cast<std::size_t>(i * kSide + j);
           push(patch.pos[k] - patch.normal[k] * kHalf,
                view::Vec3{-patch.normal[k].x, -patch.normal[k].y, -patch.normal[k].z},
-               0.80f, groove);
+               0.80f, rgba);
         }
       }
       const std::uint32_t backBase = base + kSide * kSide;
@@ -1385,6 +1393,10 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
                                           static_cast<float>(target.height())};
   PushConstants push{};
   push.viewProj = camera.viewProj(board.width / board.height);
+  const view::Vec3 eye = camera.eye();
+  push.eyePos[0] = eye.x;
+  push.eyePos[1] = eye.y;
+  push.eyePos[2] = eye.z;
 
   {
     const auto barrier = [&](VkImage image, VkImageAspectFlags aspectMask,

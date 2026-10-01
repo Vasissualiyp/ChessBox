@@ -40,16 +40,28 @@ struct SurfaceMoveSample {
 [[nodiscard]] SurfaceMoveSample surfaceMoveSample(const view::MovePath& path,
                                                   const PlaySurface& surf, float t);
 
-/// The slide offset, in cells, that best keeps `target`'s cell visible to a camera
-/// following a move along `travel`: it maximises the cell's `facing` (its outward normal
-/// toward the camera) and prefers offsets where nothing else on the shape lies between
-/// the two. `eyeDistance` is how far the camera will actually sit from the cell - the
-/// search must test occlusion at *that* distance, or a close follow can still be behind
-/// the tube. This is the anti-clip search (M17.17, revised): for a closed ring (`torus`,
-/// `klein`) only - an open tube or ribbon has no inner/outer side to turn, so it returns
-/// 0.
-[[nodiscard]] float alignSlideU(const VariantSpec& v, CellId target,
-                                const view::Vec3& travel, float eyeDistance);
+/// A slide offset, in cells, on the surface's two axes: the same two numbers the
+/// middle-mouse drag sets, and the two `PlaySurface::build` samples the pose with.
+struct SlideOffset {
+  float u{0.0f};
+  float v{0.0f};
+};
+
+/// The chase camera's elevation above the followed piece's tangent plane, expressed as a
+/// tangent (the ratio of the eye's normal lift to its distance behind), for a caller with
+/// no setting: 30 degrees. `Settings::followElevationDeg` overrides it.
+inline constexpr float kDefaultFollowLift = 0.57735027f;
+
+/// The slide offsets that best keep `target`'s cell visible to a camera following a move
+/// along `travel`: they maximise the cell's `facing` (its outward normal toward the
+/// camera) and prefer offsets where nothing else on the shape lies between the two.
+/// `eyeDistance` is how far the camera will actually sit from the cell - the search must
+/// test occlusion at *that* distance, or a close follow can still be behind the tube.
+/// This is the anti-clip search (M17.17, revised): for a closed ring (`torus`, `klein`)
+/// only - an open tube or ribbon has no inner/outer side to turn, so it returns zero.
+[[nodiscard]] SlideOffset alignSlideU(const VariantSpec& v, CellId target,
+                                      const view::Vec3& travel, float eyeDistance,
+                                      float lift = kDefaultFollowLift);
 
 /// A chase camera for a followed move on the shape (M17.16, revised): the piece centred
 /// and the camera behind it along `travel`. With `upright` the frame is rolled so the
@@ -59,7 +71,8 @@ struct SurfaceMoveSample {
 /// `surfaceMoveSample`'s, never cut at a seam.
 [[nodiscard]] view::OrbitCamera surfaceChaseCamera(const SurfaceMoveSample& piece,
                                                    const view::Vec3& travel,
-                                                   float distance, bool upright);
+                                                   float distance, bool upright,
+                                                   float lift = kDefaultFollowLift);
 
 /// The chase camera for a move on the shape at progress `t` (M17.16 revision). This is
 /// the form the front end uses: it samples the piece and its travel from
@@ -70,16 +83,16 @@ struct SurfaceMoveSample {
 /// a falling `t`.
 [[nodiscard]] view::OrbitCamera surfaceFollowCamera(const view::MovePath& path,
                                                     const PlaySurface& surf, float t,
-                                                    float distance, bool upright);
+                                                    float distance, bool upright,
+                                                    float lift = kDefaultFollowLift);
 
-/// The slide offset that turns `target`'s cell toward a camera looking along `toCamera`
+/// The slide offsets that turn `target`'s cell toward a camera looking along `toCamera`
 /// (unit, the direction from the cell toward the eye), preferring offsets where nothing
 /// on the shape lies between the two, tested at `eyeDistance`. This is the turntable
 /// anti-clip (M17.16/17): the **shape** rotates so the followed piece comes round to the
-/// near side, while the camera keeps the angle the player set. Returns 0 for an open tube
-/// or ribbon, which has no inner/outer side to turn.
-[[nodiscard]] float alignSlideToFace(const VariantSpec& v, CellId target,
-                                     const view::Vec3& toCamera, float eyeDistance);
+/// near side, while the camera keeps the angle the player set.
+[[nodiscard]] SlideOffset alignSlideToFace(const VariantSpec& v, CellId target,
+                                           const view::Vec3& toCamera, float eyeDistance);
 
 /// How many corners a square is cut into per axis. A square on a curved board is not a
 /// square: it is a patch of the surface, and this is how finely that patch is sampled.

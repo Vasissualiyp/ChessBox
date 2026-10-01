@@ -133,6 +133,9 @@ struct SurfacePose {
   /// so this is sampling, not a special case.
   float slideU{0.0f};
   float slideV{0.0f};
+  /// The Klein bottle ring's twist multiplier: 1 is the value the shipped surface uses.
+  /// A diagnostic knob; ignored by every other warp.
+  float twist{1.0f};
   /// Which side is out, for the play board: past the halfway point `PlaySurface` swaps
   /// the outward normal, so the pieces stand on the other face while the squares stay
   /// exactly where they were (M17.7, revised). The surface functions still *carry* a
@@ -146,6 +149,11 @@ struct SurfacePose {
   /// nine times longer than it is wide. A board has to be played on as well as looked at,
   /// so `PlaySurface` spends less. Nothing else reads it.
   float stretch{1.0f};
+  /// The ring or loop radius as a multiple of the shipped one, the tube/ribbon's own
+  /// cross-section left unchanged: a larger value opens a tight torus/Klein bottle, or
+  /// lengthens the Moebius loop, without thickening or thinning the material. 1 is the
+  /// shipped shape.
+  float openness{1.0f};
 };
 
 /// Where a lattice point lands on a derived overture's fully-formed surface, keyed by the

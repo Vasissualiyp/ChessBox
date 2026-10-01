@@ -73,6 +73,12 @@ struct BoardOptions {
   /// How far the surface has been turned through itself, 0 to 1 - a torus pulled inside
   /// out through its own hole, a cylinder rolled back over itself.
   float surfaceEvert{0.0f};
+  /// How many half-turns the Klein bottle's ring twists over one lap. A diagnostic knob;
+  /// 1 is the shipped surface.
+  float surfaceTwist{1.0f};
+  /// The ring or loop radius as a multiple of the shipped one, the cross-section
+  /// unchanged: opens a tight torus/Klein bottle, or lengthens the Moebius loop.
+  float surfaceOpenness{1.0f};
   /// The board mesh's alpha, 1 opaque down to a translucent ghost so the far side of the
   /// shape and the pieces on it show through (M17.10). The pieces stay opaque.
   float surfaceGhost{1.0f};

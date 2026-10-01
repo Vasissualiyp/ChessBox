@@ -169,9 +169,11 @@ render::BoardOptions optionsFrom(const app::Settings& s) {
   // while the board was still drawn unaligned, so the align affected the camera but the
   // shape never visibly turned (M17.17).
   o.surfaceSlideU = s.geometrySlideU + s.geometryAlignOffset;
-  o.surfaceSlideV = s.geometrySlideV;
+  o.surfaceSlideV = s.geometrySlideV + s.geometryAlignOffsetV;
   o.surfaceEvert = s.geometryEvert;
   o.surfaceGhost = s.geometryGhost;
+  o.surfaceTwist = s.kleinTwist;
+  o.surfaceOpenness = s.geometryWidth;
   return o;
 }
 
@@ -190,12 +192,16 @@ render::BoardOptions optionsFor(const app::Shell& shell) {
 }
 
 #ifdef CB_HAVE_IMGUI
-/// How the geometry view's surface is posed right now.
-render::SurfacePose poseFrom(const app::Settings& s) {
+/// How the geometry view's surface is posed right now. The variant argument is kept so
+/// the call sites read the same as before; nothing in the pose depends on it now that the
+/// Klein twist is a plain half-turn count.
+render::SurfacePose poseFrom(const app::Settings& s, const VariantSpec&) {
   render::SurfacePose pose;
   pose.slideU = s.geometrySlideU + s.geometryAlignOffset;
-  pose.slideV = s.geometrySlideV;
+  pose.slideV = s.geometrySlideV + s.geometryAlignOffsetV;
   pose.evert = s.geometryEvert;
+  pose.twist = s.kleinTwist;
+  pose.openness = s.geometryWidth;
   return pose;
 }
 
@@ -234,6 +240,13 @@ float chaseEyeDistance(const render::PlaySurface& surf) {
   return std::max(2.0f, 0.7f * span);
 }
 
+/// The chase camera's elevation as the tangent the shader/camera maths wants: the
+/// settings slider is in degrees because that is what a player reads.
+float followLift(const app::Settings& s) {
+  constexpr float kPi = 3.14159265358979f;
+  return std::tan(s.followElevationDeg * kPi / 180.0f);
+}
+
 }  // namespace
 
 /// The seats as a placement list, so the move camera can be asked for its blend against
@@ -256,7 +269,7 @@ view::OrbitCamera boardCamera(const app::Shell& shell) {
   const app::Settings& st = shell.settings();
   if (optionsFor(shell).surface) {
     const render::PlaySurface surf =
-        render::PlaySurface::build(session->variant(), poseFrom(st));
+        render::PlaySurface::build(session->variant(), poseFrom(st, session->variant()));
     if (!surf.empty()) {
       const view::OrbitCamera settled = session->playerCamera();
       if (session->shotInFlight()) {
@@ -269,7 +282,7 @@ view::OrbitCamera boardCamera(const app::Shell& shell) {
           // piece is the subject. The anti-clip turns the board so this does not put the
           // camera inside the tube.
           want = render::surfaceFollowCamera(path, surf, t, chaseEyeDistance(surf),
-                                             st.followUpright);
+                                             st.followUpright, followLift(st));
         } else {
           // Turntable: the camera angle is the player's; only the look-at follows the
           // piece. The anti-clip turns the *board* so nothing comes between them
@@ -308,27 +321,27 @@ CellId currentFollowedCell(const app::Shell& shell, const render::PlaySurface& s
   return best;
 }
 
-/// The slide offset that keeps the cell `followed` from clipping, for the current
+/// The slide offsets that keep the cell `followed` from clipping, for the current
 /// settings and camera. Pure and deterministic, so a capture gets the same value the
 /// interactive loop eases towards - without it a `--clip` of a followed move would show
 /// the camera looking through the shape (M17.17).
-float alignOffsetFor(const app::Shell& shell, CellId followed) {
+render::SlideOffset alignOffsetFor(const app::Shell& shell, CellId followed) {
   const app::Session* session = shell.session();
   const app::Settings& st = shell.settings();
   if (session == nullptr || followed == kInvalidCell || !st.geometryAlign ||
       !session->shotInFlight()) {
-    return 0.0f;
+    return {};
   }
   if (st.shapeFollow == "chase") {
     const render::PlaySurface surf =
-        render::PlaySurface::build(session->variant(), poseFrom(st));
+        render::PlaySurface::build(session->variant(), poseFrom(st, session->variant()));
     const view::MovePath& path = session->animation().path();
     const float t = session->animation().progress();
     const view::Vec3 here = render::surfaceMoveSample(path, surf, t).position;
     const view::Vec3 ahead =
         render::surfaceMoveSample(path, surf, std::min(1.0f, t + 0.05f)).position;
     return render::alignSlideU(session->variant(), followed, ahead - here,
-                               chaseEyeDistance(surf));
+                               chaseEyeDistance(surf), followLift(st));
   }
   const view::OrbitCamera base = session->playerCamera();
   const view::Vec3 toCamera = view::normalize(base.eye() - base.target);
@@ -343,7 +356,8 @@ float alignOffsetFor(const app::Shell& shell, CellId followed) {
 void frameBoard(app::Shell& shell) {
   app::Session* session = shell.session();
   if (session == nullptr) return;
-  render::frameGeometryCamera(*session, optionsFor(shell), poseFrom(shell.settings()));
+  render::frameGeometryCamera(*session, optionsFor(shell),
+                              poseFrom(shell.settings(), session->variant()));
 }
 #endif
 
@@ -534,10 +548,13 @@ int captureFrame(const std::string& variantName, const std::string& path,
       // move is anti-clipped in a clip too (M17.17).
       if (optionsFor(*shell).surface) {
         const render::PlaySurface alignSurf = render::PlaySurface::build(
-            shell->session()->variant(), poseFrom(shell->settings()));
-        shell->settings().geometryAlignOffset =
+            shell->session()->variant(),
+            poseFrom(shell->settings(), shell->session()->variant()));
+        const render::SlideOffset off =
             alignOffsetFor(*shell, currentFollowedCell(*shell, alignSurf));
-        // The offset just changed, so the renderer's options must be refreshed before
+        shell->settings().geometryAlignOffset = off.u;
+        shell->settings().geometryAlignOffsetV = off.v;
+        // The offsets just changed, so the renderer's options must be refreshed before
         // the board is built from them.
         renderer->setOptions(optionsFor(*shell));
       }
@@ -828,7 +845,7 @@ int main(int argc, char** argv) {
   /// The ALIGN search's target cell and offset, so the sweep runs once per followed cell
   /// rather than every frame (M17.17).
   CellId lastAlignCell = kInvalidCell;
-  float alignTarget = 0.0f;
+  render::SlideOffset alignTarget{};
   auto lastFrame = std::chrono::steady_clock::now();
   float fps = 0.0f;
 
@@ -876,8 +893,8 @@ int main(int argc, char** argv) {
               // (M17.16). The ray is in the board rectangle's pixel space.
               handled = true;
               if (!session->shotInFlight()) {
-                const render::PlaySurface surf =
-                    render::PlaySurface::build(session->variant(), poseFrom(settings));
+                const render::PlaySurface surf = render::PlaySurface::build(
+                    session->variant(), poseFrom(settings, session->variant()));
                 app::Action a;
                 a.kind = app::ActionKind::ClickCell;
                 a.cell = surf.pick(session->cameraOver(surfacePlacements(surf),
@@ -925,10 +942,18 @@ int main(int argc, char** argv) {
             // seventy pixels, and the pose is a pure function of the number, so dragging
             // back retraces it with nothing remembered between frames.
             app::Settings& st = shell->settings();
-            if (render::PlaySurface::slidesAlongRanks(shell->session()->variant())) {
-              st.geometrySlideV += e.motion.xrel * 0.014f;
+            const VariantSpec& variant = shell->session()->variant();
+            const bool ring = render::PlaySurface::slidesAlongRanks(variant);
+            if (ring && !variant.geom.isOrientable()) {
+              // On a non-orientable board the V axis is the only slide measured to keep
+              // the tile corners abutting across the seam (the U slide's gap grew to
+              // about ten times an ordinary one), so both drag axes turn V - up does what
+              // left-right does.
+              st.geometrySlideV += (e.motion.xrel + e.motion.yrel) * 0.014f;
+            } else {
+              if (ring) st.geometrySlideV += e.motion.xrel * 0.014f;
+              st.geometrySlideU += e.motion.yrel * 0.014f;
             }
-            st.geometrySlideU += e.motion.yrel * 0.014f;
           } else if (panning && shell->hasGame()) {
             // Drag the board with the middle button: slide the look-at point in the
             // camera plane, scaled so it tracks the pixels at any zoom.
@@ -1082,8 +1107,8 @@ int main(int argc, char** argv) {
       bool following = false;
       if (st.geometryAlign && session != nullptr && session->shotInFlight()) {
         following = true;
-        const render::PlaySurface alignSurf =
-            render::PlaySurface::build(session->variant(), poseFrom(st));
+        const render::PlaySurface alignSurf = render::PlaySurface::build(
+            session->variant(), poseFrom(st, session->variant()));
         const CellId current = currentFollowedCell(*shell, alignSurf);
         if (current != lastAlignCell) {
           lastAlignCell = current;
@@ -1092,22 +1117,29 @@ int main(int argc, char** argv) {
       } else {
         lastAlignCell = kInvalidCell;
       }
-      const int nx =
-          session != nullptr ? static_cast<int>(session->variant().dims.extent(0)) : 0;
-      const float period = nx > 0 ? 2.0f * static_cast<float>(nx) : 0.0f;
       // Ease towards the representative of the target nearest the current offset: the
       // slide wraps, so 15 and 1 are one cell apart, not fourteen.
-      float target = following ? alignTarget : 0.0f;
-      if (period > 0.0f) {
-        while (target - st.geometryAlignOffset > period * 0.5f) target -= period;
-        while (st.geometryAlignOffset - target > period * 0.5f) target += period;
-      }
-      st.geometryAlignOffset +=
-          (target - st.geometryAlignOffset) * std::min(1.0f, dt * 2.0f);
-      if (period > 0.0f) {
-        st.geometryAlignOffset = std::fmod(st.geometryAlignOffset, period);
-        if (st.geometryAlignOffset < 0.0f) st.geometryAlignOffset += period;
-      }
+      const auto ease = [&](float target, float& offset, float period) {
+        if (period > 0.0f) {
+          while (target - offset > period * 0.5f) target -= period;
+          while (offset - target > period * 0.5f) target += period;
+        }
+        offset += (target - offset) * std::min(1.0f, dt * 2.0f);
+        if (period > 0.0f) {
+          offset = std::fmod(offset, period);
+          if (offset < 0.0f) offset += period;
+        }
+      };
+      const float periodU =
+          session != nullptr
+              ? 2.0f * static_cast<float>(session->variant().dims.extent(0))
+              : 0.0f;
+      const float periodV =
+          session != nullptr
+              ? 2.0f * static_cast<float>(session->variant().dims.extent(1))
+              : 0.0f;
+      ease(following ? alignTarget.u : 0.0f, st.geometryAlignOffset, periodU);
+      ease(following ? alignTarget.v : 0.0f, st.geometryAlignOffsetV, periodV);
     }
 
     // Set once the interface has built this frame: the surface view draws the board

@@ -67,6 +67,15 @@ struct Settings {
   /// a ghost, so the far side of the shape and the pieces on it show through. The pieces
   /// stay opaque; the point is to see them (M17.10).
   float geometryGhost{1.0f};
+  /// How many half-turns the Klein bottle's ring twists over one lap: 1 is the shipped
+  /// surface and reverses the file coordinate (a Klein bottle); an even count does not
+  /// reverse it (an orientable double twist). The figure-eight cross-section only closes
+  /// on whole half-turns, so other twist counts would leave the join open.
+  float kleinTwist{1.0f};
+  /// The ring or loop radius of a glued surface as a multiple of the shipped one, its
+  /// cross-section left unchanged: a larger value opens a tight torus or Klein bottle, or
+  /// lengthens the Moebius loop, without thickening the material. 1 is the shipped shape.
+  float geometryWidth{1.0f};
   /// Turn the ring so the piece a followed move travels on presents its outer face to the
   /// camera, rather than the camera clipping through the tube wall to see it (M17.17).
   /// **On by default**: the clipping is a defect, not a look (M17.16 revision).
@@ -75,16 +84,20 @@ struct Settings {
   /// rather than letting it tilt and flip with the shape. The tilt is the other camera
   /// mode and has its own charm, so this is a stated choice (M17.16 revision).
   bool followUpright{true};
+  /// How far the chase camera looks down on the followed piece, in degrees above the
+  /// surface's tangent plane: 0 is directly behind, 90 straight overhead.
+  float followElevationDeg{30.0f};
   /// How a move is followed on a shape: "chase" is the third-person camera that sits
   /// behind the piece along its route - the shipped follow. "turntable" instead keeps the
   /// player's camera angle and turns the **board** (the slide a middle-drag gives). A
   /// name rather than an enum because this layer is below the renderer where the modes
   /// live.
   std::string shapeFollow{"chase"};
-  /// The align feature's own eased slide offset, in cells, added on top of the player's
-  /// manual `geometrySlideU`. Transient: not written to disk, so a reload starts aligned
-  /// to nothing.
+  /// The align feature's own eased slide offsets, in cells, added on top of the player's
+  /// manual `geometrySlideU`/`geometrySlideV`. Transient: not written to disk, so a
+  /// reload starts aligned to nothing.
   float geometryAlignOffset{0.0f};
+  float geometryAlignOffsetV{0.0f};
   /// Which flat-piece icon set to draw: "faceted" or "primitive". A name rather than an
   /// enum because this layer is below the renderer, where the sets are defined, and a
   /// settings file should stay readable anyway.
