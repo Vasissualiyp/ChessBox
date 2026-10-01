@@ -186,6 +186,7 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | A variant's library animation | `src/render/overture_scene.cpp`; which one, and its cycle, in `src/app/overture.cpp` | |
 | A variant with no bespoke overture | nothing - it gets `derivedOvertureScene` from its geometry (`app::overtureSignature`), keyed by `SurfaceKind`, never its name. See `docs/overtures.md` |
 | Playing on the shape (a glued 2-D board warped to its surface, or a `torus3d`/`hyper4` authored shape) | `render::PlaySurface` in `src/render/play_surface.cpp` - seats, frames, sizes, tiles and picking, all off one sampling; the D>=3 shapes come from `playShapePosition` in `src/render/overture_scene.cpp`. `BoardRenderer::buildInstances` draws them. The mode is `Settings::geometryView`, offered only where `render::hasPlaySurface`; `Settings::geometryEvert` is the pose. See ADR-0019 and `docs/plan/M17.12-shapes-above-two-dimensions.md` | |
+| A first-run / onboarding screen | `Screen::Welcome` and the curated path in `src/app/shell.cpp`; the screen is `Ui::buildWelcome` in `src/render/ui_menus.cpp`. `Settings::seenWelcome` makes it play once | |
 | New module in a layer | that layer's dir + CMake edge + test + this table | `cb-new-module` |
 | A decision | `docs/adr/` | `cb-adr` |
 | Perft mismatch | bisect with `divide` against the oracle | `cb-perft-golden` |

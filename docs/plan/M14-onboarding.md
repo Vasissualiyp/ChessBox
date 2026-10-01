@@ -141,8 +141,18 @@ say themselves:
 
 ## Status
 
-Planned, not started. It reads variant descriptions and difficulty (already in the
-variant data), the move preview (`expandAtom`/`tracePath`, M4/M5) and the visuals M11/M13
-produce; it does **not** depend on M7's editor, so Release Wave 2 can run M14 and M7 in
-either order. It is in Wave 2 because that is the conversion gate before the marketing
-peak.
+**M14.1 (first-run) and M14.2 (curated path) built (2026-09-30).** `Screen::Welcome` is the
+first-run screen (`Settings::seenWelcome`, persisted, plays once); `Shell::dismissWelcome`
+leaves it and opens the main menu. The screen states what the game is in one sentence and
+offers the curated path - `app::curatedVariants()`: standard → cylinder → torus → cube5 → 5d,
+each with a one-line "what changes here" - plus "Surprise me" (`Shell::surpriseVariant`,
+which skips the classic and captions its pick with the variant's own description) and "show
+me all the boards" into the full library. Headless tests: a first run opens the welcome and
+only once; the path starts at standard and each step is captioned; surprise picks a
+non-standard library variant. `chessbox_gui _ --shot o.ppm --screen welcome` captures it.
+
+Planned but not built: M14.3 (the played tutorial), M14.4 (the seam legend, axis explainer,
+per-piece reachability and glossary), M14.5 (the accessibility pass). It reads variant
+descriptions and difficulty (already in the variant data), the move preview
+(`expandAtom`/`tracePath`, M4/M5) and the visuals M11/M13 produce; it does **not** depend on
+M7's editor, so Release Wave 2 can run M14 and M7 in either order.

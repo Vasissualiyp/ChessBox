@@ -917,6 +917,9 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
 
   UiRequest request;
   switch (shell.screen()) {
+    case app::Screen::Welcome:
+      request = buildWelcome(shell);
+      break;
     case app::Screen::MainMenu:
       request = buildMainMenu(shell);
       break;

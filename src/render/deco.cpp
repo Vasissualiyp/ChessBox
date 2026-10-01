@@ -442,6 +442,7 @@ constexpr float kZFar = 4.6f;
 
 Deco decoForScreen(int screen) noexcept {
   switch (static_cast<app::Screen>(screen)) {
+    case app::Screen::Welcome:
     case app::Screen::MainMenu:
       return Deco::Manifold;
     // The library's object is the selected variant's *overture*, which the screen draws

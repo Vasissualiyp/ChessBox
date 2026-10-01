@@ -310,6 +310,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
 #endif
   if (screen == "menu")
     shell->go(app::Screen::MainMenu);
+  else if (screen == "welcome")
+    shell->go(app::Screen::Welcome);
   else if (screen == "pause")
     shell->pause();
   else if (screen == "settings")
@@ -586,8 +588,8 @@ int main(int argc, char** argv) {
           "  Esc           pause     u  undo     r  reset\n\n"
           "With no variant, the game opens on the main menu.\n"
           "--shot renders one frame to a PPM and exits, with no display required;\n"
-          "--screen picks which one: menu, newgame, pause, settings, editor, designer,\n"
-          "body, flat, info, pieces, or the board by default.\n"
+          "--screen picks which one: menu, welcome, newgame, pause, settings, editor,\n"
+          "designer, body, flat, info, pieces, or the board by default.\n"
           "--t 0..1 is where the library screen's overture is in its cycle: 0 the flat\n"
           "board every variant starts from, 1 the shape it becomes.\n"
           "--clip DIR renders a sequence of numbered PPM frames instead of one shot,\n"

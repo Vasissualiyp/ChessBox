@@ -113,6 +113,9 @@ struct Settings {
   /// Piece name to promote to without asking; empty means always ask.
   std::string autoPromoteTo;
   std::string lastVariant{"standard"};
+  /// The first-run welcome screen has been seen (M14.1). Persisted, so the sequence plays
+  /// once.
+  bool seenWelcome{false};
 
   // ---- audio --------------------------------------------------------------
   // The game has no sound yet. These are stored and shown disabled rather than hidden,

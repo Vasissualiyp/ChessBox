@@ -173,6 +173,74 @@ UiRequest Ui::buildMainMenu(app::Shell& shell) {
   return request;
 }
 
+UiRequest Ui::buildWelcome(app::Shell& shell) {
+  // The first launch is a designed sequence, not the main menu (M14.1): what this is,
+  // then a curated path from the board a newcomer knows to the board they cannot picture,
+  // one legible step at a time (M14.2).
+  UiRequest request;
+  const view::Theme& t = theme_;
+  auto* display = static_cast<ImFont*>(fontDisplay_);
+  auto* small = static_cast<ImFont*>(fontSmall_);
+
+  ImVec2 menuMin, menuMax;
+  drawShellFrame(shell, menuMin, menuMax);
+  const PaneMove move = paneMove();
+  beginPane("##welcome", menuMin, menuMax, move.scale, move.alpha, px(46.0f), !ghosting_);
+  screenTitle("CHESSBOX", t, display, scale_, 2.2f);
+  ImGui::Dummy(ImVec2(0, px(6)));
+  ImGui::PushFont(small);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
+  ImGui::PushTextWrapPos(0.0f);
+  ImGui::TextWrapped(
+      "chess on any board you can describe: cylinders, Moebius bands, "
+      "six-dimensional tori, and time travel.");
+  ImGui::PopTextWrapPos();
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
+  ImGui::Dummy(ImVec2(0, px(10)));
+
+  const float width = ImGui::GetContentRegionAvail().x;
+
+  const auto start = [&](const std::string& name) {
+    shell.dismissWelcome();
+    request.loadVariant = name;
+  };
+  const auto caption = [&](const char* text) {
+    ImGui::PushFont(small);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+    ImGui::TextUnformatted(text);
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+    ImGui::Dummy(ImVec2(0, px(6)));
+  };
+
+  // The curated path: standard first, exotic last. A front door, not a gate.
+  int row = 1;
+  for (const app::CuratedVariant& c : app::curatedVariants()) {
+    if (menuEntry(c.name.c_str(), row++, t, display, width, true, scale_)) {
+      start(c.name);
+      break;
+    }
+    caption(c.what.c_str());
+  }
+  if (menuEntry("Surprise me", row++, t, display, width, true, scale_)) {
+    start(shell.surpriseVariant());
+  }
+  const std::string surprise = shell.currentVariant();
+  if (!surprise.empty()) {
+    // Say why the last pick is strange, so a random choice still teaches.
+    const std::string why = shell.variantDescription(surprise);
+    if (!why.empty()) caption(why.c_str());
+  }
+  if (menuEntry("Show me all the boards", row++, t, display, width, true, scale_)) {
+    shell.dismissWelcome();
+    shell.go(app::Screen::NewGame);
+  }
+
+  endPane();
+  return request;
+}
+
 UiRequest Ui::buildQuitConfirm(app::Shell& shell) {
   UiRequest request;
   const view::Theme& t = theme_;

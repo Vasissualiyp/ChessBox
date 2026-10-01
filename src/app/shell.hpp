@@ -15,6 +15,7 @@ namespace cb::app {
 
 /// Which screen the player is looking at.
 enum class Screen : std::uint8_t {
+  Welcome,  ///< the first-run sequence: what this is, and where to start (M14.1)
   MainMenu,
   NewGame,  ///< choosing a variant
   Game,
@@ -26,6 +27,17 @@ enum class Screen : std::uint8_t {
   QuitConfirm,       ///< the "are you sure?" step before the window closes
   PauseQuitConfirm,  ///< the same question, asked from the pause menu
 };
+
+/// One entry of the curated "start here" path (M14.2): a variant and one line saying what
+/// changes there.
+struct CuratedVariant {
+  std::string name;
+  std::string what;
+};
+
+/// The curated first-run path, standard first, exotic last. A front door, not a gate -
+/// the full library stays available.
+[[nodiscard]] const std::vector<CuratedVariant>& curatedVariants();
 
 std::string_view screenName(Screen s) noexcept;
 
@@ -53,6 +65,15 @@ class Shell {
   }
   [[nodiscard]] const std::string& message() const noexcept { return message_; }
   [[nodiscard]] bool quitRequested() const noexcept { return quit_; }
+
+  /// True on the first run, before the welcome screen has been dismissed (M14.1). The
+  /// shell opens on `Screen::Welcome` until then.
+  [[nodiscard]] bool firstRun() const noexcept { return !settings_.seenWelcome; }
+  /// Leave the welcome screen: remember it was seen and open the main menu (M14.1).
+  void dismissWelcome();
+  /// A variant for "Surprise me", rotating through the library so a run of picks does not
+  /// repeat. The caller captions it with `variantDescription` (M14.2).
+  [[nodiscard]] std::string surpriseVariant();
 
   /// The running game, or nullptr on a screen that has none.
   [[nodiscard]] Session* session() noexcept { return session_.get(); }
@@ -161,6 +182,8 @@ class Shell {
   VariantSourceLoader sourceLoader_;
   VariantPathResolver pathResolver_;
   OverturePlayer overtures_;
+  /// Where "Surprise me" is in the library, so repeated presses move on (M14.2).
+  std::size_t surpriseCursor_{0};
   std::unique_ptr<Editor> editor_;
   std::string editorVariant_;
   std::filesystem::path editorPath_;

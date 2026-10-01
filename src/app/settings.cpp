@@ -136,6 +136,8 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.autoPromoteTo = value;
     else if (key == "last_variant")
       s.lastVariant = value;
+    else if (key == "seen_welcome")
+      s.seenWelcome = asBool(value);
     else if (key == "volume_master")
       s.volumeMaster = asFloat(value, s.volumeMaster);
     else if (key == "volume_music")
@@ -189,6 +191,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "hot_seat = " << boolText(hotSeat) << '\n';
   out << "auto_promote_to = " << autoPromoteTo << '\n';
   out << "last_variant = " << lastVariant << '\n';
+  out << "seen_welcome = " << boolText(seenWelcome) << '\n';
   out << "volume_master = " << volumeMaster << '\n';
   out << "volume_music = " << volumeMusic << '\n';
   out << "volume_effects = " << volumeEffects << '\n';

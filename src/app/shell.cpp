@@ -9,6 +9,8 @@ namespace cb::app {
 
 std::string_view screenName(Screen s) noexcept {
   switch (s) {
+    case Screen::Welcome:
+      return "welcome";
     case Screen::MainMenu:
       return "main menu";
     case Screen::NewGame:
@@ -34,6 +36,7 @@ std::string_view screenName(Screen s) noexcept {
 
 int screenDepth(Screen s) noexcept {
   switch (s) {
+    case Screen::Welcome:
     case Screen::MainMenu:
       return 0;
     case Screen::NewGame:
@@ -62,11 +65,47 @@ std::unique_ptr<Shell> Shell::create(std::vector<std::string> library,
       settingsPath.empty() ? Settings::defaultPath() : std::move(settingsPath);
   shell->settings_ = Settings::load(shell->settingsPath_);
   shell->currentVariant_ = shell->settings_.lastVariant;
+  // The first launch is a designed sequence, not the main menu (M14.1). Once seen, the
+  // shell opens where a game opens.
+  shell->screen_ = shell->settings_.seenWelcome ? Screen::MainMenu : Screen::Welcome;
   // A loaded setting should take effect immediately; the library overtures have their own
   // clock and are not waiting for `applySettings` (which a fresh shell has no reason to
   // call). `applySettings` keeps it in step once the player moves a control.
   shell->overtures_.setSpeed(shell->settings_.overtureSpeed);
   return shell;
+}
+
+const std::vector<CuratedVariant>& curatedVariants() {
+  // The first-run path: the board a newcomer knows, then one legible step at a time to
+  // the board they cannot picture. A front door, not a gate - the full library stays
+  // available.
+  static const std::vector<CuratedVariant> kPath{
+      {"standard", "the board you already know"},
+      {"cylinder", "the a-file and the h-file become the same edge"},
+      {"torus", "and then the rank edges close too: a board with no edges"},
+      {"cube5", "the board grows a third axis - five boards stacked"},
+      {"5d", "and then time: a move can land on a board from a past turn"},
+  };
+  return kPath;
+}
+
+void Shell::dismissWelcome() {
+  settings_.seenWelcome = true;
+  applySettings();  // persist, so the sequence plays once
+  if (screen_ == Screen::Welcome) screen_ = Screen::MainMenu;
+}
+
+std::string Shell::surpriseVariant() {
+  if (library_.empty()) return "standard";
+  // Rotate, skipping standard so "surprise" is always one of the strange ones.
+  for (std::size_t i = 0; i < library_.size(); ++i) {
+    const std::string& name = library_[(surpriseCursor_ + i) % library_.size()];
+    if (name != "standard") {
+      surpriseCursor_ = (surpriseCursor_ + i + 1) % library_.size();
+      return name;
+    }
+  }
+  return library_.front();
 }
 
 bool Shell::showsBoard() const noexcept {
@@ -147,6 +186,8 @@ void Shell::back() {
       screen_ = Screen::Paused;
       break;
     case Screen::MainMenu:
+      break;
+    case Screen::Welcome:
       break;
   }
 }

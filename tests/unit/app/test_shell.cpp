@@ -5,6 +5,7 @@
 // opening the settings, a menu offering something that does not exist.
 #include "app/shell.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 
@@ -24,6 +25,10 @@ std::unique_ptr<Shell> makeShell(const std::filesystem::path& settings = {}) {
     if (!v.has_value()) return fail(v.error().code, v.error().message);
     return std::move(*v);
   });
+  // These tests are about what happens after a game is started, not the first-run
+  // sequence (M14.1), which has its own test below. Dismiss it so the shell opens on the
+  // main menu as it did before.
+  shell->dismissWelcome();
   return shell;
 }
 
@@ -93,6 +98,45 @@ TEST_CASE("the game opens on the main menu with nothing loaded", "[unit][app]") 
   REQUIRE_FALSE(shell->hasGame());
   REQUIRE_FALSE(shell->showsBoard());
   REQUIRE_FALSE(shell->quitRequested());
+}
+
+TEST_CASE("a first run opens on the welcome, once", "[unit][app]") {
+  // M14.1: the first launch is a designed sequence, not the main menu. It plays once,
+  // then the shell opens where a game opens.
+  const auto path = tempSettings("welcome.conf");
+  {
+    auto shell = Shell::create({"standard", "torus"}, path);
+    REQUIRE(shell->screen() == Screen::Welcome);
+    REQUIRE(shell->firstRun());
+    REQUIRE_FALSE(shell->hasGame());
+    REQUIRE_FALSE(shell->showsBoard());
+    shell->dismissWelcome();
+    REQUIRE(shell->screen() == Screen::MainMenu);
+    REQUIRE_FALSE(shell->firstRun());
+  }
+  // A second launch remembers.
+  auto again = Shell::create({"standard", "torus"}, path);
+  REQUIRE(again->screen() == Screen::MainMenu);
+  REQUIRE_FALSE(again->firstRun());
+}
+
+TEST_CASE("the curated path starts at standard and explains each step", "[unit][app]") {
+  // M14.2: a front door from the board a newcomer knows to the one they cannot picture.
+  const std::vector<CuratedVariant>& path = curatedVariants();
+  REQUIRE_FALSE(path.empty());
+  REQUIRE(path.front().name == "standard");
+  for (const CuratedVariant& c : path) {
+    CHECK_FALSE(c.name.empty());
+    CHECK_FALSE(c.what.empty());
+  }
+}
+
+TEST_CASE("surprise me picks a strange board, not the classic", "[unit][app]") {
+  auto shell = makeShell(tempSettings("surprise.conf"));
+  const std::string pick = shell->surpriseVariant();
+  CHECK(pick != "standard");
+  const auto& lib = shell->library();
+  CHECK(std::find(lib.begin(), lib.end(), pick) != lib.end());
 }
 
 TEST_CASE("starting the same variant again begins a fresh game", "[unit][app]") {
