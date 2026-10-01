@@ -90,7 +90,7 @@ const std::vector<CuratedVariant>& curatedVariants() {
 }
 
 const std::vector<GlossaryEntry>& glossary() {
-  // Longest term first: a scan that replaces terms in a sentence has to match "Möbius
+  // Longest term first: a scan that replaces terms in a sentence has to match "Mobius
   // band" before it matches "band".
   static const std::vector<GlossaryEntry> kGlossary{
       {"time travel",
@@ -99,6 +99,9 @@ const std::vector<GlossaryEntry>& glossary() {
        "a board whose ends are joined with a twist that reverses one axis; it has only "
        "one "
        "face"},
+      {"multiverse",
+       "the axis along which the many boards of a time-travel game are laid out, one per "
+       "branch of play"},
       {"Mobius band",
        "a board whose ends are joined with a half-twist, so riding it twice comes home "
        "mirrored"},
@@ -108,6 +111,8 @@ const std::vector<GlossaryEntry>& glossary() {
       {"timeline",
        "the axis along which the past and future turns of a time-travel game "
        "are laid out"},
+      {"vector", "how far a piece moves along each axis, written as one number per axis"},
+      {"pitch", "how many cells one unit of a piece's move covers along an axis"},
       {"glued",
        "two edges of a board are joined, so a piece crossing one arrives through the "
        "other"},

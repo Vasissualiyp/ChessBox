@@ -6,6 +6,7 @@
 #include "app/shell.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <sstream>
 
@@ -448,5 +449,40 @@ TEST_CASE("every exotic term the curated path shows is defined", "[unit][app]") 
                            "seam", "dimension", "slice", "timeline", "time travel"}) {
     INFO(term);
     CHECK_FALSE(glossaryFor(term).empty());
+  }
+}
+
+TEST_CASE("the curated captions show no undefined term", "[unit][app]") {
+  // Acceptance fact 3's rot guard: a caption is walked word by word, and a word that is
+  // neither plain-English scaffolding nor a glossary term fails here. A caption that
+  // reaches for a new exotic word must define it first.
+  const std::vector<std::string_view> kPlain{
+      "a",       "and",      "axis",  "become",  "board", "boards", "can",   "close",
+      "cube5",   "edge",     "edges", "file",    "five",  "from",   "grows", "h",
+      "know",    "land",     "move",  "no",      "on",    "past",   "rank",  "same",
+      "stacked", "standard", "the",   "then",    "third", "time",   "too",   "turn",
+      "with",    "you",      "5d",    "already",
+  };
+  const auto plain = [&](std::string_view w) {
+    return std::find(kPlain.begin(), kPlain.end(), w) != kPlain.end();
+  };
+  for (const CuratedVariant& c : curatedVariants()) {
+    const std::string text = c.name + " " + c.what;
+    std::string word;
+    const auto check = [&] {
+      if (word.empty()) return;
+      INFO(text);
+      INFO(word);
+      CHECK((plain(word) || !glossaryFor(word).empty()));
+      word.clear();
+    };
+    for (const char ch : text) {
+      if (std::isalnum(static_cast<unsigned char>(ch)) != 0) {
+        word.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+      } else {
+        check();
+      }
+    }
+    check();
   }
 }

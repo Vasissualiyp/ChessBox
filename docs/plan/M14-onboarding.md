@@ -162,8 +162,10 @@ named the screen axes; it now sits beside the seam legend. The glossary is also 
 `app::glossary()` ships the definitions (torus, cylinder, Mobius band, Klein bottle, glued,
 seam, dimension, slice, timeline, time travel) and the game-info screen's TERMS section
 shows the ones a board's own name or description uses. Acceptance fact 3 is pinned by
-`tests/unit/app/test_shell.cpp` (every term defined and unique, the exotic vocabulary
-covered). Still to build: per-piece reachability.
+`tests/unit/app/test_shell.cpp`: every term is defined and unique, unknown terms stay
+unknown, the exotic vocabulary is covered, and every word of every curated caption is either
+plain-English scaffolding or a glossary term, so a caption that reaches for a new exotic word
+fails until it is defined. Still to build: per-piece reachability.
 
 Planned but not built: M14.3 (the played tutorial), the rest of M14.4 (per-piece
 reachability), M14.5 (the accessibility pass). It reads variant
