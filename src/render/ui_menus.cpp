@@ -8,6 +8,7 @@
 // transitions between screens are covered by tests that never open a window.
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -1145,6 +1146,46 @@ UiRequest Ui::buildGameInfo(app::Shell& shell) {
                                    : "off",
            t);
   ImGui::PopFont();
+
+  // The exotic terms this board's own description uses, defined rather than assumed
+  // (M14.4): a first-run player should not have to leave the game to learn what a torus
+  // is. A term is shown when the description mentions it or when the board's name is its
+  // first word - "torus" on the torus, "Mobius band" under "mobius". Case-blind, because
+  // a name and a definition need not agree on capitals.
+  {
+    const auto fold = [](const std::string& s) {
+      std::string out;
+      out.reserve(s.size());
+      for (const char c : s)
+        out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+      return out;
+    };
+    const std::string desc = fold(v.description);
+    const std::string name = fold(v.name);
+    std::vector<const app::GlossaryEntry*> used;
+    for (const app::GlossaryEntry& e : app::glossary()) {
+      const std::string term = fold(std::string(e.term));
+      const std::string first = term.substr(0, term.find(' '));
+      if (desc.find(term) != std::string::npos || name == first ||
+          (!first.empty() && name.find(first) != std::string::npos)) {
+        used.push_back(&e);
+      }
+    }
+    if (!used.empty()) {
+      ImGui::Dummy(ImVec2(0, px(8)));
+      heading("TERMS", t, small);
+      ImGui::PushFont(small);
+      for (const app::GlossaryEntry* e : used) {
+        ImGui::PushStyleColor(ImGuiCol_Text, col(t.rift));
+        ImGui::TextUnformatted(std::string(e->term).c_str());
+        ImGui::PopStyleColor();
+        ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
+        ImGui::TextWrapped("%s", std::string(e->definition).c_str());
+        ImGui::PopStyleColor();
+      }
+      ImGui::PopFont();
+    }
+  }
 
   if (v.ruleSet) {
     ImGui::Dummy(ImVec2(0, px(8)));

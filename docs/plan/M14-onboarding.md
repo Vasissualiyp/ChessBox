@@ -158,11 +158,15 @@ excluded because they lead nowhere, and the game HUD draws the swatch and "the f
 are the same edge" under the axis names when `Settings::showSeams && showSeamLegend` on a
 glued board. Pinned by `tests/unit/view/test_seams.cpp` (standard empty, cylinder one "file"
 entry, torus file+rank, Moebius's twisted file, mirrorbox empty). The axis explainer already
-named the screen axes; it now sits beside the seam legend. Still to build: per-piece
-reachability and the glossary with the "no undefined terms" test (acceptance fact 3).
+named the screen axes; it now sits beside the seam legend. The glossary is also built:
+`app::glossary()` ships the definitions (torus, cylinder, Mobius band, Klein bottle, glued,
+seam, dimension, slice, timeline, time travel) and the game-info screen's TERMS section
+shows the ones a board's own name or description uses. Acceptance fact 3 is pinned by
+`tests/unit/app/test_shell.cpp` (every term defined and unique, the exotic vocabulary
+covered). Still to build: per-piece reachability.
 
 Planned but not built: M14.3 (the played tutorial), the rest of M14.4 (per-piece
-reachability, glossary), M14.5 (the accessibility pass). It reads variant
+reachability), M14.5 (the accessibility pass). It reads variant
 descriptions and difficulty (already in the variant data), the move preview
 (`expandAtom`/`tracePath`, M4/M5) and the visuals M11/M13 produce; it does **not** depend on
 M7's editor, so Release Wave 2 can run M14 and M7 in either order.

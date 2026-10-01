@@ -4,6 +4,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "app/editor.hpp"
@@ -38,6 +39,20 @@ struct CuratedVariant {
 /// The curated first-run path, standard first, exotic last. A front door, not a gate -
 /// the full library stays available.
 [[nodiscard]] const std::vector<CuratedVariant>& curatedVariants();
+
+/// One term a first-time player may not know, and what it means (M14.4). The definitions
+/// are shipped rather than written per screen, so two screens cannot disagree about what
+/// a torus is, and acceptance fact 3 - "every visible curated-set term is defined" - is
+/// something a test can check rather than a hope.
+struct GlossaryEntry {
+  std::string_view term;
+  std::string_view definition;
+};
+
+/// The glossary, longest term first so a scan can match "Möbius band" before "band".
+[[nodiscard]] const std::vector<GlossaryEntry>& glossary();
+/// The definition of `term`, or empty when this game does not define it.
+[[nodiscard]] std::string_view glossaryFor(std::string_view term);
 
 std::string_view screenName(Screen s) noexcept;
 

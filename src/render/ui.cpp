@@ -1074,23 +1074,25 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     // Name the seam colours, so "the a-file and the h-file are the same edge" is
     // readable off the board rather than something a player has to be told (M14.4). The
     // ramp is per-cell, so one swatch per glued axis is the honest reduction: it says
-    // *which* edges meet, and the board's gradient says where along them.
+    // *which* edges meet, and the board's gradient says where along them. Drawn as
+    // ordinary items, not free text, so the overlay window sizes to the labels.
     if (shell.settings().showSeams && shell.settings().showSeamLegend &&
         !v.geom.isBox() && !session.seams().empty()) {
       const std::vector<view::SeamLegendEntry> key =
           view::seamLegend(session.seams(), session.viewConfig(), v.dims);
-      if (!key.empty()) {
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        const float x = ImGui::GetCursorScreenPos().x;
-        float y = ImGui::GetCursorScreenPos().y;
-        for (const view::SeamLegendEntry& e : key) {
-          dl->AddRectFilled(ImVec2(x, y + px(3)), ImVec2(x + px(12), y + px(13)),
-                            u32(e.color), px(2));
-          const std::string label = "the " + e.axis + " edges are the same edge";
-          dl->AddText(ImVec2(x + px(18), y), u32(t.boneFaint), label.c_str());
-          y += px(18);
-        }
-        ImGui::Dummy(ImVec2(0, px(18) * static_cast<float>(key.size())));
+      for (const view::SeamLegendEntry& e : key) {
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(p.x, p.y + px(2)),
+                                                  ImVec2(p.x + px(11), p.y + px(13)),
+                                                  u32(e.color), px(2));
+        const std::string label = "the " + e.axis + " edges are the same edge";
+        ImGui::Dummy(ImVec2(px(15), px(12)));
+        ImGui::SameLine(0.0f, px(6));
+        ImGui::PushFont(small);
+        ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+        ImGui::TextUnformatted(label.c_str());
+        ImGui::PopStyleColor();
+        ImGui::PopFont();
       }
     }
   }

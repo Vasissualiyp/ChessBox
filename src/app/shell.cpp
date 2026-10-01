@@ -89,6 +89,43 @@ const std::vector<CuratedVariant>& curatedVariants() {
   return kPath;
 }
 
+const std::vector<GlossaryEntry>& glossary() {
+  // Longest term first: a scan that replaces terms in a sentence has to match "Möbius
+  // band" before it matches "band".
+  static const std::vector<GlossaryEntry> kGlossary{
+      {"time travel",
+       "a variant where a piece may move onto a board from an earlier or later turn"},
+      {"Klein bottle",
+       "a board whose ends are joined with a twist that reverses one axis; it has only "
+       "one "
+       "face"},
+      {"Mobius band",
+       "a board whose ends are joined with a half-twist, so riding it twice comes home "
+       "mirrored"},
+      {"dimension", "one axis of a board - files, ranks, and any axes above them"},
+      {"cylinder",
+       "a board whose left and right edges are joined, so the files form a loop"},
+      {"timeline",
+       "the axis along which the past and future turns of a time-travel game "
+       "are laid out"},
+      {"glued",
+       "two edges of a board are joined, so a piece crossing one arrives through the "
+       "other"},
+      {"slice", "one board taken out of an N-dimensional one and shown on its own"},
+      {"seam", "a joined edge of a glued board; its colour says where crossing it lands"},
+      {"torus",
+       "a board whose edges are all joined into loops - it has no edge to fall off"},
+  };
+  return kGlossary;
+}
+
+std::string_view glossaryFor(std::string_view term) {
+  for (const GlossaryEntry& e : glossary()) {
+    if (e.term == term) return e.definition;
+  }
+  return {};
+}
+
 void Shell::dismissWelcome() {
   settings_.seenWelcome = true;
   applySettings();  // persist, so the sequence plays once

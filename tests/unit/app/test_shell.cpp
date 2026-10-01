@@ -425,3 +425,28 @@ TEST_CASE("the editor opens the current variant and saves it back", "[unit][app]
   std::error_code ec;
   std::filesystem::remove(out, ec);
 }
+
+TEST_CASE("every exotic term the curated path shows is defined", "[unit][app]") {
+  const auto& g = glossary();
+  REQUIRE_FALSE(g.empty());
+
+  std::vector<std::string_view> seen;
+  for (const GlossaryEntry& e : g) {
+    CHECK_FALSE(e.term.empty());
+    CHECK_FALSE(e.definition.empty());
+    CHECK(std::find(seen.begin(), seen.end(), e.term) == seen.end());
+    seen.push_back(e.term);
+    CHECK(glossaryFor(e.term) == e.definition);
+  }
+  // A term this game does not define is not accidentally defined.
+  CHECK(glossaryFor("quintic").empty());
+  CHECK(glossaryFor("").empty());
+
+  // Acceptance fact 3: the exotic vocabulary a first-run player meets on the curated
+  // path. Adding a caption that uses a new such term without defining it fails here.
+  for (const char* term : {"torus", "cylinder", "Mobius band", "Klein bottle", "glued",
+                           "seam", "dimension", "slice", "timeline", "time travel"}) {
+    INFO(term);
+    CHECK_FALSE(glossaryFor(term).empty());
+  }
+}
