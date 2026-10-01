@@ -748,7 +748,7 @@ TEST_CASE("align turns an inner-ring cell toward the camera", "[render]") {
   const SurfaceSeat* base = seatFor(rest, inner);
   REQUIRE(base != nullptr);
   const view::Vec3 travel = byQuat(base->quat, view::Vec3{1, 0, 0});  // a real tangent
-  const float offset = alignSlideU(v, inner, travel);
+  const float offset = alignSlideU(v, inner, travel, 6.0f);
   SurfacePose pose;
   pose.slideU = offset;
   const PlaySurface turned = PlaySurface::build(v, pose);
@@ -761,8 +761,8 @@ TEST_CASE("align turns an inner-ring cell toward the camera", "[render]") {
   CHECK_FALSE(turned.blocked(eye, fixed->centre, 0.02f));  // nothing between the two
 
   // An open tube/ribbon has nothing to align.
-  CHECK(alignSlideU(test::loadVariant("cylinder"), 0, travel) == 0.0f);
-  CHECK(alignSlideU(test::loadVariant("mobius"), 0, travel) == 0.0f);
+  CHECK(alignSlideU(test::loadVariant("cylinder"), 0, travel, 6.0f) == 0.0f);
+  CHECK(alignSlideU(test::loadVariant("mobius"), 0, travel, 6.0f) == 0.0f);
 }
 
 TEST_CASE("Klein's normal field is continuous except at its seam", "[render]") {
@@ -864,6 +864,220 @@ TEST_CASE("the chase camera centres a piece, and stands it up or lets it tilt",
     const view::OrbitCamera::ScreenPoint tsp = tilt.project(piece.position, aspect, w, h);
     CHECK(std::abs(tsp.x - w * 0.5f) < 1.0f);
     CHECK(std::abs(tsp.y - h * 0.5f) < 1.0f);
+  }
+}
+
+TEST_CASE("the chase camera's up really is the piece's up", "[render]") {
+  // The stronger form of the claim above: not merely that the normal points *roughly*
+  // up the screen, but that the view's up axis is the piece's normal projected
+  // perpendicular to the view direction - the vectors are aligned. The loose check
+  // above let a roll that was the wrong way round pass whenever the seat happened to
+  // stand near a pole; this is exact, at every seat and for both surface tangents.
+  for (const std::string& name : kShapes) {
+    const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
+    const PlaySurface surf = PlaySurface::build(v);
+    const float w = 1000.0f;
+    const float h = 700.0f;
+    const float aspect = w / h;
+    for (std::size_t i = 0; i < surf.seats().size(); ++i) {
+      const SurfaceSeat& seat = surf.seats()[i];
+      SurfaceMoveSample piece;
+      piece.position = seat.centre;
+      piece.normal = seat.normal;
+      piece.quat = seat.quat;
+      CAPTURE(name, i, seat.centre.x, seat.centre.y, seat.centre.z);
+      // The frame the renderer gives the piece: local +Z is the surface normal.
+      CHECK_THAT(view::dot(byQuat(seat.quat, view::Vec3{0, 0, 1}), seat.normal),
+                 WithinAbs(1.0f, 1e-3f));
+      for (const view::Vec3& local : {view::Vec3{1, 0, 0}, view::Vec3{0, 1, 0}}) {
+        const view::Vec3 travel = byQuat(seat.quat, local);
+        const view::OrbitCamera cam = surfaceChaseCamera(piece, travel, 4.0f, true);
+        const view::OrbitCamera::ScreenPoint sp =
+            cam.project(piece.position, aspect, w, h);
+        REQUIRE(sp.visible);
+        const view::OrbitCamera::ScreenPoint up =
+            cam.project(piece.position + piece.normal, aspect, w, h);
+        const float upLen = sp.y - up.y;  // positive: the normal points up the screen
+        CHECK(upLen > 0.0f);
+        // Straight up and not sideways: the horizontal offset is a rounding error
+        // against the vertical run, never a real lean.
+        CHECK(std::abs(up.x - sp.x) < 0.02f * std::abs(upLen) + 0.5f);
+      }
+    }
+  }
+}
+
+namespace {
+
+/// The camera's screen-up axis in world space, read from the matrix it actually projects
+/// with (`viewProj`), so a basis the renderer would use is what is compared - not a
+/// re-derivation from the pose fields.
+view::Vec3 screenUp(const view::OrbitCamera& cam, float aspect) {
+  const view::Mat4 vp = cam.viewProj(aspect);
+  return view::normalize(view::Vec3{vp[1], vp[5], vp[9]});
+}
+
+float angleBetween(const view::Vec3& a, const view::Vec3& b) {
+  return std::acos(std::clamp(view::dot(a, b), -1.0f, 1.0f));
+}
+
+}  // namespace
+
+TEST_CASE("the follow camera is smooth along a move", "[render]") {
+  // "Jerky" is the camera swivelling at a cell corner or flipping over a leap's apex.
+  // The follow camera is pure in `t`, so smoothness is a property of the function: a
+  // fine sweep turns the view by a small angle each step and never by a half-turn.
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("torus"));
+  const PlaySurface surf = PlaySurface::build(v);
+  const auto cell = [&](int f, int r) { return v.dims.toCell(Coord::of({f, r})); };
+  const float aspect = 1000.0f / 700.0f;
+
+  const auto smoothness = [&](const view::MovePath& path, const char* what) {
+    CAPTURE(what);
+    const int steps = 200;
+    view::Vec3 prevEye{};
+    view::Vec3 prevUp{};
+    float worstEye = 0.0f;
+    float worstUp = 0.0f;
+    int worstAt = 0;
+    for (int i = 0; i <= steps; ++i) {
+      const float t = static_cast<float>(i) / static_cast<float>(steps);
+      const view::OrbitCamera cam = surfaceFollowCamera(path, surf, t, 4.0f, true);
+      const view::Vec3 eyeDir = view::normalize(cam.eye() - cam.target);
+      const view::Vec3 up = screenUp(cam, aspect);
+      if (i > 0) {
+        const float de = angleBetween(eyeDir, prevEye);
+        const float du = angleBetween(up, prevUp);
+        if (de > worstEye) {
+          worstEye = de;
+          worstAt = i;
+        }
+        worstUp = std::max(worstUp, du);
+      }
+      prevEye = eyeDir;
+      prevUp = up;
+    }
+    CAPTURE(worstAt, static_cast<float>(worstAt) / static_cast<float>(steps));
+    // ~0.03 rad per step is an ordinary sweep over this move; a cell-corner swivel or a
+    // leap flip is many times that.
+    CHECK(worstEye < 0.12f);
+    CHECK(worstUp < 0.12f);
+  };
+
+  // A rook's glide around the ring, at the tube position that faces most steadily up:
+  // the outward side, which is where the anti-clip keeps a followed piece. (A route
+  // across the underside swings any third-person camera through a pole; the shipped
+  // anti-clip turns the shape so that does not happen, which is tested separately.)
+  const int nx = static_cast<int>(v.dims.extent(0));
+  int topFile = 0;
+  float bestUp = -2.0f;
+  for (int f = 0; f < nx; ++f) {
+    if (seatAt(surf, v, f, 0).normal.z > bestUp) {
+      bestUp = seatAt(surf, v, f, 0).normal.z;
+      topFile = f;
+    }
+  }
+  view::MovePath glide;
+  glide.from = cell(topFile, 0);
+  glide.to = cell(topFile, 6);
+  for (int r = 0; r < 6; ++r) {
+    glide.steps.push_back({cell(topFile, r),
+                           cell(topFile, r + 1),
+                           view::StepKind::Interior,
+                           {},
+                           0,
+                           Side::Max});
+  }
+  smoothness(glide, "glide");
+
+  // A knight's leap, whose arc reverses at its apex.
+  view::MovePath leap;
+  leap.from = cell(0, 0);
+  leap.to = cell(2, 1);
+  leap.leap = true;
+  smoothness(leap, "leap");
+}
+
+TEST_CASE("the turntable align turns the piece to face the camera, unoccluded",
+          "[render]") {
+  // The turntable's anti-clip: the camera angle is fixed and the *shape* rotates so the
+  // followed cell comes round to the near side. For every cell, the chosen offset must
+  // leave the piece facing the eye and nothing of the shape between the two.
+  for (const char* name : {"torus", "klein"}) {
+    const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
+    const PlaySurface rest = PlaySurface::build(v);
+    const view::Bounds rb = rest.bounds();
+    const float restSpan =
+        std::max({rb.maxX - rb.minX, rb.maxY - rb.minY, rb.maxZ - rb.minZ});
+    const view::Vec3 toCamera = view::normalize(view::Vec3{0.35f, -1.0f, 0.55f});
+    int checked = 0;
+    int unoccluded = 0;
+    int facing = 0;
+    for (const SurfaceSeat& seat : rest.seats()) {
+      const float offset = alignSlideToFace(v, seat.cell, toCamera, 0.6f * restSpan);
+      SurfacePose pose;
+      pose.slideU = offset;
+      const PlaySurface turned = PlaySurface::build(v, pose);
+      const SurfaceSeat* fixed = [&]() -> const SurfaceSeat* {
+        for (const SurfaceSeat& s : turned.seats()) {
+          if (s.cell == seat.cell) return &s;
+        }
+        return nullptr;
+      }();
+      REQUIRE(fixed != nullptr);
+      ++checked;
+      const view::Bounds b = turned.bounds();
+      const float span = std::max({b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ});
+      const view::Vec3 eye = fixed->centre + toCamera * (0.6f * span);
+      if (view::dot(fixed->normal, toCamera) > 0.0f) ++facing;
+      if (!turned.blocked(eye, fixed->centre, 0.02f)) ++unoccluded;
+    }
+    CAPTURE(name, checked, facing, unoccluded);
+    // Every cell can be brought clear of the shape on a closed ring: the search prefers
+    // an unoccluded seat over a better-facing one, so nothing clips.
+    CHECK(unoccluded == checked);
+    // ...and on the orientable torus every cell also faces the camera. A Klein bottle's
+    // normal field cannot be globally consistent, so a handful show their back - still
+    // unoccluded, which is the property that matters.
+    const bool orientable = std::string(name) == "torus";
+    CHECK(facing >= (orientable ? checked : checked * 3 / 4));
+  }
+}
+
+TEST_CASE("the chase align clears the shape at the camera's own distance", "[render]") {
+  // The search has to test occlusion at the distance the camera will actually sit: a
+  // close chase at a fraction of the span was clearing seats at a *larger* test distance
+  // and still looking through the tube. Here the eye is placed at the same distance the
+  // search was given.
+  for (const char* name : {"torus", "klein"}) {
+    const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
+    const PlaySurface rest = PlaySurface::build(v);
+    const view::Bounds rb = rest.bounds();
+    const float span =
+        std::max({rb.maxX - rb.minX, rb.maxY - rb.minY, rb.maxZ - rb.minZ});
+    const float eyeDistance = std::max(2.0f, 0.4f * span);
+    int checked = 0;
+    int unoccluded = 0;
+    for (const SurfaceSeat& seat : rest.seats()) {
+      const view::Vec3 travel = byQuat(seat.quat, view::Vec3{1, 0, 0});
+      const float offset = alignSlideU(v, seat.cell, travel, eyeDistance);
+      SurfacePose pose;
+      pose.slideU = offset;
+      const PlaySurface turned = PlaySurface::build(v, pose);
+      const SurfaceSeat* fixed = nullptr;
+      for (const SurfaceSeat& s : turned.seats()) {
+        if (s.cell == seat.cell) fixed = &s;
+      }
+      REQUIRE(fixed != nullptr);
+      ++checked;
+      const view::Vec3 toEye = view::normalize(travel * -1.0f + fixed->normal * 0.35f);
+      const view::Vec3 eye = fixed->centre + toEye * eyeDistance;
+      if (!turned.blocked(eye, fixed->centre, 0.02f)) ++unoccluded;
+    }
+    CAPTURE(name, checked, unoccluded);
+    // A Klein bottle passes through itself, so a cell or two can have a nearer sheet over
+    // them whatever the slide; the orientable torus must be clear everywhere.
+    CHECK(unoccluded >= (std::string(name) == "torus" ? checked : checked * 9 / 10));
   }
 }
 

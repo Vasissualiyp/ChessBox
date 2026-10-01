@@ -60,6 +60,13 @@ Vec3 worldDir(const ViewConfig& cfg, const Direction& d) {
 
 }  // namespace
 
+float shotEnvelope(float progress) noexcept {
+  const float in = std::clamp(progress / 0.15f, 0.0f, 1.0f);
+  const float out = std::clamp((1.0f - progress) / 0.15f, 0.0f, 1.0f);
+  const float e = std::min(in, out);
+  return e * e * (3.0f - 2.0f * e);
+}
+
 Vec3 pointAlong(const std::vector<Vec3>& points, float s) {
   if (points.empty()) return {};
   if (points.size() == 1) return points.front();

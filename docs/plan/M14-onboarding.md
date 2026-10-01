@@ -141,6 +141,14 @@ say themselves:
 
 ## Status
 
+**M14.1 revised: the tutorial is summoned, not automatic (2026-10-01).** The curated
+sequence no longer opens by itself on first launch; the shell always opens on the main
+menu, and a new **Tutorial** row (index 04, between Multiplayer and Editor) opens
+`Screen::Welcome` on demand. `back()` returns it to the main menu. `Settings::seenWelcome`
+and `Shell::dismissWelcome` remain (leaving the sequence is still recorded) but no longer
+decide the startup screen. `tests/unit/app/test_shell.cpp` pins the new behaviour: a fresh
+shell opens on the menu, the tutorial is reachable, and backing out returns to the menu.
+
 **M14.1 (first-run) and M14.2 (curated path) built (2026-09-30).** `Screen::Welcome` is the
 first-run screen (`Settings::seenWelcome`, persisted, plays once); `Shell::dismissWelcome`
 leaves it and opens the main menu. The screen states what the game is in one sentence and

@@ -10,16 +10,6 @@
 namespace cb::app {
 namespace {
 
-/// Ease the shot in and out at the ends of a move, so a camera that only leads for the
-/// middle of the move does not snap onto the piece at the first frame or back off at the
-/// last. 1 through the body of the move, 0 at both ends.
-float shotEnvelope(float progress) noexcept {
-  const float in = std::clamp(progress / 0.15f, 0.0f, 1.0f);
-  const float out = std::clamp((1.0f - progress) / 0.15f, 0.0f, 1.0f);
-  const float e = std::min(in, out);
-  return e * e * (3.0f - 2.0f * e);
-}
-
 /// Shortest signed difference between two angles, so a shot offset that wraps from just
 /// under pi to just over it does not spin the camera the long way round.
 float wrapAngle(float a) noexcept {
@@ -254,6 +244,12 @@ view::OrbitCamera Session::camera() const noexcept {
   return cameraOver(placements_, view::boundsOf(placements_), viewCfg_);
 }
 
+view::OrbitCamera Session::playerCamera() const noexcept {
+  view::OrbitCamera out = camera_;
+  out.distance *= 1.0f + 0.18f * pullBack_;
+  return out;
+}
+
 view::OrbitCamera Session::cameraOver(const std::vector<view::Placement>& placements,
                                       const view::Bounds& scene,
                                       const view::ViewConfig& cfg) const noexcept {
@@ -278,7 +274,7 @@ view::OrbitCamera Session::cameraOver(const std::vector<view::Placement>& placem
       view::moveCamera(lastPath_, placements, cfg, scene, off, 1.0f);
   const view::CameraPose shot = view::moveCamera(lastPath_, placements, cfg, scene,
                                                  cameraPolicy_, anim_.progress());
-  const float k = followStrength_ * shotEnvelope(anim_.progress());
+  const float k = followStrength_ * view::shotEnvelope(anim_.progress());
   out.target = out.target + (shot.target - settled.target) * k;
   out.yaw = out.yaw + wrapAngle(shot.yaw - settled.yaw) * k;
   out.pitch = std::clamp(out.pitch + (shot.pitch - settled.pitch) * k, 0.10f, 1.53f);

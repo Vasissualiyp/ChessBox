@@ -101,24 +101,24 @@ TEST_CASE("the game opens on the main menu with nothing loaded", "[unit][app]") 
   REQUIRE_FALSE(shell->quitRequested());
 }
 
-TEST_CASE("a first run opens on the welcome, once", "[unit][app]") {
-  // M14.1: the first launch is a designed sequence, not the main menu. It plays once,
-  // then the shell opens where a game opens.
+TEST_CASE("the game opens on the main menu, and the tutorial is on demand",
+          "[unit][app]") {
+  // M14.1, revised: the curated first-run sequence no longer opens by itself. The game
+  // opens on its menu, and the Tutorial row summons the sequence.
   const auto path = tempSettings("welcome.conf");
-  {
-    auto shell = Shell::create({"standard", "torus"}, path);
-    REQUIRE(shell->screen() == Screen::Welcome);
-    REQUIRE(shell->firstRun());
-    REQUIRE_FALSE(shell->hasGame());
-    REQUIRE_FALSE(shell->showsBoard());
-    shell->dismissWelcome();
-    REQUIRE(shell->screen() == Screen::MainMenu);
-    REQUIRE_FALSE(shell->firstRun());
-  }
-  // A second launch remembers.
+  auto shell = Shell::create({"standard", "torus"}, path);
+  REQUIRE(shell->screen() == Screen::MainMenu);
+  REQUIRE_FALSE(shell->hasGame());
+  REQUIRE_FALSE(shell->showsBoard());
+
+  shell->go(Screen::Welcome);
+  REQUIRE(shell->screen() == Screen::Welcome);
+  shell->back();
+  REQUIRE(shell->screen() == Screen::MainMenu);
+
+  // A later launch opens on the menu too, however many times the tutorial has been seen.
   auto again = Shell::create({"standard", "torus"}, path);
   REQUIRE(again->screen() == Screen::MainMenu);
-  REQUIRE_FALSE(again->firstRun());
 }
 
 TEST_CASE("the curated path starts at standard and explains each step", "[unit][app]") {
@@ -325,6 +325,7 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
     shell->settings().overtureSpeed = 1.75f;
     shell->settings().cameraMode = "route";
     shell->settings().followStrength = 0.4f;
+    shell->settings().shapeFollow = "chase";
     shell->settings().frameCap = 60;
     REQUIRE(shell->startGame("klein").has_value());  // also records the last variant
     shell->applySettings();
@@ -342,6 +343,7 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
     REQUIRE(shell->overtures().speed() == 1.75f);
     REQUIRE(shell->settings().cameraMode == "route");
     REQUIRE(shell->settings().followStrength == 0.4f);
+    REQUIRE(shell->settings().shapeFollow == "chase");
     REQUIRE(shell->settings().frameCap == 60);
   }
 }
@@ -370,11 +372,13 @@ TEST_CASE("settings are clamped to usable values", "[unit][app]") {
   s.guiScale = 99.0f;
   s.orbitSensitivity = -4.0f;
   s.volumeMaster = 5.0f;
+  s.shapeFollow = "sideways";
   s.lastVariant.clear();
   s.sanitize();
   REQUIRE(s.guiScale <= 3.0f);
   REQUIRE(s.orbitSensitivity >= 0.1f);
   REQUIRE(s.volumeMaster <= 1.0f);
+  REQUIRE(s.shapeFollow == "chase");
   REQUIRE_FALSE(s.lastVariant.empty());
 }
 

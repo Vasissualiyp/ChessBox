@@ -65,9 +65,9 @@ std::unique_ptr<Shell> Shell::create(std::vector<std::string> library,
       settingsPath.empty() ? Settings::defaultPath() : std::move(settingsPath);
   shell->settings_ = Settings::load(shell->settingsPath_);
   shell->currentVariant_ = shell->settings_.lastVariant;
-  // The first launch is a designed sequence, not the main menu (M14.1). Once seen, the
-  // shell opens where a game opens.
-  shell->screen_ = shell->settings_.seenWelcome ? Screen::MainMenu : Screen::Welcome;
+  // The shell always opens on the main menu. The curated first-run sequence is now the
+  // on-demand Tutorial row rather than something the game opens onto by itself.
+  shell->screen_ = Screen::MainMenu;
   // A loaded setting should take effect immediately; the library overtures have their own
   // clock and are not waiting for `applySettings` (which a fresh shell has no reason to
   // call). `applySettings` keeps it in step once the player moves a control.
@@ -230,6 +230,8 @@ void Shell::back() {
     case Screen::MainMenu:
       break;
     case Screen::Welcome:
+      // The tutorial is a screen off the menu now, so backing out returns there.
+      screen_ = Screen::MainMenu;
       break;
   }
 }

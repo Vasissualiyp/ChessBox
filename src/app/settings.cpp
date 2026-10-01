@@ -110,6 +110,8 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.geometryAlign = asBool(value);
     else if (key == "follow_upright")
       s.followUpright = asBool(value);
+    else if (key == "shape_follow")
+      s.shapeFollow = value;
     else if (key == "geometry_slide_u")
       s.geometrySlideU = asFloat(value, s.geometrySlideU);
     else if (key == "geometry_slide_v")
@@ -180,6 +182,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "geometry_ghost = " << geometryGhost << '\n';
   out << "geometry_align = " << boolText(geometryAlign) << '\n';
   out << "follow_upright = " << boolText(followUpright) << '\n';
+  out << "shape_follow = " << shapeFollow << '\n';
   out << "geometry_slide_u = " << geometrySlideU << '\n';
   out << "geometry_slide_v = " << geometrySlideV << '\n';
   out << "animate_moves = " << boolText(animateMoves) << '\n';
@@ -222,6 +225,7 @@ void Settings::sanitize() {
   if (cameraMode != "off" && cameraMode != "piece" && cameraMode != "route") {
     cameraMode = "off";
   }
+  if (shapeFollow != "chase" && shapeFollow != "turntable") shapeFollow = "chase";
   if (lastVariant.empty()) lastVariant = "standard";
   if (pieceIcons != "faceted" && pieceIcons != "primitive") pieceIcons = "faceted";
   if (theme != "manifold" && theme != "console") theme = "manifold";

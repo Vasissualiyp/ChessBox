@@ -160,13 +160,18 @@ UiRequest Ui::buildMainMenu(app::Shell& shell) {
   }
   if (menuEntry("Multiplayer", 3, t, display, width, false, scale_)) {
   }
-  if (menuEntry("Editor", 4, t, display, width, true, scale_)) {
+  // The curated "start here" path, summoned when the player asks for it rather than
+  // opened on first launch (M14.1, revised).
+  if (menuEntry("Tutorial", 4, t, display, width, true, scale_)) {
+    shell.go(app::Screen::Welcome);
+  }
+  if (menuEntry("Editor", 5, t, display, width, true, scale_)) {
     shell.go(app::Screen::Editor);
   }
-  if (menuEntry("Settings", 5, t, display, width, true, scale_)) {
+  if (menuEntry("Settings", 6, t, display, width, true, scale_)) {
     shell.go(app::Screen::Settings);
   }
-  if (menuEntry("Quit", 6, t, display, width, true, scale_)) {
+  if (menuEntry("Quit", 7, t, display, width, true, scale_)) {
     shell.go(app::Screen::QuitConfirm);
   }
 
@@ -182,12 +187,14 @@ UiRequest Ui::buildWelcome(app::Shell& shell) {
   const view::Theme& t = theme_;
   auto* display = static_cast<ImFont*>(fontDisplay_);
   auto* small = static_cast<ImFont*>(fontSmall_);
+  auto* mono = static_cast<ImFont*>(fontMono_);
 
   ImVec2 menuMin, menuMax;
   drawShellFrame(shell, menuMin, menuMax);
   const PaneMove move = paneMove();
   beginPane("##welcome", menuMin, menuMax, move.scale, move.alpha, px(46.0f), !ghosting_);
-  screenTitle("CHESSBOX", t, display, scale_, 2.2f);
+  eyebrow("tutorial", t, mono, scale_);
+  screenTitle("Start here", t, display, scale_, 2.2f);
   ImGui::Dummy(ImVec2(0, px(6)));
   ImGui::PushFont(small);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
@@ -937,6 +944,15 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
     }
   }
   ImGui::BeginDisabled(s.cameraMode == "off");
+  {
+    // How a move is followed when the board is its own shape: turn the board under a
+    // fixed camera angle, or chase the piece with the camera. A press toggles.
+    const std::string shown =
+        s.shapeFollow == "chase" ? "chase the piece" : "turn the board";
+    if (cycleButton("Follow shape", shown, t, scale_, px(230))) {
+      s.shapeFollow = s.shapeFollow == "chase" ? "turntable" : "chase";
+    }
+  }
   ImGui::SliderFloat("Follow strength", &s.followStrength, 0.0f, 1.0f, "%.2f");
   ImGui::Checkbox("Keep the followed piece upright", &s.followUpright);
   ImGui::Checkbox("Stop the shape clipping the followed piece", &s.geometryAlign);
@@ -1071,6 +1087,8 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       before.zoomSensitivity != s.zoomSensitivity ||
       before.invertOrbitY != s.invertOrbitY || before.cameraMode != s.cameraMode ||
       before.followStrength != s.followStrength ||
+      before.followUpright != s.followUpright ||
+      before.geometryAlign != s.geometryAlign || before.shapeFollow != s.shapeFollow ||
       before.confirmMoves != s.confirmMoves || before.autoPromoteTo != s.autoPromoteTo ||
       before.volumeMaster != s.volumeMaster || before.volumeMusic != s.volumeMusic ||
       before.volumeEffects != s.volumeEffects;

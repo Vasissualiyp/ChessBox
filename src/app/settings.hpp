@@ -75,6 +75,12 @@ struct Settings {
   /// rather than letting it tilt and flip with the shape. The tilt is the other camera
   /// mode and has its own charm, so this is a stated choice (M17.16 revision).
   bool followUpright{true};
+  /// How a move is followed on a shape: "chase" is the third-person camera that sits
+  /// behind the piece along its route - the shipped follow. "turntable" instead keeps the
+  /// player's camera angle and turns the **board** (the slide a middle-drag gives). A
+  /// name rather than an enum because this layer is below the renderer where the modes
+  /// live.
+  std::string shapeFollow{"chase"};
   /// The align feature's own eased slide offset, in cells, added on top of the player's
   /// manual `geometrySlideU`. Transient: not written to disk, so a reload starts aligned
   /// to nothing.

@@ -154,8 +154,8 @@ class Ui {
   /// the scale option moves the text and leaves the panels behind.
   [[nodiscard]] float px(float v) const noexcept { return v * scale_; }
   UiRequest buildMainMenu(app::Shell& shell);
-  /// The first-run sequence: what this is, and the curated "start here" path
-  /// (M14.1/M14.2).
+  /// The tutorial screen: what this is, and the curated "start here" path, reached from
+  /// the main menu's Tutorial row rather than opened on first launch (M14.1/M14.2).
   UiRequest buildWelcome(app::Shell& shell);
   UiRequest buildNewGame(app::Shell& shell);
   UiRequest buildPause(app::Shell& shell);

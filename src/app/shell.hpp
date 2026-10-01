@@ -16,7 +16,7 @@ namespace cb::app {
 
 /// Which screen the player is looking at.
 enum class Screen : std::uint8_t {
-  Welcome,  ///< the first-run sequence: what this is, and where to start (M14.1)
+  Welcome,  ///< the tutorial: what this is, and where to start (M14.1)
   MainMenu,
   NewGame,  ///< choosing a variant
   Game,
@@ -81,10 +81,10 @@ class Shell {
   [[nodiscard]] const std::string& message() const noexcept { return message_; }
   [[nodiscard]] bool quitRequested() const noexcept { return quit_; }
 
-  /// True on the first run, before the welcome screen has been dismissed (M14.1). The
-  /// shell opens on `Screen::Welcome` until then.
+  /// True before the tutorial has ever been dismissed. The shell no longer opens on it
+  /// (the Tutorial row does), so this only records whether the player has seen it.
   [[nodiscard]] bool firstRun() const noexcept { return !settings_.seenWelcome; }
-  /// Leave the welcome screen: remember it was seen and open the main menu (M14.1).
+  /// Leave the tutorial: remember it was seen and open the main menu (M14.1).
   void dismissWelcome();
   /// A variant for "Surprise me", rotating through the library so a run of picks does not
   /// repeat. The caller captions it with `variantDescription` (M14.2).

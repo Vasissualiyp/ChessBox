@@ -388,36 +388,83 @@ view::OrbitCamera surfaceChaseCamera(const SurfaceMoveSample& piece,
   view::Vec3 forward = travel;
   if (view::length(forward) < 1e-5f) forward = view::Vec3{0.0f, -1.0f, 0.0f};
   forward = view::normalize(forward);
+  // Behind the piece *along the surface*, a good way above it: the travel is projected
+  // onto the surface's tangent plane and the eye lifted along the normal. Taking the raw
+  // travel would let the eye dip below the board wherever the route leans at the normal
+  // - the camera then looks almost straight at the pole, its yaw flips, and the follow
+  // is jerky. The projection keeps the eye on the outward side and the direction a
+  // continuous function of the route.
   // Behind the piece along the travel, a little above the surface (along the normal):
-  // eye = target - forward*distance + normal*(distance*0.35).
+  // the shipped chase's own eye direction. The travel is already smoothed by the
+  // caller, so a cell corner does not swivel it.
   const view::Vec3 toEye = view::normalize(forward * -1.0f + piece.normal * 0.35f);
   cam.pitch = std::asin(std::clamp(toEye.z, -0.99f, 0.99f));
   cam.yaw = std::atan2(toEye.x, -toEye.y);
   if (!upright) return cam;  // the tilt mode: no roll, so the piece rides the shape
-  // Roll so the piece's own up is screen up: the angle from the unrolled up to the
-  // normal's component perpendicular to the view direction.
-  const view::Vec3 viewDir = toEye * -1.0f;  // eye -> target, unit
-  const view::Vec3 upHint{0.0f, 0.0f, 1.0f};
-  const view::Vec3 up0 = view::normalize(
-      view::cross(view::normalize(view::cross(viewDir, upHint)), viewDir));
+  // Roll so the piece's own up is screen up. The basis is rebuilt from the camera that
+  // was actually constructed - after the pitch clamp, and with the camera's own up-hint
+  // - so it is exactly the basis `cameraBasis` will apply, and the roll cannot be a
+  // degree off wherever the camera is steep or near a pole (the loose test did not see
+  // either).
+  const view::Vec3 eyeDir = view::normalize(cam.eye() - cam.target);  // target -> eye
+  const view::Vec3 viewDir = eyeDir * -1.0f;                          // eye -> target
+  const view::Vec3 r = view::normalize(view::cross(viewDir, cam.upHint()));
+  const view::Vec3 up0 = view::cross(r, viewDir);
   view::Vec3 nPerp = piece.normal - viewDir * view::dot(piece.normal, viewDir);
   if (view::length(nPerp) > 1e-5f) {
     nPerp = view::normalize(nPerp);
+    // Negated: `atan2` gives the turn from the unrolled up to the normal, but
+    // `cameraBasis` applies `roll` as `up' = up cos - right sin` (the opposite sense),
+    // so the raw angle rolls the piece *away* from upright by twice its lean. See the
+    // M17.16 upright test.
     cam.roll =
-        std::atan2(view::dot(view::cross(up0, nPerp), viewDir), view::dot(up0, nPerp));
+        -std::atan2(view::dot(view::cross(up0, nPerp), viewDir), view::dot(up0, nPerp));
   }
   return cam;
 }
 
-float alignSlideU(const VariantSpec& v, CellId target, const view::Vec3& travel) {
-  // Only a closed ring has an inner/outer side worth turning.
+view::OrbitCamera surfaceFollowCamera(const view::MovePath& path, const PlaySurface& surf,
+                                      float t, float distance, bool upright) {
+  t = std::clamp(t, 0.0f, 1.0f);
+  const SurfaceMoveSample here = surfaceMoveSample(path, surf, t);
+  view::Vec3 travel;
+  if (path.leap) {
+    // A leap's sampled position reverses at its apex, so its own difference turns the
+    // camera round mid-air; a leap has one honest direction - the chord it crosses.
+    const SurfaceSeat* a = seatOf(surf, path.from);
+    const SurfaceSeat* b = seatOf(surf, path.to);
+    travel = (a != nullptr && b != nullptr) ? b->centre - a->centre : here.normal;
+  } else {
+    // A window in `t`, not a single step: the vector between the samples either side is
+    // continuous through a cell corner, where `sample(t + eps) - sample(t)` swivels. The
+    // window shrinks smoothly at the ends because the samples clamp there, so the camera
+    // still settles rather than snapping.
+    constexpr float kWindow = 0.10f;
+    const SurfaceMoveSample behind =
+        surfaceMoveSample(path, surf, std::max(0.0f, t - kWindow));
+    const SurfaceMoveSample ahead =
+        surfaceMoveSample(path, surf, std::min(1.0f, t + kWindow));
+    travel = ahead.position - behind.position;
+  }
+  if (view::length(travel) < 1e-5f)
+    travel = here.normal;  // any tangent; the piece stands
+  return surfaceChaseCamera(here, travel, distance, upright);
+}
+
+namespace {
+
+/// Sweep slide offsets for the one that best presents `target` to a camera whose eye
+/// direction `toEyeFor` gives for the candidate's own seat. An occluded candidate is
+/// scored below every visible one, then the piece's `facing` (how squarely it looks at
+/// the camera) breaks the tie, so the shape turns the piece round rather than merely
+/// leaving it in front of a wall. Only a closed ring has an inner/outer side to turn, so
+/// an open tube or ribbon has nothing to search.
+template <typename ToEye>
+float searchSlide(const VariantSpec& v, CellId target, float eyeDistance,
+                  ToEye toEyeFor) {
   if (!PlaySurface::slidesAlongRanks(v)) return 0.0f;
   const int nx = static_cast<int>(v.dims.extent(0));
   const float period = 2.0f * static_cast<float>(nx);
-  view::Vec3 fwd = travel;
-  if (view::length(fwd) < 1e-5f) fwd = view::Vec3{0.0f, -1.0f, 0.0f};
-  fwd = view::normalize(fwd);
-
   float best = 0.0f;
   float bestScore = -1e9f;
   for (int i = 0; i < 16; ++i) {
@@ -432,12 +479,11 @@ float alignSlideU(const VariantSpec& v, CellId target, const view::Vec3& travel)
       }
     }
     if (seat == nullptr) continue;
-    const view::Bounds b = s.bounds();
-    const float span = std::max({b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ});
-    // Where the chase camera would sit for this candidate, and whether the shape comes
+    view::Vec3 toEye = toEyeFor(*seat);
+    toEye = view::length(toEye) > 1e-6f ? view::normalize(toEye) : view::Vec3{0, 0, 1};
+    // The eye the camera would sit at for this candidate, and whether the shape comes
     // between it and the piece.
-    const view::Vec3 toEye = view::normalize(fwd * -1.0f + seat->normal * 0.35f);
-    const view::Vec3 eye = seat->centre + toEye * (0.6f * span);
+    const view::Vec3 eye = seat->centre + toEye * eyeDistance;
     const bool occluded = s.blocked(eye, seat->centre, 0.02f);
     const float facing = view::dot(seat->normal, toEye);
     const float score = (occluded ? -10.0f : 0.0f) + facing;
@@ -447,6 +493,30 @@ float alignSlideU(const VariantSpec& v, CellId target, const view::Vec3& travel)
     }
   }
   return best;
+}
+
+}  // namespace
+
+float alignSlideU(const VariantSpec& v, CellId target, const view::Vec3& travel,
+                  float eyeDistance) {
+  view::Vec3 fwd = travel;
+  if (view::length(fwd) < 1e-5f) fwd = view::Vec3{0.0f, -1.0f, 0.0f};
+  fwd = view::normalize(fwd);
+  // Where the chase camera would sit for each candidate: behind the piece along the
+  // travel, a little above the surface.
+  return searchSlide(v, target, eyeDistance, [&](const SurfaceSeat& seat) {
+    return fwd * -1.0f + seat.normal * 0.35f;
+  });
+}
+
+float alignSlideToFace(const VariantSpec& v, CellId target, const view::Vec3& toCamera,
+                       float eyeDistance) {
+  view::Vec3 toCam = toCamera;
+  if (view::length(toCam) < 1e-5f) toCam = view::Vec3{0.0f, 0.0f, 1.0f};
+  toCam = view::normalize(toCam);
+  // The camera angle is fixed (the turntable), so the eye direction is the same for
+  // every candidate; only the seat moves under it.
+  return searchSlide(v, target, eyeDistance, [&](const SurfaceSeat&) { return toCam; });
 }
 
 void PlaySurface::buildStacked(const VariantSpec& v) {

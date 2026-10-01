@@ -112,6 +112,13 @@ struct RouteRun {
 /// invariant exists to rule out (M17.15).
 [[nodiscard]] Vec3 pointAlong(const std::vector<Vec3>& points, float s);
 
+/// Ease a shot in and out at the ends of a move, so a camera that only leads for the
+/// middle of the move does not snap onto the piece at the first frame or back off at the
+/// last: 1 through the body of the move, 0 at both ends. The flat move camera applies it
+/// in `Session::cameraOver`; the geometry view's shape follow applies the same envelope
+/// so both boards settle identically (M17.16).
+[[nodiscard]] float shotEnvelope(float progress) noexcept;
+
 /// Apply a pose to the orbit camera, by assignment. `roll` has no `OrbitCamera` field and
 /// is dropped here; the flat board and the existing renderer never set it.
 [[nodiscard]] OrbitCamera toOrbit(const CameraPose& pose);

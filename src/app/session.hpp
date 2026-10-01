@@ -74,6 +74,12 @@ class Session {
       const std::vector<view::Placement>& placements, const view::Bounds& scene,
       const view::ViewConfig& cfg) const noexcept;
 
+  /// The player's own camera with no move-shot contribution, adjusted for pull-back.
+  /// The geometry view follows on top of this so it can ease in and out at the ends of a
+  /// move; `cameraOver` folds the shot in, so it cannot be used as the base for a *new*
+  /// shot (M17.16).
+  [[nodiscard]] view::OrbitCamera playerCamera() const noexcept;
+
   /// How far the view has stepped back off the board, 0 to 1. Pause is the player
   /// looking up from the position, not a panel landing on top of it.
   /// Camera pull-back, 0 at the board and growing as the shell steps away from it: 1 at

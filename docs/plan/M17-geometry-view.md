@@ -1240,3 +1240,54 @@ follow styles.
 Tests: the anti-clip search now checks `blocked` returns false for the chosen offset and the
 facing is positive; the chase test covers both the upright roll and the tilt mode's centred,
 unrolled framing. `tests/render/test_play_surface.cpp`.
+
+---
+
+## Status: shape follow repaired, and a turntable mode (2026-10-01)
+
+Play asked for the shape follow to be smooth, to keep the piece upright, and to stop the
+camera clipping by **turning the board**; a strong GUI-less test was wanted for each.
+
+- **Upright was inverted.** `surfaceChaseCamera` computed the roll as the turn from the
+  unrolled up to the normal, but `OrbitCamera`'s `cameraBasis` applies `roll` in the
+  opposite sense, so every piece leaned by twice its tilt (and near a pole flipped). The
+  roll is now negated, and it is derived from the camera that was *actually built* after
+  the pitch clamp and with `OrbitCamera::upHint()`, so it is exact near steep angles.
+  `tests/render/test_play_surface.cpp` ("the chase camera's up really is the piece's up")
+  checks the view's up axis against the piece's normal projected perpendicular to the
+  view, at every seat and for both surface tangents; the old loose test passed by luck.
+- **Smoothness.** The chase eye is `-tangent + normal*0.8`, the travel projected into the
+  surface so the eye stays on the outward side instead of dipping under it, and the new
+  `render::surfaceFollowCamera` samples the route through a window in `t` (a leap follows
+  its chord) so the direction is continuous through a cell corner. `main::boardCamera`
+  blends the follow onto the player's camera with `view::shotEnvelope * followStrength`
+  (the same envelope the flat move camera uses), so a move eases in and out instead of
+  snapping. Tested by "the follow camera is smooth along a move" - a fine sweep turns the
+  view by a small angle each step.
+- **Two selectable modes.** `Settings::shapeFollow`: `"chase"` (default and shipped) is
+  the repaired third-person camera that follows behind the piece; `"turntable"` keeps the
+  player's camera angle and turns the **board** - the shape-slide the middle-drag uses -
+  so the followed piece comes round to the near side. The settings screen's `Follow shape`
+  row toggles them, and `chessbox_gui ... --shape-follow chase|turntable` states it for a
+  capture. The chase keeps the player's framing distance, which is at least the anti-clip
+  search's test distance, so a seat the search found clear is not still behind the tube.
+  `render::alignSlideToFace` is the turntable anti-clip (a fixed eye direction rather than
+  the chase's travel), sharing the 16-offset search with `alignSlideU`. Both are tested:
+  the turntable test brings every cell unoccluded on torus and Klein, and the chase's
+  anti-clip keeps its existing facing/`blocked` test.
+- **Anti-clip in captures.** `main::alignOffsetFor` is the deterministic form of the
+  ALIGN search; the interactive loop eases towards it and a capture sets it outright, so
+  a `--clip` of a followed move is anti-clipped like play.
+- **The align offset reaches the renderer (the real bug).** `poseFrom` folded the transient
+  `geometryAlignOffset` into the surface the camera and picker sampled, but `optionsFrom` -
+  which the renderer builds the drawn board from - did not. So the camera aimed at the
+  aligned surface while `BoardRenderer` drew the board unaligned: the align changed the
+  camera and never visibly turned the shape, which is exactly why "rotate the shape to
+  avoid clipping" never seemed to work. `optionsFrom` now adds the offset too, and a
+  capture refreshes the renderer's options after setting it.
+- **The chase searches occlusion at its own distance.** `alignSlideU`/`alignSlideToFace`
+  take the eye distance the camera will actually use; before, the search tested at
+  `0.6 * span` while a close follow sat inside that, so a seat it called clear could still
+  be behind the tube. `main::chaseEyeDistance` (0.7 * span) is used for both the camera and
+  its search. `tests/render/test_play_surface.cpp` pins it ("the chase align clears the
+  shape at the camera's own distance").

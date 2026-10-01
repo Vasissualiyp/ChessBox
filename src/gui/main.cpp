@@ -164,7 +164,11 @@ render::BoardOptions optionsFrom(const app::Settings& s) {
   o.showSeams = s.showSeams;
   o.pieceHeightScale = s.pieceHeightScale;
   o.flat = s.flatView;
-  o.surfaceSlideU = s.geometrySlideU;
+  // The player's own slide plus the anti-clip's transient offset. Both the renderer and
+  // `poseFrom` must fold the offset in: the camera was targeting the aligned surface
+  // while the board was still drawn unaligned, so the align affected the camera but the
+  // shape never visibly turned (M17.17).
+  o.surfaceSlideU = s.geometrySlideU + s.geometryAlignOffset;
   o.surfaceSlideV = s.geometrySlideV;
   o.surfaceEvert = s.geometryEvert;
   o.surfaceGhost = s.geometryGhost;
@@ -195,6 +199,43 @@ render::SurfacePose poseFrom(const app::Settings& s) {
   return pose;
 }
 
+namespace {
+
+float wrapAngle(float a) {
+  constexpr float kPi = 3.14159265358979f;
+  constexpr float kTwoPi = 2.0f * kPi;
+  while (a > kPi) a -= kTwoPi;
+  while (a < -kPi) a += kTwoPi;
+  return a;
+}
+
+/// Blend the player's own camera towards a follow pose by `k` in [0,1], the same way
+/// `Session::cameraOver` folds in the flat move camera: yaw and roll wrap, pitch stays
+/// off its poles, and the target and distance interpolate. The follow then eases in and
+/// out with `view::shotEnvelope`, so a move neither snaps onto the piece at the first
+/// frame nor jerks back at the last.
+view::OrbitCamera blendCamera(const view::OrbitCamera& base,
+                              const view::OrbitCamera& want, float k) {
+  view::OrbitCamera out = base;
+  out.target = base.target + (want.target - base.target) * k;
+  out.yaw = base.yaw + wrapAngle(want.yaw - base.yaw) * k;
+  out.pitch = std::clamp(base.pitch + (want.pitch - base.pitch) * k, 0.10f, 1.53f);
+  out.distance = std::max(1.0f, base.distance + (want.distance - base.distance) * k);
+  out.roll = base.roll + wrapAngle(want.roll - base.roll) * k;
+  return out;
+}
+
+/// How far the chase camera sits from the followed piece: close enough to make the piece
+/// the subject, at a fraction of the shape's span. The anti-clip search tests occlusion
+/// at this same distance, so a seat it finds clear is clear for the camera that follows.
+float chaseEyeDistance(const render::PlaySurface& surf) {
+  const view::Bounds b = surf.bounds();
+  const float span = std::max({b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ});
+  return std::max(2.0f, 0.7f * span);
+}
+
+}  // namespace
+
 /// The seats as a placement list, so the move camera can be asked for its blend against
 /// the shape instead of the flat layout (M17.16).
 std::vector<view::Placement> surfacePlacements(const render::PlaySurface& surf) {
@@ -212,31 +253,86 @@ std::vector<view::Placement> surfacePlacements(const render::PlaySurface& surf) 
 view::OrbitCamera boardCamera(const app::Shell& shell) {
   const app::Session* session = shell.session();
   if (session == nullptr) return {};
+  const app::Settings& st = shell.settings();
   if (optionsFor(shell).surface) {
     const render::PlaySurface surf =
-        render::PlaySurface::build(session->variant(), poseFrom(shell.settings()));
+        render::PlaySurface::build(session->variant(), poseFrom(st));
     if (!surf.empty()) {
-      // Following a move: one continuous chase, the piece centred and standing upright on
-      // its own normal (M17.16, revised). The travel direction is the route's, sampled a
-      // little ahead so a leap is followed across its arc too.
+      const view::OrbitCamera settled = session->playerCamera();
       if (session->shotInFlight()) {
         const view::MovePath& path = session->animation().path();
         const float t = session->animation().progress();
-        const render::SurfaceMoveSample here = render::surfaceMoveSample(path, surf, t);
-        const render::SurfaceMoveSample ahead =
-            render::surfaceMoveSample(path, surf, std::min(1.0f, t + 0.05f));
-        view::Vec3 travel = ahead.position - here.position;
-        if (view::length(travel) < 1e-5f) travel = here.normal;  // any tangent will do
-        const view::Bounds b = surf.bounds();
-        const float span = std::max({b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ});
-        return render::surfaceChaseCamera(here, travel, std::max(2.0f, 0.4f * span),
-                                          shell.settings().followUpright);
+        view::OrbitCamera want = settled;
+        if (st.shapeFollow == "chase") {
+          // A third-person chase: the piece centred, the camera behind it along its
+          // route and standing it upright on its normal (M17.16), close enough that the
+          // piece is the subject. The anti-clip turns the board so this does not put the
+          // camera inside the tube.
+          want = render::surfaceFollowCamera(path, surf, t, chaseEyeDistance(surf),
+                                             st.followUpright);
+        } else {
+          // Turntable: the camera angle is the player's; only the look-at follows the
+          // piece. The anti-clip turns the *board* so nothing comes between them
+          // (M17.16/17).
+          want.target = render::surfaceMoveSample(path, surf, t).position;
+        }
+        // Ease in and out at the ends, and respect the follow-strength setting, so the
+        // shape follow settles like the flat board's does rather than snapping.
+        return blendCamera(settled, want,
+                           session->followStrength() * view::shotEnvelope(t));
       }
-      return session->cameraOver(surfacePlacements(surf), surf.bounds(),
-                                 view::ViewConfig{});
+      return settled;
     }
   }
   return session->camera();
+}
+
+/// The seat the followed move is on right now, by nearest seat to the sampled position.
+/// Aligning for the *current* cell rather than the destination keeps a long move clear
+/// of the shape the whole way across, not only at the square it lands on.
+CellId currentFollowedCell(const app::Shell& shell, const render::PlaySurface& surf) {
+  const app::Session* session = shell.session();
+  if (session == nullptr || !session->shotInFlight()) return kInvalidCell;
+  const view::Vec3 here = render::surfaceMoveSample(session->animation().path(), surf,
+                                                    session->animation().progress())
+                              .position;
+  CellId best = kInvalidCell;
+  float bestDist = 1e30f;
+  for (const render::SurfaceSeat& s : surf.seats()) {
+    const float d = view::length(s.centre - here);
+    if (d < bestDist) {
+      bestDist = d;
+      best = s.cell;
+    }
+  }
+  return best;
+}
+
+/// The slide offset that keeps the cell `followed` from clipping, for the current
+/// settings and camera. Pure and deterministic, so a capture gets the same value the
+/// interactive loop eases towards - without it a `--clip` of a followed move would show
+/// the camera looking through the shape (M17.17).
+float alignOffsetFor(const app::Shell& shell, CellId followed) {
+  const app::Session* session = shell.session();
+  const app::Settings& st = shell.settings();
+  if (session == nullptr || followed == kInvalidCell || !st.geometryAlign ||
+      !session->shotInFlight()) {
+    return 0.0f;
+  }
+  if (st.shapeFollow == "chase") {
+    const render::PlaySurface surf =
+        render::PlaySurface::build(session->variant(), poseFrom(st));
+    const view::MovePath& path = session->animation().path();
+    const float t = session->animation().progress();
+    const view::Vec3 here = render::surfaceMoveSample(path, surf, t).position;
+    const view::Vec3 ahead =
+        render::surfaceMoveSample(path, surf, std::min(1.0f, t + 0.05f)).position;
+    return render::alignSlideU(session->variant(), followed, ahead - here,
+                               chaseEyeDistance(surf));
+  }
+  const view::OrbitCamera base = session->playerCamera();
+  const view::Vec3 toCamera = view::normalize(base.eye() - base.target);
+  return render::alignSlideToFace(session->variant(), followed, toCamera, base.distance);
 }
 
 /// Put the camera round whatever the board has just become.
@@ -280,7 +376,8 @@ void syncMarks(render::BoardRenderer& renderer, const app::Session& session) {
 int captureFrame(const std::string& variantName, const std::string& path,
                  const std::string& script, const std::string& screen, float overtureT,
                  int previewDims, bool clip, int clipFrames, float clipT0, float clipT1,
-                 bool cinema, const std::string& followMode, float moveT, int benchFrames,
+                 bool cinema, const std::string& followMode,
+                 const std::string& shapeFollow, float moveT, int benchFrames,
                  bool geometry, float evert, float slideU, float slideV, float ghost) {
   // Captures use default settings, never the person's own. A screenshot that changes
   // because whoever ran it likes a larger interface is not a screenshot of the game -
@@ -347,6 +444,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
       shell->session()->setCameraMode(followMode);
       shell->session()->setFollowStrength(1.0f);
     }
+    if (!shapeFollow.empty()) shell->settings().shapeFollow = shapeFollow;
     if (moveT >= 0.0f) shell->session()->setMoveProgress(moveT);
   }
 
@@ -432,6 +530,17 @@ int captureFrame(const std::string& variantName, const std::string& path,
       shell->session()->setPullBack(away);
       renderer->setBlur(away);
       if (frame.valid()) shell->session()->setBoardAspect(frame.width / frame.height);
+      // The interactive loop eases this; a capture states it outright, so a followed
+      // move is anti-clipped in a clip too (M17.17).
+      if (optionsFor(*shell).surface) {
+        const render::PlaySurface alignSurf = render::PlaySurface::build(
+            shell->session()->variant(), poseFrom(shell->settings()));
+        shell->settings().geometryAlignOffset =
+            alignOffsetFor(*shell, currentFollowedCell(*shell, alignSurf));
+        // The offset just changed, so the renderer's options must be refreshed before
+        // the board is built from them.
+        renderer->setOptions(optionsFor(*shell));
+      }
       syncMarks(*renderer, *shell->session());
       instances = renderer->buildInstances(
           shell->session()->snapshot(), shell->session()->viewConfig(),
@@ -564,6 +673,7 @@ int main(int argc, char** argv) {
   std::string screen;
   std::string clipDir;
   std::string followMode;
+  std::string shapeFollow;
   float overtureT = 0.78f;
   float moveT = -1.0f;
   int previewDims = 2;
@@ -596,7 +706,9 @@ int main(int argc, char** argv) {
           "sweeping t from --t0 to --t1 over --frames frames (default 0..1, 96).\n"
           "--cinema drops the interface and fills the frame with the board.\n"
           "--follow off|piece|route and --move-t 0..1 show the move camera in a "
-          "capture.\n"
+          "capture;\n"
+          "--shape-follow turntable|chase picks whether the board turns under a fixed\n"
+          "camera or the camera chases the piece.\n"
           "--bench-frame N times N headless frames of the chosen screen and prints "
           "ms/frame.\n"
           "--geometry draws the play board as its own shape (a cylinder, a torus, ...),\n"
@@ -636,6 +748,8 @@ int main(int argc, char** argv) {
       ghost = std::strtof(argv[++i], nullptr);
     else if (arg == "--follow" && i + 1 < argc)
       followMode = argv[++i];
+    else if (arg == "--shape-follow" && i + 1 < argc)
+      shapeFollow = argv[++i];
     else if (arg == "--move-t" && i + 1 < argc)
       moveT = std::strtof(argv[++i], nullptr);
     else if (arg == "--bench-frame" && i + 1 < argc)
@@ -649,8 +763,8 @@ int main(int argc, char** argv) {
   if (!targetPath.empty() || benchFrames > 0) {
     return captureFrame(variantName.empty() ? "standard" : variantName, targetPath,
                         script, screen, overtureT, previewDims, !clipDir.empty(),
-                        clipFrames, clipT0, clipT1, cinema, followMode, moveT,
-                        benchFrames, geometry, evert, slideU, slideV, ghost);
+                        clipFrames, clipT0, clipT1, cinema, followMode, shapeFollow,
+                        moveT, benchFrames, geometry, evert, slideU, slideV, ghost);
   }
 
   auto shell = makeShell();
@@ -968,18 +1082,12 @@ int main(int argc, char** argv) {
       bool following = false;
       if (st.geometryAlign && session != nullptr && session->shotInFlight()) {
         following = true;
-        const CellId followed = session->animation().travellingTo();
-        if (followed != lastAlignCell) {
-          lastAlignCell = followed;
-          // The route's travel, sampled a little ahead, is what the search orients by.
-          const render::PlaySurface surf =
-              render::PlaySurface::build(session->variant(), poseFrom(st));
-          const view::MovePath& path = session->animation().path();
-          const float t = session->animation().progress();
-          const view::Vec3 here = render::surfaceMoveSample(path, surf, t).position;
-          const view::Vec3 ahead =
-              render::surfaceMoveSample(path, surf, std::min(1.0f, t + 0.05f)).position;
-          alignTarget = render::alignSlideU(session->variant(), followed, ahead - here);
+        const render::PlaySurface alignSurf =
+            render::PlaySurface::build(session->variant(), poseFrom(st));
+        const CellId current = currentFollowedCell(*shell, alignSurf);
+        if (current != lastAlignCell) {
+          lastAlignCell = current;
+          alignTarget = alignOffsetFor(*shell, current);
         }
       } else {
         lastAlignCell = kInvalidCell;
