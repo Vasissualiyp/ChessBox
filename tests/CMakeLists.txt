@@ -69,9 +69,8 @@ if(TARGET chessbox_gui)
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(gui-geometry PROPERTIES LABELS "render;gui" TIMEOUT 120
     ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
-  # And turned through itself: at the far end of the eversion the hole has been pulled
-  # inside out. Halfway is the interesting frame to keep validation-clean, because that is
-  # where the surface passes through its own degenerate moment.
+  # The eversion flag at its halfway point: with the revised invert this is the rest
+  # shape (the swap happens past 0.5), so it is a plain validation capture of the pose.
   add_test(NAME gui-evert
     COMMAND chessbox_gui torus
             --shot ${CMAKE_BINARY_DIR}/render-captures/gui-evert.ppm

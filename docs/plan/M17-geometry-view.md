@@ -354,11 +354,12 @@ is described here. See **ADR-0019**.
     comes all the way round, and a Moebius band comes home mirrored and needs a second lap.
     That is the gluing itself rather than a cyan line about it. Offered along the ranks
     only where the ranks are glued.
-  - `evert` turns the surface through itself - the one move on a holed or non-orientable
-    surface that no camera can show. The closed surfaces sweep their ring radius through
-    zero to its negative, so the inside of the hole comes out by way of the spindle; a
-    cylinder, which no rotation can invert, rolls back over itself like a sock. `[` and `]`
-    for a keyboard, `--evert` for a capture.
+  - `evert` is the source of the INVERT control. As first built it geometrically everted
+    the shape (the closed surfaces sweep their ring radius through zero to its negative; a
+    cylinder rolls back over itself like a sock); **play found that a mirror, not an
+    invert** - it moves every cell about the origin - so M17.7 below revises it to a swap
+    of the outward side, with the squares fixed. `[` and `]` for a keyboard, `--evert` for
+    a capture.
 
 Two surfaces were also corrected while the board was being drawn on them, and both fixes
 land in the overtures as well, since there is one catalogue:
@@ -423,11 +424,14 @@ The next increment, done in the plan's order.
   double-counted. `Session::frameOn` takes a `headroom` and the geometry view passes 0.
 - **M17.7 - INVERT, and pieces that stay outside.** A `INVERT` button beside `SHAPE`
   (shown while the shape is showing) sets `Settings::geometryInvert`, a *target* the front
-  end eases `geometryEvert` to over ~half a second; `]`/`[` set the same target. The pose
-  stays a pure function of its number. The outward normal is now chosen by the side away
-  from the shape's axis (the cross-section centroid, precomputed once per rank), so the
-  eversion's reversal of the parametrisation's handedness no longer leaves every piece
-  inside the turned-out shape.
+  end eases `geometryEvert` to over ~half a second; `]`/`[` set the same target. **Revised
+  after play:** the invert *swaps the outward side* rather than geometrically everting the
+  shape - the surface functions' eversion mirrors the whole board about the origin and
+  moves every cell, which is not what a board wants. `PlaySurface` keeps the geometry and
+  negates the normal past the halfway point, so the squares stay put and the pieces move to
+  the other face. The base outward normal is still chosen away from the shape's axis (the
+  cross-section centroid, precomputed per rank), which is what makes even that negation
+  land on a face rather than inside the material.
 - **M17.10 - GHOST.** `Settings::geometryGhost` (0.35 to 1) with a `GHOST` button and a
   `--ghost` capture flag. The board mesh's alpha rides in `MeshVertex::color.a`; a second
   pipeline - same shaders and vertex input, `blendEnable` with src-alpha/one-minus-src-

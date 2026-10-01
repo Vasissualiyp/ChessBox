@@ -340,14 +340,16 @@ These are the ones that have actually cost time here, not hypotheticals.
   sliding one cell along the files is sampling at `u + 1/nx`, so a1 lands exactly where b1
   was and a lap of a Moebius band comes home mirrored. The wrap is `fmod(s, 2 * nx)` in
   *cells*, in `PlaySurface` alone - `Settings` does not know the board's extent (M17.9).
-  `evert` turns the surface through itself: the `INVERT` button and `]`/`[` set a **target**
-  (`Settings::geometryInvert`) the front end eases `geometryEvert` to, so the pose stays a
-  pure function of its number (M17.7). Both are pure in their numbers, like an overture.
-- **"Outward" is the side away from the shape's axis, not the formula's sign.** The
-  eversion sweeps the ring radius through zero and reverses the parametrisation's
-  handedness, so `cross(dv, du)` alone points *into* the turned-out shape and leaves every
-  piece hidden inside it. `PlaySurface` precomputes the cross-section centroid per rank
-  and flips the normal to point away from it (M17.7).
+  `evert` **swaps the outward side**: past the halfway point the normal is reversed, so the
+  pieces stand on the other face while the squares do not move. It is *not* the geometric
+  eversion the surface functions carry - that mirrors the whole board about the origin and
+  lands every cell somewhere else, which is not a board (M17.7, revised). The `INVERT`
+  button and `]`/`[` set a **target** (`Settings::geometryInvert`) the front end eases
+  `geometryEvert` to, so the pose stays a pure function of its number.
+- **"Outward" is the side away from the shape's axis, not the formula's sign.**
+  `cross(dv, du)` alone is not enough once the parametrisation is posed, so `PlaySurface`
+  precomputes the cross-section centroid per rank and flips the normal to point away from
+  it; the invert then negates that (M17.7).
 - **The geometry view is framed with `headroom = 0`.** `OrbitCamera::frame` lifts the
   look-at for piece crowns, but `PlaySurface::bounds()` already pads for the pieces, so
   the default headroom double-counts and drops the shape ~30 px down the window.

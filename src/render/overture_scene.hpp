@@ -132,6 +132,11 @@ struct SurfacePose {
   /// so this is sampling, not a special case.
   float slideU{0.0f};
   float slideV{0.0f};
+  /// Which side is out, for the play board: past the halfway point `PlaySurface` swaps
+  /// the outward normal, so the pieces stand on the other face while the squares stay
+  /// exactly where they were (M17.7, revised). The surface functions still *carry* a
+  /// geometric eversion - the overtures use it - but the play board does not take it: it
+  /// mirrors the whole shape about the origin and moves every cell, which is not a board.
   float evert{0.0f};
   /// How much of the Moebius ribbon's stretch to keep, 0 to 1, where 1 is the shape the
   /// library screen draws. The ribbon is the one surface in the catalogue whose two axes

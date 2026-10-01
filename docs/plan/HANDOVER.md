@@ -89,8 +89,9 @@ interface over the flat board (no camera control, labels showed through).**
   constant) wrong. See **ADR-0019**.
 - **The board is posed on its surface:** `slideU`/`slideV` slide it *along* the surface -
   middle-drag on the shape, or `--slide`/`--slide-v` - so a1 rides to b1, round, and home
-  (mirrored, on a Moebius band, after two laps). `evert` turns the surface through itself
-  (`[`/`]`, `--evert`). Presentation only; neither enters `VariantId`.
+  (mirrored, on a Moebius band, after two laps). `evert` swaps the outward side - the
+  squares fixed, the pieces moved to the other face, `INVERT`/`[`/`]`/`--evert`.
+  Presentation only; neither enters `VariantId`.
 - `Settings::geometryView`, `geometrySlideU`/`geometrySlideV` and `geometryEvert`, a
   `SHAPE` button and the `G` key, offered only where `render::hasPlaySurface` holds.
 - Two surfaces were corrected in the shared catalogue: the Klein bottle's figure-eight is

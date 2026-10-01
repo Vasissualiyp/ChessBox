@@ -102,6 +102,14 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
   // loop it goes round, and the band passes through itself - and it is the same kind of
   // stated legibility cheat as the torus's pulled-open hole.
   pose.stretch = 0.5f;
+  // INVERT swaps which side is out, it does not move the surface (M17.7, revised). The
+  // geometric eversion the library's shapes carry mirrors the whole board about the
+  // origin
+  // - every cell lands somewhere else - which is not what a board wants. The play surface
+  // keeps the geometry and flips the normal the seat and the patch read, so the pieces
+  // move to the other face while the squares stay put.
+  const bool inverted = pose.evert > 0.5f;
+  pose.evert = 0.0f;
   const app::SurfaceKind kind = app::overtureSignature(v).surface;
   const int nx = static_cast<int>(v.dims.extent(0));
   const int nz = static_cast<int>(v.dims.extent(1));
@@ -158,7 +166,7 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
     view::Vec3 n = normalAt(kind, pose, u + su, vv + sv, nx, nz);
     const view::Vec3 out = at(u, vv) - axisRef(vv);
     if (view::length(out) > 1e-5f && view::dot(n, out) < 0.0f) n = n * -1.0f;
-    return n;
+    return inverted ? n * -1.0f : n;
   };
 
   s.seats_.reserve(static_cast<std::size_t>(nx * nz));

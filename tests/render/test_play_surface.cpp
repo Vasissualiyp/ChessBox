@@ -330,11 +330,13 @@ TEST_CASE("sliding the ranks is offered only where the ranks are glued", "[rende
   }
 }
 
-TEST_CASE("the eversion turns the surface through itself", "[render]") {
-  // "Drag it inside out": the hole's inside comes out. At rest the surface is exactly
-  // the one the library screen draws - the identity matters, because every existing
-  // capture is of that one - and at full turn the cell that was deepest inside the hole
-  // is the one furthest out.
+TEST_CASE("invert swaps the side a piece stands on, without moving the board",
+          "[render]") {
+  // M17.7, revised: INVERT does not mirror the geometry - the eversion that ships in the
+  // library's shapes moves every cell about the origin, which is not what a board wants.
+  // It swaps the outward side: the squares stay exactly where they were, and every piece
+  // stands on the other face. At rest the surface is the library screen's, bit for bit,
+  // which every existing capture depends on.
   const VariantSpec& torus = *new VariantSpec(test::loadVariant("torus"));
   const PlaySurface rest = PlaySurface::build(torus, SurfacePose{});
   for (const SurfaceSeat& t : rest.seats()) {
@@ -349,68 +351,44 @@ TEST_CASE("the eversion turns the surface through itself", "[render]") {
   SurfacePose full;
   full.evert = 1.0f;
   const PlaySurface turned = PlaySurface::build(torus, full);
-  const auto axisDist = [](const SurfaceSeat& t) {
-    return std::hypot(t.centre.x, t.centre.y);
-  };
-  const auto nearest = [&](const PlaySurface& s) {
-    return std::min_element(s.seats().begin(), s.seats().end(),
-                            [&](const SurfaceSeat& a, const SurfaceSeat& b) {
-                              return axisDist(a) < axisDist(b);
-                            })
-        ->cell;
-  };
-  const auto farthest = [&](const PlaySurface& s) {
-    return std::max_element(s.seats().begin(), s.seats().end(),
-                            [&](const SurfaceSeat& a, const SurfaceSeat& b) {
-                              return axisDist(a) < axisDist(b);
-                            })
-        ->cell;
-  };
-  const auto axisDistOf = [&](const PlaySurface& s, CellId cell) {
-    for (const SurfaceSeat& t : s.seats()) {
-      if (t.cell == cell) return axisDist(t);
-    }
-    return 0.0f;
-  };
-  // What was hugging the axis is now outside what was the rim, and the other way about:
-  // the two have changed places, which is what "the inside came out" means.
-  const CellId wasInner = nearest(rest);
-  const CellId wasOuter = farthest(rest);
-  CHECK(axisDistOf(rest, wasInner) < axisDistOf(rest, wasOuter));
-  CHECK(axisDistOf(turned, wasInner) > axisDistOf(turned, wasOuter));
-  // And it is still the same board: every cell is still there, still one step from its
-  // neighbour.
-  CHECK(turned.seats().size() == rest.seats().size());
-  for (const SurfaceSeat& t : turned.seats()) {
-    CHECK(t.stepU > 0.05f);
-    CHECK(t.stepV > 0.05f);
+  REQUIRE(turned.seats().size() == rest.seats().size());
+  for (std::size_t i = 0; i < rest.seats().size(); ++i) {
+    // The geometry is identical...
+    CHECK_THAT(dist(turned.seats()[i].centre, rest.seats()[i].centre),
+               WithinAbs(0.0f, 1e-6f));
+    // ...and the normal is exactly reversed, so the piece stands on the other side.
+    CHECK_THAT(view::dot(turned.seats()[i].normal, rest.seats()[i].normal),
+               WithinAbs(-1.0f, 1e-4f));
+    CHECK(turned.seats()[i].stepU > 0.05f);
+    CHECK(turned.seats()[i].stepV > 0.05f);
   }
 }
 
-TEST_CASE("the eversion is continuous and pure in its parameter", "[render]") {
-  // Like an overture: a pose is a function of one number, so a drag can run it forwards
-  // or backwards and a capture of it reproduces. Continuity is what makes it read as a
-  // fold rather than a cut.
+TEST_CASE("the invert is pure in its parameter and never moves the board", "[render]") {
+  // A pose is a function of one number, so a capture reproduces and a toggle is
+  // reversible. The side swap is discrete (past the halfway point), so this pins
+  // determinism and that the squares do not move - which is the whole point of the
+  // revised invert.
   for (const std::string& name : kShapes) {
     const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
-    CAPTURE(name);
-    for (int i = 0; i < 20; ++i) {
-      const float e = static_cast<float>(i) / 20.0f;
-      SurfacePose at;
-      at.evert = e;
-      SurfacePose on;
-      on.evert = e + 0.05f;
-      const PlaySurface a = PlaySurface::build(v, at);
-      const PlaySurface b = PlaySurface::build(v, on);
-      const PlaySurface again = PlaySurface::build(v, at);
-      float moved = 0.0f;
+    const PlaySurface rest = PlaySurface::build(v);
+    for (int i = 0; i <= 10; ++i) {
+      CAPTURE(name, i);
+      SurfacePose p;
+      p.evert = static_cast<float>(i) / 10.0f;
+      const PlaySurface a = PlaySurface::build(v, p);
+      const PlaySurface b = PlaySurface::build(v, p);
+      REQUIRE(a.seats().size() == rest.seats().size());
       for (std::size_t c = 0; c < a.seats().size(); ++c) {
-        CHECK_THAT(dist(a.seats()[c].centre, again.seats()[c].centre),
+        // Pure...
+        CHECK_THAT(dist(a.seats()[c].centre, b.seats()[c].centre),
                    WithinAbs(0.0f, 1e-6f));
-        moved = std::max(moved, dist(a.seats()[c].centre, b.seats()[c].centre));
+        CHECK_THAT(view::dot(a.seats()[c].normal, b.seats()[c].normal),
+                   WithinAbs(1.0f, 1e-6f));
+        // ...and the squares never move, at any point of the turn.
+        CHECK_THAT(dist(a.seats()[c].centre, rest.seats()[c].centre),
+                   WithinAbs(0.0f, 1e-6f));
       }
-      CAPTURE(e, moved);
-      CHECK(moved < 1.2f);  // a twentieth of the turn never jumps a board's width
     }
   }
 }
@@ -464,40 +442,6 @@ TEST_CASE("only a glued two-dimensional board has a play surface", "[render]") {
   CHECK(PlaySurface::build(test::loadVariant("mirrorbox")).empty());
   CHECK(PlaySurface::build(test::loadVariant("cube5")).empty());
   CHECK_FALSE(PlaySurface::build(test::loadVariant("torus")).empty());
-}
-
-TEST_CASE("a piece stands on the outside at every eversion", "[render]") {
-  // M17.7. The eversion sweeps the ring radius through zero and reverses the
-  // parametrisation's handedness, so a normal taken straight from `cross(dv, du)` points
-  // *into* the turned-out shape past the halfway point, leaving every piece hidden
-  // inside it. "Outward" is the side away from the shape's axis (the cross-section
-  // centroid), which does not flip; a piece's foot plus a slab of thickness must be
-  // further from the axis than its seat is.
-  for (const std::string& name : kShapes) {
-    const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
-    const int nx = static_cast<int>(v.dims.extent(0));
-    const int nz = static_cast<int>(v.dims.extent(1));
-    for (float evert : {0.0f, 0.25f, 0.5f, 0.75f, 1.0f}) {
-      CAPTURE(name, evert);
-      SurfacePose pose;
-      pose.evert = evert;
-      const PlaySurface s = PlaySurface::build(v, pose);
-      // seats are laid out f-major: index f * nz + r.
-      for (int r = 0; r < nz; ++r) {
-        view::Vec3 axis{0.0f, 0.0f, 0.0f};
-        for (int f = 0; f < nx; ++f) {
-          axis = axis + s.seats()[static_cast<std::size_t>(f * nz + r)].centre;
-        }
-        axis = axis * (1.0f / static_cast<float>(nx));
-        for (int f = 0; f < nx; ++f) {
-          const SurfaceSeat& seat = s.seats()[static_cast<std::size_t>(f * nz + r)];
-          const view::Vec3 foot =
-              seat.centre + seat.normal * (PlaySurface::kThickness * 0.5f);
-          CHECK(view::length(foot - axis) >= view::length(seat.centre - axis) - 1e-4f);
-        }
-      }
-    }
-  }
 }
 
 TEST_CASE("the shape is framed on its own centre", "[render]") {
