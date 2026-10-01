@@ -106,6 +106,12 @@ struct RouteRun {
                                     const ViewConfig& cfg, const Bounds& scene,
                                     const CameraPolicy& policy, float t);
 
+/// A point at normalised arc length `s` in [0,1] along a polyline. Shared by the move
+/// camera and the geometry view's piece sampler, so the camera and the piece cannot
+/// disagree about where the move currently is - exactly the class of bug ADR-0011's
+/// invariant exists to rule out (M17.15).
+[[nodiscard]] Vec3 pointAlong(const std::vector<Vec3>& points, float s);
+
 /// Apply a pose to the orbit camera, by assignment. `roll` has no `OrbitCamera` field and
 /// is dropped here; the flat board and the existing renderer never set it.
 [[nodiscard]] OrbitCamera toOrbit(const CameraPose& pose);

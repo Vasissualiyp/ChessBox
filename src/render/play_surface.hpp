@@ -4,12 +4,41 @@
 #include <array>
 #include <vector>
 
+#include "app/session.hpp"
+#include "render/board_renderer.hpp"
 #include "render/overture_scene.hpp"
 #include "variant/variant.hpp"
 #include "view/camera.hpp"
 #include "view/layout.hpp"
+#include "view/move_anim.hpp"
+#include "view/move_camera.hpp"
 
 namespace cb::render {
+
+class PlaySurface;
+
+/// Frame `session`'s camera on whatever the geometry view would show right now: the play
+/// surface's own bounds with `headroom = 0` (M17.11) while `options.surface` is set, the
+/// flat layout's bounds otherwise. Reads nothing from `session` but its variant and
+/// placements, so it is correct - and cheap - to call whenever anything that changes what
+/// is drawn has changed: the surface toggle, the pose, or the variant itself. The caller
+/// never has to work out which of the three actually happened (M17.14).
+void frameGeometryCamera(app::Session& session, const BoardOptions& options,
+                         SurfacePose pose);
+
+/// Where the travelling piece sits on `surf` at progress `t`, and which way it stands. A
+/// leap arcs outward along the blended normal; a glide walks the seats the engine's own
+/// route passes through, in order, with no seam special case - on the surface a glued
+/// edge is one continuous place, so there is no gap to open a doorway across. Pure in
+/// `t`, like `moveCamera` and like an overture (M17.15).
+struct SurfaceMoveSample {
+  view::Vec3 position{};
+  view::Vec3 normal{0.0f, 0.0f, 1.0f};
+  std::array<float, 4> quat{{0.0f, 0.0f, 0.0f, 1.0f}};
+  float fit{1.0f};  ///< the piece scale factor seats already carry
+};
+[[nodiscard]] SurfaceMoveSample surfaceMoveSample(const view::MovePath& path,
+                                                  const PlaySurface& surf, float t);
 
 /// How many corners a square is cut into per axis. A square on a curved board is not a
 /// square: it is a patch of the surface, and this is how finely that patch is sampled.

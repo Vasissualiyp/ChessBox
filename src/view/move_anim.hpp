@@ -112,6 +112,10 @@ class MoveAnimation {
     return duration_ > 0.0f && elapsed_ < duration_ ? elapsed_ / duration_ : 1.0f;
   }
   [[nodiscard]] CellId travellingTo() const noexcept { return to_; }
+  /// The route this animation was last started with. Needed by anything that samples a
+  /// *different* placement of the same move - the geometry view's surface sampler, which
+  /// cannot reconstruct the route itself (M17.15).
+  [[nodiscard]] const MovePath& path() const noexcept { return path_; }
   [[nodiscard]] Sample sample() const;
   /// Portals with any intensity left this frame, for the renderer to draw.
   [[nodiscard]] std::vector<Portal> openPortals() const;
@@ -122,6 +126,7 @@ class MoveAnimation {
   float elapsed_{0};
   float duration_{0.0001f};
   CellId to_{kInvalidCell};
+  MovePath path_;
   std::vector<Run> runs_;
   std::vector<float> runStart_;  ///< normalised time each run begins at
   std::vector<float> runEnd_;

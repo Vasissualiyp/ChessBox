@@ -152,6 +152,7 @@ void MoveAnimation::start(const ViewConfig& cfg, const std::vector<Placement>& p
   clear();
   if (path.from == kInvalidCell || path.to == kInvalidCell) return;
   if (secondsPerCell <= 0.0f) return;
+  path_ = path;  // the route, for anything that samples it on another placement (M17.15)
 
   // Gather the world positions this route needs in one pass over the placements, rather
   // than building a cell-indexed table: a move touches a handful of cells and the

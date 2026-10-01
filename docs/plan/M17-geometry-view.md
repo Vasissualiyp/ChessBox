@@ -131,13 +131,16 @@ the lattice: `torus3d` as nested shells, `hyper4` as a hypercube, `t6` as the qu
 
 ---
 
----
-
-## M17.7 - M17.12 The next increment: a shape you can handle
+## M17.7 - M17.17 The next increment: a shape you can handle
 
 M17 shipped a board you can play on its own surface, and playing on it turned up six
 things the first pass does not do. They are specified here, smallest first; each names what
-is wrong, what is known about why, what to build and what pins it.
+is wrong, what is known about why, what to build and what pins it. M17.13 and M17.14 were
+added after M17.7-M17.12 shipped, diagnosing two regressions the M17.12 first pass
+introduced - see each section's own **Have** for the evidence. M17.15-M17.17 are a third
+batch, asked for once a move could be made on the shape at all: the piece's own travel, the
+move camera following it there, and keeping that camera from looking through the shape's
+own geometry to find it.
 
 ### M17.7 An INVERT control, and pieces that stay on the outside
 
@@ -296,13 +299,571 @@ glues. A `--geometry` capture per variant, validation-clean.
 `hyper4 --geometry` on a hypercube; `t6 --geometry` either on the quintic, or on the
 extruded lattice with the reason stated in the interface.
 
+### M17.13 `torus3d`/`hyper4` read as a scatter of fish scales, not a shape
+
+The M17.12 first pass shipped and immediately showed two bugs, both diagnosed below by
+reading `PlaySurface::buildStacked` (`src/render/play_surface.cpp:254-345`) and confirmed
+by printing real seat data (see **Evidence**). `chessbox_gui torus3d --geometry` draws a
+fan of thin, wildly-angled slabs with no visible tube or ring; `hyper4 --geometry` draws a
+chaotic cloud of small squares with no visible cube-in-a-cube.
+
+**Want.** `torus3d --geometry` reads as four smooth, nested rings; `hyper4 --geometry`
+reads as two nested cube-shaped clusters, the way the M17.12 plan intended.
+
+**Have - the bug.** `buildStacked`'s local helper `uprightSite` (lines 261-269) builds the
+tangent frame for every cell from its immediate file/rank neighbours, found like this:
+
+```cpp
+c.c[0] = static_cast<std::int16_t>(std::clamp(base.c[0] + df, 0, nx - 1));
+c.c[1] = static_cast<std::int16_t>(std::clamp(base.c[1] + dr, 0, nz - 1));
+```
+
+This **clamps** the neighbour's coordinate at the axis's two ends. That is correct only
+for a *bounded* axis (no cell past the edge). `torus3d`'s file and rank axes are declared
+`kind = "periodic"` in `variants/torus3d.toml` - there is no edge, a cell at file 0's
+"previous" neighbour is file 3 wrapped around, not file 0 again. Clamping instead of
+wrapping makes `uprightSite` return the **cell's own position** as its neighbour at every
+boundary index, which for a 4-wide periodic axis is every index touching 0 or 3 - most of
+the board. The resulting tangent is then a one-sided, half-length, wrongly-based estimate,
+and the surface normal (`cross(tangentV, tangentU)`) inherits the error: each affected
+cell's local frame tilts in whatever direction that bad tangent happens to point, which is
+not continuous from one cell to the next. That is the "fish scales"/fan-of-slabs picture.
+
+`hyper4` has no periodic axes at all (a plain 4-D box - "no identifications", per
+`docs/plan/M17.12-shapes-above-two-dimensions.md`), so clamping there is the *correct*
+choice of neighbour - there genuinely is no cell past the edge. But the same formula still
+mis-sizes the boundary: `cellU = 0.5f * view::length(tangentU)` (line 305) assumes a
+**centred, two-sided** difference spanning two cells; at a true boundary only one side is
+real and `tangentU` spans one cell, so halving it produces a tile **half the width** it
+should be. That is the discontinuity in `hyper4`'s scattered look - every cell on a
+boundary face of the tesseract is drawn at roughly half the size of its interior
+neighbours, which breaks the fan of squares apart.
+
+**Evidence.** A diagnostic dump of `PlaySurface::build(torus3d).seats()` at level 0, every
+`(file, rank)`, shows exactly the signature of the clamp bug - a mirror-symmetric pattern
+around the middle of each 4-wide axis instead of the uniform values a fully periodic 4x4
+torus must have (every cell is equivalent by the identification group; `torus3d.toml`'s
+own comment says so: *"no cell is special"*):
+
+```
+f0 r0: stepU=0.889 stepV=5.355      f1 r0: stepU=1.257 stepV=5.355
+f0 r1: stepU=0.889 stepV=7.573      f1 r1: stepU=1.257 stepV=7.573
+f0 r2: stepU=0.889 stepV=7.573      f1 r2: stepU=1.257 stepV=7.573
+f0 r3: stepU=0.889 stepV=5.355      f1 r3: stepU=1.257 stepV=5.355
+f2 r*: stepU=1.257 (matches f1)     f3 r*: stepU=0.889 (matches f0)
+```
+
+`stepU` takes exactly two values (0.889 at file 0/3, 1.257 at file 1/2) and `stepV` takes
+exactly two values (5.355 at rank 0/3, 7.573 at rank 1/2) - a clean f↔(3-f), r↔(3-r)
+mirror, which is the clamp substituting the opposite-parity neighbour's own position. A
+correctly wrapped periodic axis has no such mirror: every file value is interchangeable
+with every other by the torus's own symmetry, so `stepU` must come out the same (within
+floating-point/metric tolerance) for all four, and likewise `stepV`.
+
+**Build.** Replace `uprightSite`'s per-axis neighbour lookup with one that treats a
+periodic axis as periodic and a bounded axis as bounded, independently for axis 0 (U) and
+axis 1 (V):
+
+- **Is the axis periodic?** `v.geom.boundaryKind(axis, Side::Max) == BoundaryKind::Periodic`
+  - the same check `app::overtureSignature` already uses (`src/app/overture.cpp:71`,
+  `g.boundaryKind(a, Side::Max) == BoundaryKind::Periodic`). `Side` and `BoundaryKind` are
+  declared directly in namespace `cb` (`src/geometry/geometry.hpp`).
+- **Periodic axis:** wrap, never clamp - `(idx + offset + extent) % extent` for both
+  `offset = +1` and `offset = -1`. The existing central-difference formula
+  (`tangent = p_plus - p_minus`, `cellSize = 0.5f * length(tangent)`,
+  `ex = normalize(tangent)`) is otherwise unchanged and is now correct for every cell,
+  boundary or not, because there is no boundary.
+- **Bounded axis, interior cell** (`0 < idx < extent - 1`): unchanged - the existing
+  central difference is already correct here.
+- **Bounded axis, boundary cell** (`idx == 0` or `idx == extent - 1`): only one real
+  neighbour exists. Use a one-sided difference **scaled to one cell**, not a clamped
+  two-sided one scaled to a (fictitious) two cells:
+  ```cpp
+  // idx == 0: only the +1 side is real.
+  tangent = p_plus - centre;       // NOT p_plus - centre_clamped_to_self
+  cellSize = view::length(tangent);  // NOT 0.5f * length(...)
+  exDir = view::normalize(tangent);
+  // idx == extent - 1: only the -1 side is real, symmetric construction.
+  tangent = centre - p_minus;
+  cellSize = view::length(tangent);
+  exDir = view::normalize(tangent);
+  ```
+  `centre` is already computed in `buildStacked`'s outer loop (line 294) before
+  `uprightSite` is called, so it is available to pass in or capture.
+- Apply this choice **independently per axis** (U from axis 0, V from axis 1): a future
+  authored shape could glue one in-plane axis and not the other, and the code should not
+  assume both behave the same way. `torus3d` exercises the periodic branch on both axes;
+  `hyper4` exercises the bounded-boundary branch on both axes; nothing today exercises a
+  mix, but the code must not rule it out.
+- The `normal`, `ex`, `ey`, `quat`, and the patch/quad construction that follow are
+  unchanged - they already consume `tangentU`/`tangentV`/`cellU`/`cellV` generically.
+
+**Tests.**
+
+- `tests/render/test_play_surface.cpp`, strengthen the existing
+  `"a three- and four-dimensional variant plays on its own shape"` case (currently only
+  checks `stepU/stepV > 0.01f`, which is why this bug shipped): for `torus3d`, assert every
+  seat's `stepU` is within a small tolerance (a few percent) of every other seat's `stepU`,
+  and likewise for `stepV` - citing the variant's own "no cell is special" claim as the
+  justification. This directly fails today (0.889 vs 1.257, a 41% spread) and must pass
+  after the fix.
+- New case for `hyper4`: for a cell one step in from a true boundary (e.g. file index 1)
+  and the boundary cell next to it (file index 0), `stepU` must be within roughly 20% of
+  each other - not the ~40% systematic drop the halved one-sided formula produces today.
+  Check this on all four axes (file, rank, level, aeon are all bounded on `hyper4`; pick
+  one representative boundary pair per axis).
+- Keep the existing patch/picking tests passing unchanged - the patch and pick-ray
+  construction do not change, only the tangent inputs they are built from.
+
+**Acceptance.** `chessbox_gui torus3d --shot t.ppm --geometry` shows four continuous,
+smoothly nested rings with no isolated radiating slabs; `chessbox_gui hyper4 --shot h.ppm
+--geometry` shows two legible, roughly cube-shaped clusters of squares rather than a
+scattered fan. Both stay validation-clean.
+
+### M17.14 The camera does not follow a variant switch while already in shape mode
+
+**Want.** Loading a different variant - or the same one again, "start over" from the
+library screen - while the geometry view is already on must centre the camera on the *new*
+variant's shape. It must not leave the camera framed on the previous variant's shape, or
+on the new variant's flat board.
+
+**Have - the bug.** `Settings::geometryView` (and `geometrySlideU/V`, `geometryEvert`,
+`geometryInvert`) live on `Shell::settings_`, a single member that `Shell::startGame`
+(`src/app/shell.cpp:208-`) never resets - it only copies specific fields
+(`flatView`, `hotSeat`, `confirmMoves`, `cameraMode`, `followStrength`, `theme`) onto the
+freshly-built `Session`. `geometryView` itself is not one of them, so it is **sticky**
+across a variant change: if it was on for variant A, it is still on for variant B.
+
+`Session::create` (`src/app/session.cpp`) frames its initial camera from the **flat**
+layout's bounds unconditionally - `Session` does not know `PlaySurface` exists.
+
+The only place that ever frames the camera on the *shape's* bounds is `frameBoard`
+(`src/gui/main.cpp:198-217`), called from exactly one place in the main loop
+(`src/gui/main.cpp:941-953`):
+
+```cpp
+const bool nowSurface = optionsFor(*shell).surface;
+if (nowSurface != wasSurface) {
+  renderer->setOptions(optionsFor(*shell));
+  frameBoard(*shell);
+  wasSurface = nowSurface;
+}
+```
+
+This fires only when `nowSurface` (purely a function of `geometryView` and the *current*
+variant's `hasPlaySurface`) differs from last frame's value. It says nothing about which
+variant is loaded. So: player turns SHAPE on for `torus` (`nowSurface` flips false→true,
+`frameBoard` fires, correctly centred); player then opens New Game and picks `torus3d`
+without turning SHAPE off. `request.loadVariant` fires
+(`src/gui/main.cpp:928-931`), `startGame` builds a brand-new `Session` for `torus3d`,
+freshly flat-framed by its constructor - but `geometryView` was already `true` and still
+is, so `nowSurface` is `true` both before and after this reload. The toggle check sees no
+change and never calls `frameBoard`. The camera stays on `torus3d`'s flat-board framing:
+"the window is centred at the centre of the flat board, not the centre of the shape."
+
+**Build.**
+
+- Extract the policy `frameBoard` currently implements into a plain, headless-testable
+  function in the render layer (which already depends on `app`, see `render/ui.hpp`'s
+  `#include "app/session.hpp"` - this is not a new layer dependency), alongside
+  `PlaySurface` since it is the thing being framed on:
+  ```cpp
+  // src/render/play_surface.hpp (or a small new pair if preferred - this is one
+  // function and does not need its own module)
+  namespace cb::render {
+  /// Frame `session`'s camera on whatever the geometry view would show right now: the
+  /// play surface's own bounds, headroom 0 (M17.11), while `options.surface` is set;
+  /// the flat layout's bounds otherwise. Reads nothing from `session` but its variant
+  /// and placements, so it is correct - and cheap - to call unconditionally every time
+  /// anything that could change what is drawn has changed: the surface toggle, the
+  /// pose, or the variant itself. The caller never has to work out which of the three
+  /// actually happened (M17.14).
+  void frameGeometryCamera(app::Session& session, const BoardOptions& options,
+                           SurfacePose pose);
+  }
+  ```
+  Its body is `frameBoard`'s current one, verbatim (the `surf.empty()` fallback to flat
+  framing included).
+- `main.cpp`'s `frameBoard` becomes a thin wrapper: `render::frameGeometryCamera(*session,
+  optionsFor(shell), poseFrom(shell.settings()))`. No behaviour change there.
+- In the `request.loadVariant` block (`src/gui/main.cpp:928-931`), call `frameBoard(*shell)`
+  **unconditionally** right after `renderer->setOptions(optionsFor(*shell))`, and set
+  `wasSurface = optionsFor(*shell).surface` there too, so the toggle check later in the
+  same tick does not redundantly re-fire. This is always correct (per the function's own
+  doc comment above) and costs one extra `PlaySurface::build` on a variant load only - the
+  same cost `frameBoard` already pays every time the toggle flips, which the project has
+  already measured as microseconds (ADR-0019's "Costs" section).
+
+**Tests.** This is the first part of the surface-view policy that can be headless-tested
+directly, because it no longer lives only in `main()`:
+
+```cpp
+// tests/render/test_play_surface.cpp
+TEST_CASE("the camera reframes on the shape when the variant changes under it",
+          "[render]") {
+  // The regression this pins: geometryView is sticky across Shell::startGame (never
+  // reset), so a one-shot "did the toggle flip" check misses a variant switch that
+  // happens while it was already on - the camera is left on the wrong shape, or on the
+  // new variant's flat board.
+  auto open = [](const char* name) {
+    auto s = app::Session::create(test::loadVariant(name));
+    REQUIRE(s.has_value());
+    return std::move(*s);
+  };
+  BoardOptions opts;
+  opts.surface = true;
+
+  std::unique_ptr<app::Session> session = open("torus");
+  frameGeometryCamera(*session, opts, SurfacePose{});
+
+  session = open("torus3d");  // switched variant; opts.surface is still true throughout
+  frameGeometryCamera(*session, opts, SurfacePose{});
+
+  const view::Bounds want = PlaySurface::build(test::loadVariant("torus3d")).bounds();
+  const view::Vec3 target = session->camera().target;
+  CHECK_THAT(target.x, WithinAbs(want.centerX(), 0.05f));
+  CHECK_THAT(target.y, WithinAbs(want.centerY(), 0.05f));
+  CHECK_THAT(target.z, WithinAbs(want.centerZ(), 0.05f));
+}
+```
+
+This fails today for the obvious reason (nothing in this sequence ever calls the framing
+function for the second session) and passes once `frameGeometryCamera` exists and the
+`loadVariant` call site calls it unconditionally, matching what the real fix does.
+
+**Acceptance.** Interactively (no capture flag can reach this - it needs two loads in one
+process; note this limitation next to ADR-0018's similar one for the present path): launch
+the game, load `torus`, press SHAPE (correctly centres, unchanged). Open the pause menu's
+New Game screen and pick `torus3d` *without* turning SHAPE off first - the moment it loads,
+`torus3d`'s own shape is centred in the window. Repeat starting from `klein` into `hyper4`,
+and picking the *same* shaped variant again (the "start over" case). None of them should
+ever show the previous variant's framing or the new variant's flat-board framing.
+
+### M17.15 A move on the shape animates instead of teleporting
+
+**Want.** A piece crossing the shape travels there - a knight arcs directly from its
+square to its landing square; everything else (rook, bishop, queen, king, pawn) visibly
+passes through every square the engine's own route says it passes through, the way M11
+already draws a move on the flat board.
+
+**Have.** `BoardRenderer::buildInstances`'s surface branch draws every piece at its
+*destination* seat every frame, unconditionally - `board_renderer.cpp:772-799` loops
+`surf.seats()` and places each occupied cell's piece there from `p.at(seat.cell)`, which
+the engine has already updated the instant the move was applied. The animation parameter
+is received and discarded: `(void)anim;  // the warped route is M17's remaining piece; a
+mover shows at its seat` (`board_renderer.cpp:800`). There is no skip for the cell the
+piece is travelling *to* either (the flat path has one -
+`if (anim != nullptr && anim->active() && pl.cell == anim->travellingTo()) continue;`,
+`board_renderer.cpp:939` - the surface loop has no equivalent), so once a mover is drawn
+it would simply sit correctly at its landing square with nothing animating towards it:
+a teleport.
+
+The flat board's existing machinery - `view::MoveAnimation`, `view::tracePath`,
+`view::routeRuns` - already carries everything needed to know the route (`MovePath.steps`,
+each tagged `Interior`/`Portal`/`Bounce`; `MovePath.leap` for a knight/hop) and the timing
+(`MoveAnimation::advance`/`progress`/`setProgress`, already driven by `Session` and already
+reaching `--move-t` in captures). None of it assumes a flat board in its *logic* - M11's
+whole premise (AGENTS.md: "the move camera reads the trace, never the topology") - but
+`MoveAnimation::sample()` sites its `lift` along world **Z** (right for a flat board,
+wrong on a curved one, where "up" is the local surface normal and world Z is often not
+that), and its portal visuals assume two glued edges are drawn far apart on screen, which
+is never true on the surface - a glued seam there is drawn as one continuous place, so
+there is nothing to open a doorway between.
+
+**Build.**
+
+- **Keep `MoveAnimation`'s timing, drop its flat-specific sampling for this path.**
+  `Session` already owns one `view::MoveAnimation` and drives it the same way regardless of
+  view mode - nothing here changes that. Add one small, safe accessor so the renderer can
+  read what move is actually in flight, since `MoveAnimation::sample()`'s own x/y/z/lift
+  stay correct (and unchanged) for the flat board:
+  ```cpp
+  // src/view/move_anim.hpp, inside class MoveAnimation
+  /// The route this animation was last started with. Needed by anything that samples a
+  /// *different* placement of the same move - the geometry view's surface sampler, which
+  /// cannot reconstruct the route itself (board_renderer.cpp has no access to
+  /// `Session::lastPath_`, only to this animation) (M17.15).
+  [[nodiscard]] const MovePath& path() const noexcept { return path_; }
+  private: MovePath path_;  // set in start(), alongside the existing leap_/to_/etc.
+  ```
+- **A pure sampler, parallel to `moveCamera`, in the render layer** (`PlaySurface` already
+  lives there and already depends on `app`; this needs nothing new in the dependency
+  graph). Add to `src/render/play_surface.hpp`/`.cpp`:
+  ```cpp
+  struct SurfaceMoveSample {
+    view::Vec3 position{};
+    view::Vec3 normal{0.0f, 0.0f, 1.0f};
+    std::array<float, 4> quat{{0.0f, 0.0f, 0.0f, 1.0f}};
+    float fit{1.0f};  ///< the piece scale factor seats already carry (board_renderer.cpp:789)
+  };
+  /// Where the travelling piece sits on `surf` at progress `t`, and which way it stands.
+  /// Pure in `t`, like `moveCamera` and like an overture - nothing here reads a clock.
+  [[nodiscard]] SurfaceMoveSample surfaceMoveSample(const view::MovePath& path,
+                                                     const PlaySurface& surf, float t);
+  ```
+  Its body:
+  - Look up each `SurfaceSeat` the route touches by cell (same linear scan
+    `view::routeRuns` already does over a handful of cells - a move touches a handful
+    regardless of board size).
+  - **Leap** (`path.leap`): arc directly from `path.from`'s seat to `path.to`'s seat -
+    `position = mix(fromSeat.centre, toSeat.centre, t)` lifted outward along
+    `normalize(mix(fromSeat.normal, toSeat.normal, t))` by the same
+    `sin(t * pi) * 0.65f` the flat board's leap already uses
+    (`move_anim.cpp:488`) - peaking mid-flight, zero at both ends. `normal`/`quat` blend
+    (`quatOf`-style, reusing the private helper already in `play_surface.cpp`) between the
+    two seats' frames.
+  - **Glide** (not a leap): walk `path.from` then every `PathStep.to` in order - this *is*
+    "every square between start and end", directly off the route the engine already
+    computed, with no reinterpretation. Build the ordered list of seat centres, then use
+    the same arc-length parametrisation `move_camera.cpp`'s file-local `pointAlong` already
+    implements (move it out of that file's anonymous namespace and export it from
+    `move_camera.hpp` as `view::pointAlong(points, s)`, generalised to a plain point list
+    rather than a `RouteRun`, so both call sites share one definition rather than drifting
+    apart - the camera and the piece disagreeing about where "the move" currently is would
+    be exactly the class of bug ADR-0011's invariant exists to rule out). **A `Portal` or
+    `Bounce` step is not a special case here** - unlike the flat board, there is no gap to
+    open a doorway across: the seams the step crosses are already drawn as one continuous
+    region of the surface, so the walk simply continues through the point sequence with no
+    cut. (`Bounce` cannot occur in practice - `hasPlaySurface` already excludes
+    `MirrorBox`.) Orientation snaps to the nearest route cell's seat quat as the piece
+    passes it; a slerp between consecutive quats would read more smoothly and is a
+    reasonable follow-up, not required here.
+  - `fit`: blend the two relevant seats' `stepU*stepV`-derived fit the same way position
+    blends, so a piece does not visibly resize in a jump at each cell boundary.
+- **`BoardRenderer::buildInstances`'s surface branch** (around `board_renderer.cpp:772`):
+  add the destination skip the flat path already has -
+  `if (anim != nullptr && anim->active() && seat.cell == anim->travellingTo()) continue;`
+  inside the `surf.seats()` loop - and after it, where `(void)anim;` is today, emit the
+  travelling piece: `const Piece moving = p.at(anim->travellingTo());` (the engine has
+  already moved it there, exactly as the flat path's equivalent line reads
+  `board_renderer.cpp:1236`), and if not empty, `const SurfaceMoveSample s =
+  surfaceMoveSample(anim->path(), surf, anim->progress());`, then build an `Instance` the
+  same way the static loop does (`body.center`/`body.quat`/`body.scale`) but sourced from
+  `s` instead of a `SurfaceSeat`.
+
+**Tests.** New cases in `tests/render/test_play_surface.cpp` (pure geometry, no GPU):
+
+- A leap's sample at `t = 0` equals `fromSeat.centre` and at `t = 1` equals `toSeat.centre`
+  (within float tolerance); at `t = 0.5` it is displaced *outward* along the blended
+  normal relative to the straight chord between the two - i.e. it visibly arcs rather than
+  cutting through the shape.
+- A glide's sample at `t = 0` and `t = 1` match the route's first and last seat; sampled
+  across a dense sweep of `t`, the position visits a neighbourhood of every intermediate
+  `PathStep.to` seat in order (monotonically increasing arc-length), and never departs the
+  surface by more than the leap's own lift bound (it should hug the surface, not arc).
+- A glide across a seam (pick a scripted rook move on `torus` that crosses the glued file
+  edge) produces no discontinuity in the sampled position around the step that crosses it
+  - the point just before and just after the crossing are close together (within one
+  cell's `stepU`), unlike the flat board's portal cut.
+- `BoardRenderer::buildInstances`, GPU: a validation-clean render mid-move
+  (`anim.setProgress(0.5f)`) on `torus` shows the moving piece displaced from both its
+  start and end seats, and neither the start nor end seat double-draws it.
+
+**Acceptance.** `chessbox_gui torus --script "click a1\nclick a2" --geometry --move-t 0.5
+--shot mid.ppm` shows the pawn part-way along the surface between a1 and a2, not sitting
+statically at a2. A scripted knight move shows a visible arc clear of the surface at
+`--move-t 0.5`. `--geometry` renders without the flag are unaffected (progress defaults to
+1, the sampler's own end-state, identical to today's static placement).
+
+### M17.16 The move camera follows on the shape
+
+**Want.** The existing camera-follow setting (off / follow the piece / follow the route)
+works in the geometry view too: "off" is the player's own orbit, unchanged - the ordinary
+third-person view, as now; "piece"/"route" put the camera behind the moving piece as it
+crosses the shape, the same way it already does on the flat board.
+
+**Have.** `Settings::cameraMode` (`"off"`/`"piece"`/`"route"`) already drives
+`Session::setCameraMode`, which sets `cameraPolicy_.follow` to a `view::FollowMode`; the
+cycle button for it already lives in the settings menu (`ui_menus.cpp:858-867`) and is not
+gated on `geometryView` - it is simply **inert** there, because `Session::camera()`
+(`session.cpp:253-276`) blends the move-camera shot using `placements_`/`viewCfg_` - the
+*flat* layout, always, regardless of what `BoardOptions::surface` the renderer is actually
+drawing. `view::moveCamera`/`view::routeRuns` themselves need no change for this: they are
+already geometry-agnostic, reading only a `MovePath` and a `std::vector<Placement>`
+(AGENTS.md's own description of M11). The gap is entirely that nothing ever builds a
+*surface* `Placement` list and asks for the blend against it.
+
+Two more things follow from that gap once it is closed: `moveCamera`'s "look along travel"
+direction (`move_camera.cpp:188-191`, `worldDir(cfg, run.dir)`) projects a lattice
+direction through `ViewConfig::screenAxes` - a flat-layout concept with no surface
+equivalent - but `moveCamera` already falls back to the run's own 3-D chord
+(`move_camera.cpp:192`, `dir = normalize(last - first)`) whenever `worldDir` returns
+near-zero, which is exactly what happens when `cfg.screenAxes` is empty. And picking on the
+surface (`src/gui/main.cpp`, the `optionsFor(*shell).surface` click branch) currently calls
+`session->camera()` directly with no `shotInFlight()` guard - harmless while nothing ever
+animated a surface move, not harmless once M17.15 and this both exist: a click mid-shot
+would now pick against a camera that is about to move, which is exactly the desync
+ADR-0011's invariant exists to prevent, and which `Session::clickPixel` already guards
+against for the flat board (`session.cpp:636`, `if (shotInFlight()) return kInvalidCell;`).
+
+**Build.**
+
+- **One function, not two copies of the blend.** `Session::camera()`'s body (past the
+  `pullBack_` line) is the move-camera blend, parametrised internally on `placements_` and
+  `view::boundsOf(placements_)`. Split it:
+  ```cpp
+  // session.hpp
+  /// `camera()`'s own blend, against an arbitrary placement set and its bounds instead of
+  /// the session's flat layout - what the geometry view passes, built from
+  /// `render::PlaySurface::seats()` (M17.16). One definition either way, so the move
+  /// camera cannot say something different from what `camera()` already promises: see the
+  /// note on `camera()` for why the blend is folded into one accessor at all.
+  [[nodiscard]] view::OrbitCamera cameraOver(const std::vector<view::Placement>& placements,
+                                              const view::Bounds& scene) const noexcept;
+  ```
+  `camera()` becomes `return cameraOver(placements_, view::boundsOf(placements_));` after
+  its existing `pullBack_`/early-return lines (those stay exactly where they are - this is
+  a pure extraction, not a behaviour change, and the existing camera/move-camera tests must
+  keep passing unchanged).
+- **Build the surface placements once per frame**, in `src/gui/main.cpp`, next to where
+  `optionsFor`/`poseFrom` already live:
+  ```cpp
+  std::vector<view::Placement> surfacePlacements(const PlaySurface& surf) {
+    std::vector<view::Placement> out;
+    out.reserve(surf.seats().size());
+    for (const SurfaceSeat& s : surf.seats())
+      out.push_back({s.cell, s.centre.x, s.centre.y, s.centre.z, 0});
+    return out;
+  }
+  ```
+  Wherever the loop currently calls `session->camera()` while
+  `optionsFor(*shell).surface` is true (the render call and the picking call both need the
+  *same* one, per ADR-0011), call `session->cameraOver(surfacePlacements(surf),
+  surf.bounds())` instead, with `surf` the same `PlaySurface::build(variant, pose)` already
+  being built this frame for drawing - do not build it twice.
+- **`ViewConfig` for the surface blend is the default, empty one** (`view::ViewConfig{}`)
+  wherever `cameraOver`/`moveCamera`'s `cfg` parameter is threaded through - its only
+  consumers (`worldDir`, `travelsGridAxis`) both degrade to their already-correct
+  fallbacks on an empty config (chord direction; never "grid axis", since the surface view
+  has no grid-axis concept). No change to `move_camera.cpp` is needed for this.
+- **Gate surface picking on `shotInFlight()`**, matching `clickPixel`'s own rule: in the
+  surface click branch in `main.cpp`, skip (or no-op) the pick when
+  `shell->session()->shotInFlight()` is true, exactly as the flat board already refuses a
+  click mid-shot.
+- `Settings::cameraMode` needs no new value and no new UI - the existing three-state cycle
+  already reaches `Session::setCameraMode`, which this reuses unmodified. `FollowMode::Off`
+  is already "the player's own orbit, unaffected" (`moveCamera` returns the settled framing
+  immediately); that is literally "3rd person, as now" and needs no code here at all.
+
+**Tests.**
+
+- `tests/render/test_play_surface.cpp` (or a sibling), headless: construct a `Session` on
+  `torus`, start a move, call `cameraOver(surfacePlacements, surf.bounds())` at a few
+  values of `anim.progress()` with `cameraPolicy_` set to `Piece`/`Route` - note this needs
+  the same small accessor path M17.14 already asked for (or `cameraPolicy_`/`lastPath_`
+  exposed some other way; either spec's refactor satisfies the other) - and assert the
+  returned camera's `target` tracks the route (moves monotonically along it) rather than
+  sitting fixed at the settled framing `FollowMode::Off` would give.
+- A regression test that `FollowMode::Off` against surface placements is bit-identical to
+  `frameGeometryCamera`'s own settled framing (M17.14) - the strict no-op the whole feature
+  promises when the player has not opted in.
+- A picking test: with a shot in flight (`anim.setProgress(0.4f)`, `cameraPolicy_` set to
+  follow), the surface pick call returns `kInvalidCell` rather than resolving against a
+  stale camera.
+
+**Acceptance.** Set "follow the route" in settings, make a long sliding move on `torus` in
+the geometry view: the camera leads the piece around the ring, pulling back as it travels,
+and settles back to the player's own orbit once the move completes - the same character the
+flat board's follow already has, now on the shape. Set it back to "off": nothing about the
+geometry view's camera changes from how it behaves today.
+
+### M17.17 Align the shape so the moving piece is never on the far side
+
+**Want.** An option that, while the camera is following a move, keeps the piece on the
+side of the shape the camera can actually see without looking through the shape's own
+geometry to find it - concretely, if a piece travels along a torus's inner ring (the side
+facing the hole), the torus turns so that ring becomes the outer one before or as the
+camera gets there, rather than the camera ending up inside the donut looking out through
+the tube wall.
+
+**Have.** Nothing - this is new. But the mechanism already exists in a different guise:
+`SurfacePose::slideU`/`slideV` (ADR-0019) already rotate *which part of the surface's own
+parametrisation* sits where - the middle-mouse-button slide is a player manually doing
+exactly this. "Align" is the same operation, chosen automatically rather than dragged, and
+only for the file axis (`slideU`) in the first cut: on every shape in the catalogue, `u`
+is the angle that wraps the ring a torus's inner/outer side sits on (`tube`'s `th`
+parameter in `overture_scene.cpp`), while `v` (the ones that would need `slidesAlongRanks`)
+governs the cross-section twist, not which side faces the camera. Scoping to `slideU` on
+the surfaces that already support sliding (`PlaySurface::slidesAlongRanks` names which
+variants slide at all - `torus`/`klein`; `cylinder`/`mobius` have no inner/outer ring to
+begin with, since they do not close into one) keeps this from needing new theory about the
+D >= 3 stacked shapes, which do not support slide or invert yet (M17.12's stated limits).
+
+**Build.**
+
+- **A facing measure already sits on every seat.** `SurfaceSeat::normal` is the outward
+  direction `PlaySurface` already computes; "does the camera clip through the shape to see
+  this cell" is well approximated by whether that normal points *away* from the camera:
+  `facing(seat, camera) = dot(seat.normal, normalize(camera.eye() - seat.centre))`. A
+  seat with `facing <= 0` is on the far side of the shape as the camera currently sits -
+  not necessarily occluded by a precise raycast, but a cheap, honest proxy consistent with
+  what the renderer already uses for shading and picking.
+- **The search.** Given the cell the camera is about to follow (the destination of the
+  move about to start, or the currently-nearest route cell while one is in flight) and the
+  *settled* camera (`Session::cameraOver` with `FollowMode::Off` - the framing the shot
+  would otherwise lead from), sample `facing` at a handful of candidate `slideU` offsets
+  (e.g. 16, evenly spaced across the shape's own period -
+  `PlaySurface`'s existing `wrapSlide(s, period)` helper and its `2 * nx` period
+  (`play_surface.cpp:84`, used at `play_surface.cpp:131-132`) - by
+  rebuilding just that one seat's position at each candidate (no need to rebuild the whole
+  `PlaySurface` per candidate - add a small helper that samples a single seat's
+  centre/normal at a given `(cell, pose)`, factored out of `PlaySurface::build`'s per-cell
+  body) and keep the offset with the largest `facing`. This is a search, not a closed
+  form - the embeddings have no general inverse for "which slide makes this point face
+  outward," and a 16-point sweep is cheap (the same order of cost ADR-0019 already
+  accepted for rebuilding the whole surface every frame).
+- **Applying it.** `Settings::geometryAlign` (bool, default `false` - another strict
+  no-op by default, consistent with every other M17 setting). An `ALIGN` button in the
+  rail, shown next to `SHAPE` only when `cameraMode != "off"` (aligning has nothing to do
+  while the player is not following a move - same reasoning `INVERT`/`GHOST` already use
+  for when they are offered). While it is on **and** a shot is in flight
+  (`shotInFlight()`), ease an *additional* offset into `Settings::geometrySlideU` - on top
+  of whatever the player has manually slid to, not replacing it - towards the searched
+  value, over the same kind of ramp `INVERT`'s target already uses
+  (`main.cpp:904-913`, `dt * 2.0f`-ish), and ease it back to zero once the shot ends. The
+  search itself only needs to run once per move (when the shot starts, or when the
+  followed cell changes - a slide search every frame would be wasted work for a value that
+  only needs to change when the target cell does).
+- **Scope.** Offered only where `PlaySurface::slidesAlongRanks` or the plain
+  `hasPlaySurface` 2-D case with a closed `u` axis applies - concretely, `torus` and
+  `klein` (closed rings with an inner/outer side); `cylinder` and `mobius` never show the
+  button (nothing to align - a `u`-slide there just spins an open tube/strip with no side
+  that is more "inside" than another). `torus3d`/`hyper4`/`t6` are out of scope for this
+  pass, matching M17.12's own stated limits on slide/invert there.
+
+**Tests.**
+
+- `tests/render/test_play_surface.cpp`: for a torus, pick a cell known to sit on the inner
+  ring at `slideU = 0` (one exists - the torus's `open` parameter in `tube()` pulls the
+  hole open specifically so an inner ring exists to test against) and a settled camera
+  framed on the whole shape; assert `facing(seat, camera) < 0` there (the premise the
+  feature exists to fix), then assert the search finds a `slideU` for which
+  `facing(seat', camera) > facing(seat, camera)` and is positive - the align genuinely
+  improves the measure it targets, for the specific case the feature was asked for.
+- A continuity check: the chosen offset as a function of a sweep of candidate followed
+  cells does not jump discontinuously between adjacent cells (the search should prefer the
+  candidate nearest the previous frame's choice when two offsets tie on `facing`, or the
+  shape would visibly snap between two rotations for a route that crosses the tie-break
+  boundary).
+
+**Acceptance.** Turn ALIGN on, set "follow the route", script a rook's slide along a
+torus's inner ring. Without ALIGN, the camera at some point along that route ends up
+looking through the tube wall (self-occlusion visible in a capture). With ALIGN on, the
+torus itself turns so the travelled ring presents its outer face to the camera and the
+piece stays visible throughout.
+
 ### Ordering
 
-M17.8 and M17.9 are one sitting each and should go first - a control that is the wrong way
-round and a slide that snaps make everything else harder to judge. M17.11 is a measurement
-and then a small fix. M17.7 and M17.10 are a button each plus one real piece of work (the
-outward side; a blended pipeline). M17.12 is its own milestone-sized step and should not be
-started until the other five are done, because it generalises exactly the code they touch.
+M17.13 and M17.14 are regressions found while playing with the M17.12 first pass and
+should be fixed before anything else here - both make `torus3d`/`hyper4` unusable to judge
+and M17.14 affects every shaped variant, not just the new ones. M17.8 and M17.9 are one
+sitting each. M17.11 is a measurement and then a small fix. M17.7 and M17.10 are a button
+each plus one real piece of work (the outward side; a blended pipeline). M17.15 is the
+dependency the other two need - M17.16's camera has nothing honest to follow before a
+move actually travels, and M17.17 only matters once the camera is close enough to clip.
+Build them in that order: M17.15, then M17.16, then M17.17. [M17.12's remaining
+limits](M17.12-shapes-above-two-dimensions.md) (level/aeon adjacency, no slide/invert on
+the stacked shapes) are their own, larger step.
 
 ---
 

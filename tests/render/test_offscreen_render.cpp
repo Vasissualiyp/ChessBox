@@ -672,6 +672,50 @@ TEST_CASE("the shapes above two dimensions render on the board", "[render][gpu]"
     REQUIRE(writePpm(*img, capturePath(std::string("surface-") + name)).has_value());
   }
 }
+
+TEST_CASE("a move in flight on the shape renders cleanly", "[render][gpu]") {
+  // M17.15: the moving piece is drawn from the surface sampler, not left at its landing
+  // seat. This drives the renderer's travelling-piece path under the validation layers.
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("torus"));
+  auto session = app::Session::create(test::loadVariant("torus"));
+  REQUIRE(session.has_value());
+  app::Session& s = **session;
+  REQUIRE_FALSE(s.game().legalMoves().empty());
+  const Move m = s.game().legalMoves().front();
+  const auto click = [&](CellId c) {
+    app::Action a;
+    a.kind = app::ActionKind::ClickCell;
+    a.cell = c;
+    REQUIRE(s.apply(a).has_value());
+  };
+  click(m.from);
+  click(m.to);
+  REQUIRE(s.animation().active());
+  s.setMoveProgress(0.5f);
+
+  auto target = OffscreenTarget::create(gpu().ctx, 512, 384);
+  REQUIRE(target.has_value());
+  auto renderer = BoardRenderer::create(gpu().ctx);
+  REQUIRE(renderer.has_value());
+  BoardOptions options = renderer->options();
+  options.surface = true;
+  renderer->setOptions(options);
+  const view::ViewConfig cfg = view::ViewConfig::forBoard(v.dims);
+  const PlaySurface surf = PlaySurface::build(v);
+  const view::OrbitCamera cam =
+      view::OrbitCamera::frame(surf.bounds(), 512.0f / 384.0f, 0.0f);
+  const InstanceSet set =
+      renderer->buildInstances(s.snapshot(), cfg, &s.seams(), &s.animation(),
+                               [&](CellId c) { return s.boardVisible(c); });
+
+  (void)gpu().ctx.takeValidationMessages();
+  REQUIRE(renderer->render(*target, set, cam).has_value());
+  CAPTURE(gpu().ctx.takeValidationMessages());
+  REQUIRE(gpu().ctx.validationErrorCount() == 0);
+  const auto px = target->readPixels();
+  REQUIRE(px.has_value());
+}
 #endif  // CB_HAVE_IMGUI
 
 #endif  // CB_HAVE_VULKAN

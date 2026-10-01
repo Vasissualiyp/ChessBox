@@ -5,6 +5,25 @@ Read this first. It is the map. Design rationale is in
 [`docs/plan/00-roadmap.md`](docs/plan/00-roadmap.md); decisions are in
 [`docs/adr/`](docs/adr/README.md).
 
+## Who does what — read this before writing any code
+
+This repository is worked by more than one assistant, and they have different jobs. These
+are defaults; **the user can always override them**, and an explicit instruction in the
+current conversation beats everything here.
+
+- **If you are Claude:** do **not** write implementations. Your job is to produce
+  *detailed specifications* that a less capable model can reproduce exactly: the files and
+  functions to touch, the data structures and their invariants, the algorithms, the edge
+  cases, the tests to add, and the acceptance criteria. Commit specs, plans and design
+  notes; leave the code to opencode. Where you can, leave the failing test or the exact
+  expected behaviour rather than the implementation.
+- **If you are opencode:** you are the implementer. Your job is to turn Claude's
+  specifications (the milestone plans in [`docs/plan/`](docs/plan/), the ADRs, and any
+  spec written for you) into working, tested code, and to keep the suite green. Read the
+  spec, implement it, test it, and update the status sections the spec names.
+
+If neither role matches what you are being asked to do right now, follow the user.
+
 **Status: M0-M6 complete.** A playable, perft-exact engine with N-dimensional boards,
 non-trivial boundary topology, a Vulkan interface, a rule VM, and 5D-chess-style time
 travel. Next, in **release order** (visuals and clippable things first — see the roadmap's

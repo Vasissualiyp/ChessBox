@@ -251,6 +251,12 @@ void Session::applyViewMode() {
 }
 
 view::OrbitCamera Session::camera() const noexcept {
+  return cameraOver(placements_, view::boundsOf(placements_), viewCfg_);
+}
+
+view::OrbitCamera Session::cameraOver(const std::vector<view::Placement>& placements,
+                                      const view::Bounds& scene,
+                                      const view::ViewConfig& cfg) const noexcept {
   view::OrbitCamera out = camera_;
   out.distance *= 1.0f + 0.18f * pullBack_;
   if (!shotInFlight()) return out;
@@ -262,12 +268,15 @@ view::OrbitCamera Session::camera() const noexcept {
   // The shot is applied as an **offset in its own frame**: the pose it would use with
   // following off is subtracted first, so the player's own orbit, pan and zoom survive
   // and the move camera only leads them. A player who turned the board keeps that turn.
-  const view::Bounds scene = view::boundsOf(placements_);
+  //
+  // `placements`/`scene`/`cfg` are parameters so the geometry view can ask for the same
+  // blend against its own surface placements (M17.16); the flat board passes the
+  // session's own layout, so this is the one definition either way.
   view::CameraPolicy off = cameraPolicy_;
   off.follow = view::FollowMode::Off;
   const view::CameraPose settled =
-      view::moveCamera(lastPath_, placements_, viewCfg_, scene, off, 1.0f);
-  const view::CameraPose shot = view::moveCamera(lastPath_, placements_, viewCfg_, scene,
+      view::moveCamera(lastPath_, placements, cfg, scene, off, 1.0f);
+  const view::CameraPose shot = view::moveCamera(lastPath_, placements, cfg, scene,
                                                  cameraPolicy_, anim_.progress());
   const float k = followStrength_ * shotEnvelope(anim_.progress());
   out.target = out.target + (shot.target - settled.target) * k;

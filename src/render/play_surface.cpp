@@ -251,6 +251,91 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
   return s;
 }
 
+void frameGeometryCamera(app::Session& session, const BoardOptions& options,
+                         SurfacePose pose) {
+  if (options.surface) {
+    const PlaySurface surf = PlaySurface::build(session.variant(), pose);
+    if (!surf.empty()) {
+      // `bounds()` already pads for the pieces, so headroom would drop the shape down the
+      // window (M17.11).
+      session.frameOn(surf.bounds(), 0.0f);
+      return;
+    }
+  }
+  session.frameOn(view::boundsOf(session.placements()));
+}
+
+namespace {
+const SurfaceSeat* seatOf(const PlaySurface& s, CellId c) {
+  for (const SurfaceSeat& st : s.seats()) {
+    if (st.cell == c) return &st;
+  }
+  return nullptr;
+}
+float fitOf(const SurfaceSeat& s) {
+  return std::min(std::sqrt(s.stepU * s.stepV), 1.0f);
+}
+}  // namespace
+
+SurfaceMoveSample surfaceMoveSample(const view::MovePath& path, const PlaySurface& surf,
+                                    float t) {
+  SurfaceMoveSample out;
+  const SurfaceSeat* a = seatOf(surf, path.from);
+  const SurfaceSeat* b = seatOf(surf, path.to);
+  if (a == nullptr || b == nullptr) return out;
+  t = std::clamp(t, 0.0f, 1.0f);
+  constexpr float kPi = 3.14159265358979f;
+
+  if (path.leap || path.steps.empty()) {
+    // Arc directly from the start seat to the end, lifted outward along the blended
+    // normal - the same `sin(pi t) * 0.65` the flat board's leap uses, so a knight clears
+    // the shape rather than cutting through it.
+    const view::Vec3 chord = a->centre + (b->centre - a->centre) * t;
+    view::Vec3 n = a->normal + (b->normal - a->normal) * t;
+    n = view::length(n) > 1e-6f ? view::normalize(n) : a->normal;
+    out.position = chord + n * (std::sin(t * kPi) * 0.65f);
+    out.normal = n;
+    out.quat = t < 0.5f ? a->quat : b->quat;
+    out.fit = fitOf(*a) + (fitOf(*b) - fitOf(*a)) * t;
+    return out;
+  }
+
+  // Glide: walk the seats the engine's route passes through, in order. A portal or bounce
+  // step is not a special case here - on the surface there is no gap to open a doorway
+  // across, so the walk simply continues through the point sequence with no cut.
+  std::vector<const SurfaceSeat*> seats{a};
+  for (const view::PathStep& s : path.steps) {
+    const SurfaceSeat* st = seatOf(surf, s.to);
+    if (st == nullptr) return out;
+    seats.push_back(st);
+  }
+  std::vector<view::Vec3> points;
+  points.reserve(seats.size());
+  for (const SurfaceSeat* s : seats) points.push_back(s->centre);
+  out.position = view::pointAlong(points, t);
+
+  // Orientation snaps to the nearer route cell as the piece passes it; the scale blends,
+  // so a piece does not visibly resize at a cell boundary.
+  std::vector<float> cum(points.size(), 0.0f);
+  float total = 0.0f;
+  for (std::size_t i = 1; i < points.size(); ++i) {
+    total += view::length(points[i] - points[i - 1]);
+    cum[i] = total;
+  }
+  std::size_t i = 1;
+  const float want = t * total;
+  while (i + 1 < cum.size() && cum[i] < want) ++i;
+  const float seg = std::max(1e-5f, cum[i] - cum[i - 1]);
+  const float local = std::clamp((want - cum[i - 1]) / seg, 0.0f, 1.0f);
+  const SurfaceSeat& sa = *seats[i - 1];
+  const SurfaceSeat& sb = *seats[i];
+  view::Vec3 n = sa.normal + (sb.normal - sa.normal) * local;
+  out.normal = view::length(n) > 1e-6f ? view::normalize(n) : sa.normal;
+  out.quat = local < 0.5f ? sa.quat : sb.quat;
+  out.fit = fitOf(sa) + (fitOf(sb) - fitOf(sa)) * local;
+  return out;
+}
+
 void PlaySurface::buildStacked(const VariantSpec& v) {
   stacked_ = true;
   const DimSpec& d = v.dims;
@@ -258,13 +343,55 @@ void PlaySurface::buildStacked(const VariantSpec& v) {
   const int nz = static_cast<int>(d.extent(1));
   nx_ = nx;
   nz_ = nz;
-  const auto uprightSite = [&](const Coord& base, int df, int dr, view::Vec3& out) {
+  // A neighbour's position, wrapping a periodic axis and clamping a bounded one. The
+  // difference matters: on `torus3d` the file and rank axes are periodic, so file 0's
+  // "previous" is file 3, not file 0 again - clamping returns the cell's own position, so
+  // every boundary cell's frame tilts on a half-length, wrongly-based tangent, which is
+  // the fish-scales scatter; on `hyper4` all four axes are bounded, so clamping is right
+  // (M17.13).
+  const bool periodicU = v.geom.boundaryKind(0, Side::Max) == BoundaryKind::Periodic;
+  const bool periodicV = v.geom.boundaryKind(1, Side::Max) == BoundaryKind::Periodic;
+  const auto positionAt = [&](const Coord& base, int axis, int offset, view::Vec3& out) {
+    const std::size_t a = static_cast<std::size_t>(axis);
+    const int extent = axis == 0 ? nx : nz;
+    const bool periodic = axis == 0 ? periodicU : periodicV;
+    int idx = base.c[a] + offset;
+    idx = periodic ? ((idx % extent) + extent) % extent : std::clamp(idx, 0, extent - 1);
     Coord c = base;
-    c.c[0] = static_cast<std::int16_t>(std::clamp(base.c[0] + df, 0, nx - 1));
-    c.c[1] = static_cast<std::int16_t>(std::clamp(base.c[1] + dr, 0, nz - 1));
+    c.c[a] = static_cast<std::int16_t>(idx);
     OvVec3 p;
     if (!playShapePosition(v, d.toCell(c), p)) return false;
     out = {p.x, -p.z, p.y};  // into the board's Z-up world, as the 2-D shapes are
+    return true;
+  };
+  // One axis's tangent, cell size and direction at `base`. A two-sided difference spans
+  // two cells; at a bounded boundary only one side is real, so the one-sided difference
+  // is a whole cell - not half of a fictitious two (M17.13).
+  const auto axisFrame = [&](const Coord& base, int axis, const view::Vec3& centre,
+                             view::Vec3& tangent, float& cellSize, view::Vec3& dir) {
+    const int extent = axis == 0 ? nx : nz;
+    const bool periodic = axis == 0 ? periodicU : periodicV;
+    const int idx = base.c[static_cast<std::size_t>(axis)];
+    view::Vec3 plus{}, minus{};
+    bool twoSided = true;
+    if (periodic || (idx > 0 && idx < extent - 1)) {
+      if (!positionAt(base, axis, +1, plus) || !positionAt(base, axis, -1, minus)) {
+        return false;
+      }
+      tangent = plus - minus;
+    } else if (idx == 0) {
+      if (!positionAt(base, axis, +1, plus)) return false;
+      tangent = plus - centre;
+      twoSided = false;
+    } else {
+      if (!positionAt(base, axis, -1, minus)) return false;
+      tangent = centre - minus;
+      twoSided = false;
+    }
+    const float len = view::length(tangent);
+    if (len < 1e-6f) return false;
+    cellSize = (twoSided ? 0.5f : 1.0f) * len;
+    dir = tangent * (1.0f / len);
     return true;
   };
 
@@ -292,20 +419,14 @@ void PlaySurface::buildStacked(const VariantSpec& v) {
     if (!playShapePosition(v, cell, raw)) continue;
     const Coord c = d.toCoord(cell);
     const view::Vec3 centre{raw.x, -raw.z, raw.y};
-    view::Vec3 pu{}, mu{}, pv{}, mv{};
-    if (!uprightSite(c, +1, 0, pu) || !uprightSite(c, -1, 0, mu) ||
-        !uprightSite(c, 0, +1, pv) || !uprightSite(c, 0, -1, mv)) {
-      continue;
-    }
-    const view::Vec3 tangentU = pu - mu;
-    const view::Vec3 tangentV = pv - mv;
+    view::Vec3 tangentU{}, tangentV{}, ex{}, vDir{};
+    float cellU = 0.0f;
+    float cellV = 0.0f;
+    if (!axisFrame(c, 0, centre, tangentU, cellU, ex)) continue;
+    if (!axisFrame(c, 1, centre, tangentV, cellV, vDir)) continue;
     view::Vec3 normal = view::cross(tangentV, tangentU);
     normal = view::length(normal) > 1e-6f ? view::normalize(normal)
                                           : view::Vec3{0.0f, 0.0f, 1.0f};
-    const float cellU = 0.5f * view::length(tangentU);
-    const float cellV = 0.5f * view::length(tangentV);
-    const view::Vec3 ex =
-        view::length(tangentU) > 1e-6f ? view::normalize(tangentU) : view::Vec3{1, 0, 0};
     const view::Vec3 ey = view::cross(normal, ex);
 
     SurfaceSeat seat;

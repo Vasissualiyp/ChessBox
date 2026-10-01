@@ -58,28 +58,27 @@ Vec3 worldDir(const ViewConfig& cfg, const Direction& d) {
   return {out[0], out[1], out[2]};
 }
 
-/// A point at normalised arc length `s` along a run's polyline.
-Vec3 pointAlong(const RouteRun& run, float s) {
-  if (run.points.empty()) return {};
-  if (run.points.size() == 1) return run.points.front();
+}  // namespace
+
+Vec3 pointAlong(const std::vector<Vec3>& points, float s) {
+  if (points.empty()) return {};
+  if (points.size() == 1) return points.front();
   s = std::clamp(s, 0.0f, 1.0f);
 
-  std::vector<float> cum(run.points.size(), 0.0f);
+  std::vector<float> cum(points.size(), 0.0f);
   float total = 0.0f;
-  for (std::size_t i = 1; i < run.points.size(); ++i) {
-    total += length(run.points[i] - run.points[i - 1]);
+  for (std::size_t i = 1; i < points.size(); ++i) {
+    total += length(points[i] - points[i - 1]);
     cum[i] = total;
   }
-  if (total <= 1e-5f) return run.points.back();
+  if (total <= 1e-5f) return points.back();
 
   const float want = s * total;
   std::size_t i = 1;
   while (i + 1 < cum.size() && cum[i] < want) ++i;
   const float seg = std::max(1e-5f, cum[i] - cum[i - 1]);
-  return mix(run.points[i - 1], run.points[i], (want - cum[i - 1]) / seg);
+  return mix(points[i - 1], points[i], (want - cum[i - 1]) / seg);
 }
-
-}  // namespace
 
 std::vector<RouteRun> routeRuns(const MovePath& path,
                                 const std::vector<Placement>& placements) {
@@ -160,7 +159,7 @@ CameraPose moveCamera(const MovePath& path, const std::vector<Placement>& placem
   const float span = std::max(1e-5f, run->t1 - run->t0);
   const float local = applyEase(Ease::Smooth, (t - run->t0) / span);
   CameraPose pose = base;
-  pose.target = pointAlong(*run, local);
+  pose.target = pointAlong(run->points, local);
 
   if (policy.grid == GridAxisPolicy::Cut && travelsGridAxis(cfg, run->dir)) {
     // A grid-axis move travels between sub-boards, not across the screen. Following the

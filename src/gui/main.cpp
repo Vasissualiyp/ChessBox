@@ -195,6 +195,34 @@ render::SurfacePose poseFrom(const app::Settings& s) {
   return pose;
 }
 
+/// The seats as a placement list, so the move camera can be asked for its blend against
+/// the shape instead of the flat layout (M17.16).
+std::vector<view::Placement> surfacePlacements(const render::PlaySurface& surf) {
+  std::vector<view::Placement> out;
+  out.reserve(surf.seats().size());
+  for (const render::SurfaceSeat& s : surf.seats()) {
+    out.push_back({s.cell, s.centre.x, s.centre.y, s.centre.z, 0});
+  }
+  return out;
+}
+
+/// The effective camera for what is drawn right now: the move-camera blend against the
+/// shape while the geometry view is on, the session's own camera otherwise. One function
+/// so the render and the pick cannot ask for different cameras (ADR-0011).
+view::OrbitCamera boardCamera(const app::Shell& shell) {
+  const app::Session* session = shell.session();
+  if (session == nullptr) return {};
+  if (optionsFor(shell).surface) {
+    const render::PlaySurface surf =
+        render::PlaySurface::build(session->variant(), poseFrom(shell.settings()));
+    if (!surf.empty()) {
+      return session->cameraOver(surfacePlacements(surf), surf.bounds(),
+                                 view::ViewConfig{});
+    }
+  }
+  return session->camera();
+}
+
 /// Put the camera round whatever the board has just become.
 ///
 /// The shape and the flat board are different sizes and sit in different places, so a
@@ -203,17 +231,7 @@ render::SurfacePose poseFrom(const app::Settings& s) {
 void frameBoard(app::Shell& shell) {
   app::Session* session = shell.session();
   if (session == nullptr) return;
-  if (optionsFor(shell).surface) {
-    const render::PlaySurface surf =
-        render::PlaySurface::build(session->variant(), poseFrom(shell.settings()));
-    if (!surf.empty()) {
-      // `bounds()` already pads for the pieces, so the camera's own headroom would lift
-      // the look-at off the shape's centre and drop it down the window (M17.11).
-      session->frameOn(surf.bounds(), 0.0f);
-      return;
-    }
-  }
-  session->frameOn(view::boundsOf(session->placements()));
+  render::frameGeometryCamera(*session, optionsFor(shell), poseFrom(shell.settings()));
 }
 #endif
 
@@ -405,7 +423,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
           shell->session()->timelineLinks());
     }
     const view::OrbitCamera camera =
-        shell->showsBoard() ? shell->session()->camera() : view::OrbitCamera{};
+        shell->showsBoard() ? boardCamera(*shell) : view::OrbitCamera{};
     const std::function<void(VkCommandBuffer)> drawUi = [&](VkCommandBuffer cmd) {
       (*ui)->record(cmd);
     };
@@ -715,16 +733,23 @@ int main(int argc, char** argv) {
 #ifdef CB_HAVE_IMGUI
             const app::Session* session = shell->session();
             if (optionsFor(*shell).surface && session != nullptr) {
-              // The geometry view: pick against the same surface the renderer drew,
-              // with the effective camera, so the click resolves to the cell under the
-              // cursor (M17.3). The ray is in the board rectangle's pixel space.
-              app::Action a;
-              a.kind = app::ActionKind::ClickCell;
-              a.cell = render::PlaySurface::build(session->variant(), poseFrom(settings))
-                           .pick(session->camera(), boardRect.width, boardRect.height,
-                                 e.button.x - boardRect.x, e.button.y - boardRect.y);
-              (void)shell->session()->apply(a);
+              // The geometry view: pick against the same surface the renderer drew, with
+              // the effective camera, so the click resolves to the cell under the cursor
+              // (M17.3). A shot in flight means the camera is about to move, so the click
+              // is refused - the same rule `clickPixel` already applies on the flat board
+              // (M17.16). The ray is in the board rectangle's pixel space.
               handled = true;
+              if (!session->shotInFlight()) {
+                const render::PlaySurface surf =
+                    render::PlaySurface::build(session->variant(), poseFrom(settings));
+                app::Action a;
+                a.kind = app::ActionKind::ClickCell;
+                a.cell = surf.pick(session->cameraOver(surfacePlacements(surf),
+                                                       surf.bounds(), view::ViewConfig{}),
+                                   boardRect.width, boardRect.height,
+                                   e.button.x - boardRect.x, e.button.y - boardRect.y);
+                (void)shell->session()->apply(a);
+              }
             }
 #endif
             if (!handled) {
@@ -928,6 +953,12 @@ int main(int argc, char** argv) {
     if (!request.loadVariant.empty()) {
       (void)shell->startGame(request.loadVariant);
       renderer->setOptions(optionsFor(*shell));
+      // A new variant is a new shape, and `geometryView` is sticky across the load, so
+      // frame unconditionally - a one-shot "did the toggle flip" check would miss this
+      // and leave the camera on the previous variant's shape, or the new one's flat board
+      // (M17.14). Set `wasSurface` too so the toggle check below does not re-fire.
+      frameBoard(*shell);
+      wasSurface = optionsFor(*shell).surface;
     }
     if (request.settingsChanged) {
       shell->applySettings();
@@ -989,7 +1020,7 @@ int main(int argc, char** argv) {
           [&](CellId c) { return shell->session()->boardVisible(c); },
           [&](CellId c) { return shell->session()->game().cellInPresent(c); },
           shell->session()->timelineLinks());
-      camera = shell->session()->camera();
+      camera = boardCamera(*shell);
     }
 
     const auto overlay = [&](VkCommandBuffer cmd) {

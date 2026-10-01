@@ -769,35 +769,54 @@ InstanceSet BoardRenderer::buildInstances(
 
     std::vector<std::vector<Instance>> byShape(
         static_cast<std::size_t>(Archetype::Count));
-    for (const SurfaceSeat& seat : surf.seats()) {
-      const Piece piece = p.at(seat.cell);
-      if (piece.empty()) continue;
+    const auto emitSurfacePiece = [&](const Piece& piece, const view::Vec3& centre,
+                                      const view::Vec3& normal,
+                                      const std::array<float, 4>& quat, float fit,
+                                      bool inCheck) {
       view::Rgba pc =
           piece.colorOf() == Color::White ? theme_.whitePiece : theme_.blackPiece;
-      if (options_.showCheck && seat.cell == checkCell_)
-        pc = mix(pc, theme_.blood, 0.65f);
+      if (options_.showCheck && inCheck) pc = mix(pc, theme_.blood, 0.65f);
       Instance body{};
       // Standing on the square, not in it: the piece's foot is its own local z = 0.
-      body.center[0] = seat.centre.x + seat.normal.x * kHalf;
-      body.center[1] = seat.centre.y + seat.normal.y * kHalf;
-      body.center[2] = seat.centre.z + seat.normal.z * kHalf;
+      body.center[0] = centre.x + normal.x * kHalf;
+      body.center[1] = centre.y + normal.y * kHalf;
+      body.center[2] = centre.z + normal.z * kHalf;
       const float hgt = 1.0f + (height[piece.type] - 1.0f) * options_.pieceHeightScale;
       // Never bigger than the flat board's piece, and smaller where the square is. The
       // measure is the square's mean side rather than its shorter one: an embedding
       // squeezes one axis and stretches the other - a Moebius square is four times longer
       // than it is wide - and a piece sized to the short side there is a speck.
-      const float fit = std::min(std::sqrt(seat.stepU * seat.stepV), 1.0f);
       body.scale[0] = 0.8f * fit;
       body.scale[1] = 0.8f * fit;
       body.scale[2] = 0.8f * fit * hgt;
-      body.quat[0] = seat.quat[0];
-      body.quat[1] = seat.quat[1];
-      body.quat[2] = seat.quat[2];
-      body.quat[3] = seat.quat[3];
+      body.quat[0] = quat[0];
+      body.quat[1] = quat[1];
+      body.quat[2] = quat[2];
+      body.quat[3] = quat[3];
       toFloat4(pc, body.color);
       byShape[static_cast<std::size_t>(shape[piece.type])].push_back(body);
+    };
+    for (const SurfaceSeat& seat : surf.seats()) {
+      const Piece piece = p.at(seat.cell);
+      if (piece.empty()) continue;
+      // The travelling piece is drawn where it currently is, not where it arrived; skip
+      // it here so it is not drawn twice (M17.15).
+      if (anim != nullptr && anim->active() && seat.cell == anim->travellingTo())
+        continue;
+      const float fit = std::min(std::sqrt(seat.stepU * seat.stepV), 1.0f);
+      emitSurfacePiece(piece, seat.centre, seat.normal, seat.quat, fit,
+                       seat.cell == checkCell_);
     }
-    (void)anim;  // the warped route is M17's remaining piece; a mover shows at its seat
+    // The mover, part-way along the surface between its start and its end.
+    if (anim != nullptr && anim->active()) {
+      const Piece moving = p.at(anim->travellingTo());
+      if (!moving.empty()) {
+        const SurfaceMoveSample s =
+            surfaceMoveSample(anim->path(), surf, anim->progress());
+        emitSurfacePiece(moving, s.position, s.normal, s.quat, s.fit,
+                         anim->travellingTo() == checkCell_);
+      }
+    }
 
     std::size_t total = 0;
     for (const auto& group : byShape) total += group.size();

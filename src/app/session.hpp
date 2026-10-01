@@ -66,6 +66,14 @@ class Session {
   /// the pieces drawn on top of it stayed put.
   [[nodiscard]] view::OrbitCamera camera() const noexcept;
 
+  /// `camera()`'s own blend, against an arbitrary placement set and its bounds instead of
+  /// the session's flat layout - what the geometry view passes, built from
+  /// `render::PlaySurface::seats()` (M17.16). One definition either way, so the move
+  /// camera cannot say something different from what `camera()` already promises.
+  [[nodiscard]] view::OrbitCamera cameraOver(
+      const std::vector<view::Placement>& placements, const view::Bounds& scene,
+      const view::ViewConfig& cfg) const noexcept;
+
   /// How far the view has stepped back off the board, 0 to 1. Pause is the player
   /// looking up from the position, not a panel landing on top of it.
   /// Camera pull-back, 0 at the board and growing as the shell steps away from it: 1 at
