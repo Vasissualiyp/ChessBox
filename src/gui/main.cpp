@@ -229,7 +229,8 @@ view::OrbitCamera boardCamera(const app::Shell& shell) {
         if (view::length(travel) < 1e-5f) travel = here.normal;  // any tangent will do
         const view::Bounds b = surf.bounds();
         const float span = std::max({b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ});
-        return render::surfaceChaseCamera(here, travel, std::max(2.0f, 0.4f * span));
+        return render::surfaceChaseCamera(here, travel, std::max(2.0f, 0.4f * span),
+                                          shell.settings().followUpright);
       }
       return session->cameraOver(surfacePlacements(surf), surf.bounds(),
                                  view::ViewConfig{});
@@ -968,8 +969,15 @@ int main(int argc, char** argv) {
         const CellId followed = session->animation().travellingTo();
         if (followed != lastAlignCell) {
           lastAlignCell = followed;
-          alignTarget =
-              render::alignSlideU(session->variant(), followed, session->camera());
+          // The route's travel, sampled a little ahead, is what the search orients by.
+          const render::PlaySurface surf =
+              render::PlaySurface::build(session->variant(), poseFrom(st));
+          const view::MovePath& path = session->animation().path();
+          const float t = session->animation().progress();
+          const view::Vec3 here = render::surfaceMoveSample(path, surf, t).position;
+          const view::Vec3 ahead =
+              render::surfaceMoveSample(path, surf, std::min(1.0f, t + 0.05f)).position;
+          alignTarget = render::alignSlideU(session->variant(), followed, ahead - here);
         }
       } else {
         lastAlignCell = kInvalidCell;

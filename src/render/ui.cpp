@@ -1243,18 +1243,31 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
           shell.settings().geometryGhost = ghost ? 1.0f : 0.35f;
           request.settingsChanged = true;
         }
-        // ALIGN (M17.17): turn the ring so the piece a followed move travels on presents
-        // its outer face to the camera. Offered only while following, and only on a
-        // closed ring - an open tube or ribbon has no inner/outer side to turn.
+        // ANTI-CLIP (M17.17): turn the ring so the piece a followed move travels on
+        // presents its outer face to the camera, with nothing of the shape between.
+        // Offered only while following, and only on a closed ring - an open tube or
+        // ribbon has no inner/outer side to turn. On by default; a player who wants the
+        // raw view turns it off here or in settings.
         if (shell.settings().cameraMode != "off" &&
             PlaySurface::slidesAlongRanks(session.variant())) {
           ImGui::SameLine();
           const bool aligned = shell.settings().geometryAlign;
-          if (button("ALIGN", t, px(84), aligned, true, true, display)) {
+          if (button("NOCLIP", t, px(92), aligned, true, true, display)) {
             shell.settings().geometryAlign = !aligned;
             request.settingsChanged = true;
           }
         }
+      }
+    }
+    // The two follow camera styles (M17.16, revised): upright (the piece's own up up the
+    // screen) or the tilt that lets it ride the shape. Offered whenever the camera
+    // follows a move, on any shape.
+    if (shell.settings().cameraMode != "off" && shell.settings().geometryView) {
+      ImGui::SameLine();
+      const bool upright = shell.settings().followUpright;
+      if (button(upright ? "UPRIGHT" : "TILT", t, px(92), upright, true, true, display)) {
+        shell.settings().followUpright = !upright;
+        request.settingsChanged = true;
       }
     }
     ImGui::SameLine();

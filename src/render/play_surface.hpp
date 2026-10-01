@@ -40,22 +40,24 @@ struct SurfaceMoveSample {
 [[nodiscard]] SurfaceMoveSample surfaceMoveSample(const view::MovePath& path,
                                                   const PlaySurface& surf, float t);
 
-/// The slide offset, in cells, that turns `target`'s cell most toward `camera`: the
-/// facing search behind ALIGN (M17.17). For a closed ring (`torus`, `klein`) only - an
-/// open tube or ribbon has no inner/outer side to turn, so it returns 0. A search rather
-/// than a closed form: the embeddings have no general inverse for "which slide makes this
-/// point face outward", and a 16-point sweep is cheap.
+/// The slide offset, in cells, that best keeps `target`'s cell visible to a camera
+/// following a move along `travel`: it maximises the cell's `facing` (its outward normal
+/// toward the camera) and prefers offsets where nothing else on the shape lies between
+/// the two. This is the anti-clip search (M17.17, revised): for a closed ring (`torus`,
+/// `klein`) only - an open tube or ribbon has no inner/outer side to turn, so it returns
+/// 0.
 [[nodiscard]] float alignSlideU(const VariantSpec& v, CellId target,
-                                const view::OrbitCamera& camera);
+                                const view::Vec3& travel);
 
-/// A chase camera for a followed move on the shape (M17.16, revised): the piece centred,
-/// the camera behind it along `travel`, and the frame rolled so the piece's own up (its
-/// surface normal) is the view's up - so the piece stands vertically in the middle of the
-/// view, the way a third-person follow would. One camera for one continuous move; the
-/// route is `surfaceMoveSample`'s, never cut at a seam.
+/// A chase camera for a followed move on the shape (M17.16, revised): the piece centred
+/// and the camera behind it along `travel`. With `upright` the frame is rolled so the
+/// piece's own up (its surface normal) is the view's up - the piece stands vertically in
+/// the middle of the view. Without it the frame is not rolled, so the piece tilts and can
+/// flip with the shape. One camera for one continuous move; the route is
+/// `surfaceMoveSample`'s, never cut at a seam.
 [[nodiscard]] view::OrbitCamera surfaceChaseCamera(const SurfaceMoveSample& piece,
                                                    const view::Vec3& travel,
-                                                   float distance);
+                                                   float distance, bool upright);
 
 /// How many corners a square is cut into per axis. A square on a curved board is not a
 /// square: it is a patch of the surface, and this is how finely that patch is sampled.
@@ -144,6 +146,12 @@ class PlaySurface {
   /// resolves to the cell the cursor is over and never falls between two squares.
   [[nodiscard]] CellId pick(const view::OrbitCamera& camera, float width, float height,
                             float px, float py) const;
+
+  /// True when any drawn tile lies between `eye` and `target` (nearer than it by more
+  /// than `eps`) - the anti-clip test that keeps the shape from coming between a followed
+  /// piece and the camera (M17.16 revision).
+  [[nodiscard]] bool blocked(const view::Vec3& eye, const view::Vec3& target,
+                             float eps) const;
 
  private:
   /// The three- and four-dimensional shapes (M17.12): one flat tile per cell from

@@ -719,38 +719,50 @@ TEST_CASE("align turns an inner-ring cell toward the camera", "[render]") {
   // side, so it returns 0.
   const VariantSpec& v = *new VariantSpec(test::loadVariant("torus"));
   const PlaySurface rest = PlaySurface::build(v);
-  const view::OrbitCamera cam = view::OrbitCamera::frame(rest.bounds(), 1.3f, 0.0f);
-  const auto facingOf = [&](const PlaySurface& s, CellId c) {
+  const auto seatFor = [&](const PlaySurface& s, CellId c) -> const SurfaceSeat* {
     for (const SurfaceSeat& seat : s.seats()) {
-      if (seat.cell != c) continue;
-      const view::Vec3 toCam = view::normalize(cam.eye() - seat.centre);
-      return view::dot(seat.normal, toCam);
+      if (seat.cell == c) return &seat;
     }
-    return 0.0f;
+    return nullptr;
+  };
+  // Where the chase camera would sit for a piece travelling along `travel`, and the
+  // direction from the piece to it.
+  const auto eyeFor = [](const SurfaceSeat& seat, const view::Vec3& travel) {
+    const view::Vec3 toEye = view::normalize(travel * -1.0f + seat.normal * 0.35f);
+    return std::pair{seat.centre + toEye * 6.0f, toEye};
   };
 
-  // The cell facing most away from the camera at rest: the case the feature exists to
-  // fix.
+  // The cell facing most away from a nominal camera at rest: the case to fix.
+  const view::Vec3 restTravel{1.0f, 0.0f, 0.0f};
   CellId inner = kInvalidCell;
-  float worst = 0.0f;
+  float worst = 1e9f;
   for (const SurfaceSeat& seat : rest.seats()) {
-    const float f = facingOf(rest, seat.cell);
-    if (f < worst) {
-      worst = f;
+    const float facing = view::dot(seat.normal, eyeFor(seat, restTravel).second);
+    if (facing < worst) {
+      worst = facing;
       inner = seat.cell;
     }
   }
   REQUIRE(inner != kInvalidCell);
-  const float offset = alignSlideU(v, inner, cam);
+
+  const SurfaceSeat* base = seatFor(rest, inner);
+  REQUIRE(base != nullptr);
+  const view::Vec3 travel = byQuat(base->quat, view::Vec3{1, 0, 0});  // a real tangent
+  const float offset = alignSlideU(v, inner, travel);
   SurfacePose pose;
   pose.slideU = offset;
   const PlaySurface turned = PlaySurface::build(v, pose);
-  CHECK(facingOf(turned, inner) > worst);
-  CHECK(facingOf(turned, inner) > 0.0f);
+  const SurfaceSeat* fixed = seatFor(turned, inner);
+  REQUIRE(fixed != nullptr);
+  const auto [eye, toEye] = eyeFor(*fixed, travel);
+  const float facing = view::dot(fixed->normal, toEye);
+  CHECK(facing > worst);  // the search improves the facing it targets
+  CHECK(facing > 0.0f);   // and lands the piece on the camera's side
+  CHECK_FALSE(turned.blocked(eye, fixed->centre, 0.02f));  // nothing between the two
 
   // An open tube/ribbon has nothing to align.
-  CHECK(alignSlideU(test::loadVariant("cylinder"), 0, cam) == 0.0f);
-  CHECK(alignSlideU(test::loadVariant("mobius"), 0, cam) == 0.0f);
+  CHECK(alignSlideU(test::loadVariant("cylinder"), 0, travel) == 0.0f);
+  CHECK(alignSlideU(test::loadVariant("mobius"), 0, travel) == 0.0f);
 }
 
 TEST_CASE("Klein's normal field is continuous except at its seam", "[render]") {
@@ -817,10 +829,12 @@ TEST_CASE("Klein's normal field is continuous except at its seam", "[render]") {
   }
 }
 
-TEST_CASE("the chase camera centres a piece and stands it up", "[render]") {
-  // M17.16 (revised): following a move is one continuous chase, the piece centred with
-  // its own up (surface normal) pointing up the screen - so it reads as following behind
-  // it.
+TEST_CASE("the chase camera centres a piece, and stands it up or lets it tilt",
+          "[render]") {
+  // M17.16 (revised): following a move is one continuous chase, the piece centred.
+  // Upright mode also rolls the frame so the piece's own up (surface normal) points up
+  // the screen; the tilt mode does not, so the piece rides the shape (the other camera
+  // mode).
   const VariantSpec& v = *new VariantSpec(test::loadVariant("torus"));
   const PlaySurface surf = PlaySurface::build(v);
   const float w = 1000.0f;
@@ -832,7 +846,7 @@ TEST_CASE("the chase camera centres a piece and stands it up", "[render]") {
     piece.position = seat.centre;
     piece.normal = seat.normal;
     const view::Vec3 travel = byQuat(seat.quat, view::Vec3{1, 0, 0});
-    const view::OrbitCamera cam = surfaceChaseCamera(piece, travel, 4.0f);
+    const view::OrbitCamera cam = surfaceChaseCamera(piece, travel, 4.0f, true);
     const view::OrbitCamera::ScreenPoint sp = cam.project(piece.position, aspect, w, h);
     REQUIRE(sp.visible);
     CHECK(std::abs(sp.x - w * 0.5f) < 1.0f);
@@ -842,6 +856,14 @@ TEST_CASE("the chase camera centres a piece and stands it up", "[render]") {
         cam.project(piece.position + piece.normal, aspect, w, h);
     CHECK(up.y < sp.y);
     CHECK(std::abs(up.x - sp.x) < 8.0f);
+
+    // The tilt mode centres the piece too, but does not roll: world up stays screen up,
+    // so the piece is not forced vertical.
+    const view::OrbitCamera tilt = surfaceChaseCamera(piece, travel, 4.0f, false);
+    CHECK_THAT(tilt.roll, WithinAbs(0.0f, 1e-6f));
+    const view::OrbitCamera::ScreenPoint tsp = tilt.project(piece.position, aspect, w, h);
+    CHECK(std::abs(tsp.x - w * 0.5f) < 1.0f);
+    CHECK(std::abs(tsp.y - h * 0.5f) < 1.0f);
   }
 }
 

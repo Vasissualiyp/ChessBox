@@ -1216,3 +1216,27 @@ sliced-`t6` view) and the M17.5 "no surface coordinates or seam rails yet" note.
   view, the way a third-person follow reads. `main::boardCamera` uses it whenever a shot is
   in flight on the surface and the settled framing otherwise. Test: every seat, projected
   through the chase, is centred with its normal pointing up the screen.
+
+---
+
+## Status: anti-clip by default, and two follow camera modes (2026-09-30)
+
+Play then asked for the camera work to be the default, not opt-in, and for a choice of two
+follow styles.
+
+- **Anti-clip is on by default.** `Settings::geometryAlign` now defaults true and is the
+  anti-clip: while following, `render::alignSlideU` searches slide offsets and scores each by
+  (a) whether `PlaySurface::blocked` finds anything of the shape between the camera and the
+  piece, then (b) the piece's `facing` - so a piece on a torus's inner ring is turned to the
+  outer side rather than the camera clipping through the tube. The `NOCLIP` rail button
+  toggles it, and the camera settings carry the same checkbox. `alignSlideU` now takes the
+  route's travel direction and builds the camera its search is scored against.
+- **Two follow modes.** `Settings::followUpright` (default true) makes the chase roll the
+  frame so the piece's surface normal is the view's up - the piece stands vertically in the
+  middle of the view. With it off the frame is not rolled, so the piece tilts and can flip
+  with the shape. The `UPRIGHT`/`TILT` rail button and a settings checkbox choose between
+  them. Both centre the piece and sit the camera behind it.
+
+Tests: the anti-clip search now checks `blocked` returns false for the chosen offset and the
+facing is positive; the chase test covers both the upright roll and the tilt mode's centred,
+unrolled framing. `tests/render/test_play_surface.cpp`.

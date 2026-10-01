@@ -866,6 +866,8 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   }
   ImGui::BeginDisabled(s.cameraMode == "off");
   ImGui::SliderFloat("Follow strength", &s.followStrength, 0.0f, 1.0f, "%.2f");
+  ImGui::Checkbox("Keep the followed piece upright", &s.followUpright);
+  ImGui::Checkbox("Stop the shape clipping the followed piece", &s.geometryAlign);
   ImGui::EndDisabled();
   ImGui::PushFont(small);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));

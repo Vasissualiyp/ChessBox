@@ -380,7 +380,8 @@ SurfaceMoveSample surfaceMoveSample(const view::MovePath& path, const PlaySurfac
 }
 
 view::OrbitCamera surfaceChaseCamera(const SurfaceMoveSample& piece,
-                                     const view::Vec3& travel, float distance) {
+                                     const view::Vec3& travel, float distance,
+                                     bool upright) {
   view::OrbitCamera cam;
   cam.target = piece.position;
   cam.distance = std::max(0.5f, distance);
@@ -392,6 +393,7 @@ view::OrbitCamera surfaceChaseCamera(const SurfaceMoveSample& piece,
   const view::Vec3 toEye = view::normalize(forward * -1.0f + piece.normal * 0.35f);
   cam.pitch = std::asin(std::clamp(toEye.z, -0.99f, 0.99f));
   cam.yaw = std::atan2(toEye.x, -toEye.y);
+  if (!upright) return cam;  // the tilt mode: no roll, so the piece rides the shape
   // Roll so the piece's own up is screen up: the angle from the unrolled up to the
   // normal's component perpendicular to the view direction.
   const view::Vec3 viewDir = toEye * -1.0f;  // eye -> target, unit
@@ -407,29 +409,41 @@ view::OrbitCamera surfaceChaseCamera(const SurfaceMoveSample& piece,
   return cam;
 }
 
-float alignSlideU(const VariantSpec& v, CellId target, const view::OrbitCamera& camera) {
+float alignSlideU(const VariantSpec& v, CellId target, const view::Vec3& travel) {
   // Only a closed ring has an inner/outer side worth turning.
   if (!PlaySurface::slidesAlongRanks(v)) return 0.0f;
   const int nx = static_cast<int>(v.dims.extent(0));
   const float period = 2.0f * static_cast<float>(nx);
-  const view::Vec3 eye = camera.eye();
+  view::Vec3 fwd = travel;
+  if (view::length(fwd) < 1e-5f) fwd = view::Vec3{0.0f, -1.0f, 0.0f};
+  fwd = view::normalize(fwd);
+
   float best = 0.0f;
-  float bestFacing = -2.0f;
+  float bestScore = -1e9f;
   for (int i = 0; i < 16; ++i) {
     SurfacePose pose;
     pose.slideU = period * static_cast<float>(i) / 16.0f;
     const PlaySurface s = PlaySurface::build(v, pose);
-    for (const SurfaceSeat& seat : s.seats()) {
-      if (seat.cell != target) continue;
-      view::Vec3 toCam = eye - seat.centre;
-      if (view::length(toCam) < 1e-6f) break;
-      toCam = view::normalize(toCam);
-      const float facing = view::dot(seat.normal, toCam);
-      if (facing > bestFacing) {
-        bestFacing = facing;
-        best = pose.slideU;
+    const SurfaceSeat* seat = nullptr;
+    for (const SurfaceSeat& t : s.seats()) {
+      if (t.cell == target) {
+        seat = &t;
+        break;
       }
-      break;
+    }
+    if (seat == nullptr) continue;
+    const view::Bounds b = s.bounds();
+    const float span = std::max({b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ});
+    // Where the chase camera would sit for this candidate, and whether the shape comes
+    // between it and the piece.
+    const view::Vec3 toEye = view::normalize(fwd * -1.0f + seat->normal * 0.35f);
+    const view::Vec3 eye = seat->centre + toEye * (0.6f * span);
+    const bool occluded = s.blocked(eye, seat->centre, 0.02f);
+    const float facing = view::dot(seat->normal, toEye);
+    const float score = (occluded ? -10.0f : 0.0f) + facing;
+    if (score > bestScore) {
+      bestScore = score;
+      best = pose.slideU;
     }
   }
   return best;
@@ -629,6 +643,56 @@ CellId PlaySurface::pick(const view::OrbitCamera& camera, float width, float hei
     }
   }
   return best;
+}
+
+bool PlaySurface::blocked(const view::Vec3& eye, const view::Vec3& target,
+                          float eps) const {
+  const view::Vec3 delta = target - eye;
+  const float len = view::length(delta);
+  if (len < 1e-5f) return false;
+  const view::Vec3 dir = delta * (1.0f / len);
+  const auto hit = [&](const view::Vec3& a, const view::Vec3& b, const view::Vec3& c,
+                       float& t) {
+    const view::Vec3 e1 = b - a;
+    const view::Vec3 e2 = c - a;
+    const view::Vec3 pv = view::cross(dir, e2);
+    const float det = view::dot(e1, pv);
+    if (std::abs(det) < 1e-9f) return false;
+    const float inv = 1.0f / det;
+    const view::Vec3 tv = eye - a;
+    const float uu = view::dot(tv, pv) * inv;
+    if (uu < 0.0f || uu > 1.0f) return false;
+    const view::Vec3 qv = view::cross(tv, e1);
+    const float vv = view::dot(dir, qv) * inv;
+    if (vv < 0.0f || uu + vv > 1.0f) return false;
+    t = view::dot(e2, qv) * inv;
+    return true;
+  };
+  const float limit = len - eps;
+  const auto tri = [&](const view::Vec3& a, const view::Vec3& b, const view::Vec3& c,
+                       const view::Vec3& d) {
+    float t = 0.0f;
+    return (hit(a, b, c, t) || hit(a, c, d, t)) && t > 1e-4f && t < limit;
+  };
+  if (stacked_) {
+    for (const std::array<view::Vec3, 4>& q : quads_) {
+      if (tri(q[0], q[1], q[2], q[3])) return true;
+    }
+    return false;
+  }
+  if (corners_.empty()) return false;
+  const int cv = nz_ * kSubdiv + 1;
+  const auto corner = [&](int i, int j) -> const view::Vec3& {
+    return corners_[static_cast<std::size_t>(i * cv + j)];
+  };
+  for (int i = 0; i + 1 < nx_ * kSubdiv + 1; ++i) {
+    for (int j = 0; j + 1 < cv; ++j) {
+      if (tri(corner(i, j), corner(i + 1, j), corner(i + 1, j + 1), corner(i, j + 1))) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 }  // namespace cb::render

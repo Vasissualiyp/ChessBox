@@ -395,11 +395,15 @@ These are the ones that have actually cost time here, not hypotheticals.
 - **A move on the shape is sampled, not teleported.** `render::surfaceMoveSample` walks the
   seats `view::MoveAnimation::path()` names (a leap arcs, a glide hugs; a seam step is not a
   cut). Following it is **one continuous chase** - `render::surfaceChaseCamera` centres the
-  piece, sits the camera behind it along the travel, and rolls the frame so the piece's own
-  up (its surface normal) is the view's up. `OrbitCamera::roll` is applied in `viewProj`
-  *and* `pickRay` (the one `cameraBasis`), or the draw and the pick disagree; it is 0 for
-  every ordinary view. `ALIGN` (`Settings::geometryAlign`, `torus`/`klein` only) searches a
-  slide offset that turns the followed cell toward the camera (M17.15-M17.17).
+  piece and sits the camera behind it along the travel; `Settings::followUpright` rolls the
+  frame so the piece's own up (its surface normal) is the view's up, or leaves it unrolled so
+  the piece rides the shape. `OrbitCamera::roll` is applied in `viewProj` *and* `pickRay`
+  (the one `cameraBasis`), or the draw and the pick disagree; it is 0 for every ordinary view.
+  **Anti-clip is on by default** (`Settings::geometryAlign`): `render::alignSlideU` searches
+  slide offsets that keep the followed cell facing the camera with nothing of the shape
+  between (`PlaySurface::blocked`), so a piece on a torus's inner ring is turned to the
+  outer side rather than the camera clipping through the tube. `torus`/`klein` only
+  (M17.15-M17.17).
 - **A normal field is built by a continuity walk, not a per-point test.** On a non-orientable
   shape one flip is unavoidable; `PlaySurface::build` seeds file 0 against the cross-section
   centroid and then makes each next sample agree with its neighbour, never closing the loop,

@@ -67,7 +67,12 @@ struct Settings {
   float geometryGhost{1.0f};
   /// Turn the ring so the piece a followed move travels on presents its outer face to the
   /// camera, rather than the camera clipping through the tube wall to see it (M17.17).
-  bool geometryAlign{false};
+  /// **On by default**: the clipping is a defect, not a look (M17.16 revision).
+  bool geometryAlign{true};
+  /// When following a move, hold the piece upright - its surface normal up the screen -
+  /// rather than letting it tilt and flip with the shape. The tilt is the other camera
+  /// mode and has its own charm, so this is a stated choice (M17.16 revision).
+  bool followUpright{true};
   /// The align feature's own eased slide offset, in cells, added on top of the player's
   /// manual `geometrySlideU`. Transient: not written to disk, so a reload starts aligned
   /// to nothing.
