@@ -86,6 +86,8 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.showCheck = asBool(value);
     else if (key == "show_seams")
       s.showSeams = asBool(value);
+    else if (key == "show_seam_legend")
+      s.showSeamLegend = asBool(value);
     else if (key == "show_coordinates")
       s.showCoordinates = asBool(value);
     else if (key == "piece_height_scale")
@@ -166,6 +168,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "show_last_move = " << boolText(showLastMove) << '\n';
   out << "show_check = " << boolText(showCheck) << '\n';
   out << "show_seams = " << boolText(showSeams) << '\n';
+  out << "show_seam_legend = " << boolText(showSeamLegend) << '\n';
   out << "show_coordinates = " << boolText(showCoordinates) << '\n';
   out << "piece_height_scale = " << pieceHeightScale << '\n';
   out << "piece_icons = " << pieceIcons << '\n';

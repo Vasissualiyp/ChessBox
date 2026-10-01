@@ -33,6 +33,8 @@ struct Settings {
   /// Draw cyan edges where the board is glued to itself. Off only for a player who
   /// already knows the geometry by heart.
   bool showSeams{true};
+  /// Draw the corner legend that names what the cyan seam colours mean (M14.4).
+  bool showSeamLegend{true};
   bool showCoordinates{true};
   /// How much taller a valuable piece stands. 0 makes every piece the same height.
   float pieceHeightScale{1.0f};

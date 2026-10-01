@@ -907,6 +907,9 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::Checkbox("Mark the last move", &s.showLastMove);
   ImGui::Checkbox("Warn when in check", &s.showCheck);
   ImGui::Checkbox("Show seams on glued boards", &s.showSeams);
+  ImGui::BeginDisabled(!s.showSeams);
+  ImGui::Checkbox("Name the seam colours", &s.showSeamLegend);
+  ImGui::EndDisabled();
   ImGui::Checkbox("Show coordinates", &s.showCoordinates);
   ImGui::SliderFloat("Piece height", &s.pieceHeightScale, 0.0f, 2.0f, "%.2f");
   ImGui::PushFont(small);
@@ -1057,7 +1060,8 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       before.vsync != s.vsync || before.frameCap != s.frameCap ||
       before.showLegalMoves != s.showLegalMoves ||
       before.showLastMove != s.showLastMove || before.showCheck != s.showCheck ||
-      before.showSeams != s.showSeams || before.showCoordinates != s.showCoordinates ||
+      before.showSeams != s.showSeams || before.showSeamLegend != s.showSeamLegend ||
+      before.showCoordinates != s.showCoordinates ||
       before.pieceHeightScale != s.pieceHeightScale || before.flatView != s.flatView ||
       before.pieceIcons != s.pieceIcons || before.animateMoves != s.animateMoves ||
       before.theme != s.theme || before.animationSpeed != s.animationSpeed ||

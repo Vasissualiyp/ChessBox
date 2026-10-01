@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include <span>
@@ -63,5 +64,19 @@ class SeamMap {
 /// The portal ramp, exposed so the same colour can be used by anything that has to
 /// agree with the board: the move animation's portals, a legend, a minimap.
 Rgba seamRampColor(const Theme& theme, float t);
+
+/// One line of the on-screen seam legend: a drawn axis that is glued, and the colour its
+/// edges are drawn in. The legend is what makes "the a-file and the h-file are the same
+/// edge" sayable in the corner rather than something a player has to be told (M14.4).
+struct SeamLegendEntry {
+  std::string axis;  ///< the axis's own name, e.g. "file"
+  Rgba color;
+};
+
+/// One entry per glued drawn axis, or empty when nothing is glued. Mirrors are excluded -
+/// they are silver and lead nowhere, so a hue that promised a destination would be a lie.
+[[nodiscard]] std::vector<SeamLegendEntry> seamLegend(const SeamMap& seams,
+                                                      const ViewConfig& cfg,
+                                                      const DimSpec& dims);
 
 }  // namespace cb::view

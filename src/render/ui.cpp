@@ -21,6 +21,7 @@
 #include "render/piece_mesh.hpp"
 #include "render/play_surface.hpp"
 #include "render/ui_widgets.hpp"
+#include "view/seams.hpp"
 
 namespace cb::render {
 using namespace widgets;
@@ -1069,6 +1070,28 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       ImGui::TextUnformatted(legend.c_str());
       ImGui::PopStyleColor();
       ImGui::PopFont();
+    }
+    // Name the seam colours, so "the a-file and the h-file are the same edge" is
+    // readable off the board rather than something a player has to be told (M14.4). The
+    // ramp is per-cell, so one swatch per glued axis is the honest reduction: it says
+    // *which* edges meet, and the board's gradient says where along them.
+    if (shell.settings().showSeams && shell.settings().showSeamLegend &&
+        !v.geom.isBox() && !session.seams().empty()) {
+      const std::vector<view::SeamLegendEntry> key =
+          view::seamLegend(session.seams(), session.viewConfig(), v.dims);
+      if (!key.empty()) {
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const float x = ImGui::GetCursorScreenPos().x;
+        float y = ImGui::GetCursorScreenPos().y;
+        for (const view::SeamLegendEntry& e : key) {
+          dl->AddRectFilled(ImVec2(x, y + px(3)), ImVec2(x + px(12), y + px(13)),
+                            u32(e.color), px(2));
+          const std::string label = "the " + e.axis + " edges are the same edge";
+          dl->AddText(ImVec2(x + px(18), y), u32(t.boneFaint), label.c_str());
+          y += px(18);
+        }
+        ImGui::Dummy(ImVec2(0, px(18) * static_cast<float>(key.size())));
+      }
     }
   }
   ImGui::End();

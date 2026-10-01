@@ -151,8 +151,18 @@ me all the boards" into the full library. Headless tests: a first run opens the 
 only once; the path starts at standard and each step is captioned; surprise picks a
 non-standard library variant. `chessbox_gui _ --shot o.ppm --screen welcome` captures it.
 
-Planned but not built: M14.3 (the played tutorial), M14.4 (the seam legend, axis explainer,
-per-piece reachability and glossary), M14.5 (the accessibility pass). It reads variant
+**M14.4 (legibility) started (2026-10-01).** The seam legend is built:
+`view::seamLegend(seams, cfg, dims)` reduces the per-cell portal ramp to one entry per glued
+drawn axis (`SeamMap` already colours both ends of an identification the same), mirrors are
+excluded because they lead nowhere, and the game HUD draws the swatch and "the file edges
+are the same edge" under the axis names when `Settings::showSeams && showSeamLegend` on a
+glued board. Pinned by `tests/unit/view/test_seams.cpp` (standard empty, cylinder one "file"
+entry, torus file+rank, Moebius's twisted file, mirrorbox empty). The axis explainer already
+named the screen axes; it now sits beside the seam legend. Still to build: per-piece
+reachability and the glossary with the "no undefined terms" test (acceptance fact 3).
+
+Planned but not built: M14.3 (the played tutorial), the rest of M14.4 (per-piece
+reachability, glossary), M14.5 (the accessibility pass). It reads variant
 descriptions and difficulty (already in the variant data), the move preview
 (`expandAtom`/`tracePath`, M4/M5) and the visuals M11/M13 produce; it does **not** depend on
 M7's editor, so Release Wave 2 can run M14 and M7 in either order.

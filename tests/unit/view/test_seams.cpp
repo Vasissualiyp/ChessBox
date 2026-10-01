@@ -108,3 +108,29 @@ TEST_CASE("a mirror is silver and sends you back to yourself", "[unit][view]") {
     CHECK(sameColor(f.color, theme().mirrorEdge));
   }
 }
+
+TEST_CASE("the legend names the axis of each glued edge, and hides mirrors",
+          "[unit][view]") {
+  const auto legendFor = [](const char* name) {
+    const VariantSpec v = test::loadVariant(name);
+    const SeamMap m = SeamMap::build(v, ViewConfig::forBoard(v.dims), theme());
+    return seamLegend(m, ViewConfig::forBoard(v.dims), v.dims);
+  };
+
+  // A plain box glues nothing, so there is nothing to explain.
+  CHECK(legendFor("standard").empty());
+  // A cylinder glues one axis; a torus both.
+  const auto cyl = legendFor("cylinder");
+  REQUIRE(cyl.size() == 1);
+  CHECK(cyl[0].axis == "file");
+  const auto torus = legendFor("torus");
+  REQUIRE(torus.size() == 2);
+  CHECK(torus[0].axis == "file");
+  CHECK(torus[1].axis == "rank");
+  // A Moebius band has one glued axis, twist and all; the legend still names it.
+  const auto mob = legendFor("mobius");
+  REQUIRE(mob.size() == 1);
+  CHECK(mob[0].axis == "file");
+  // A mirror leads nowhere, so a colour that promised a destination would be a lie.
+  CHECK(legendFor("mirrorbox").empty());
+}

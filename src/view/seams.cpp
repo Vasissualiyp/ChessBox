@@ -140,4 +140,25 @@ std::span<const SeamFace> SeamMap::at(CellId cell) const {
   return {faces_.data() + (lo - faces_.begin()), static_cast<std::size_t>(hi - lo)};
 }
 
+std::vector<SeamLegendEntry> seamLegend(const SeamMap& seams, const ViewConfig& cfg,
+                                        const DimSpec& dims) {
+  std::vector<SeamLegendEntry> out;
+  for (const SeamFace& f : seams.faces()) {
+    if (f.kind != SeamKind::Glued) continue;  // a mirror leads nowhere; no hue to explain
+    const std::string axis =
+        static_cast<std::size_t>(f.screenAxis) < cfg.screenAxes.size()
+            ? std::string(dims.name(cfg.screenAxes[f.screenAxis]))
+            : std::string("?");
+    bool seen = false;
+    for (const SeamLegendEntry& e : out) {
+      if (e.axis == axis) {
+        seen = true;
+        break;
+      }
+    }
+    if (!seen) out.push_back({axis, f.color});
+  }
+  return out;
+}
+
 }  // namespace cb::view
