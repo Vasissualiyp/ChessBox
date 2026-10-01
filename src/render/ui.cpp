@@ -1224,6 +1224,25 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
         shell.settings().geometryView = !on;
         request.settingsChanged = true;
       }
+      // Turn the shape inside out and back (M17.7). Only while the shape is showing, and
+      // lit while it is inverted. It sets a target; the front end eases the pose to it,
+      // so a pose stays a pure function of its number.
+      if (on) {
+        ImGui::SameLine();
+        const bool inverted = shell.settings().geometryInvert;
+        if (button("INVERT", t, px(92), inverted, true, true, display)) {
+          shell.settings().geometryInvert = !inverted;
+          request.settingsChanged = true;
+        }
+        // Make the board a ghost, so the far side of the shape and the pieces on it show
+        // through the near side (M17.10). The pieces stay opaque.
+        ImGui::SameLine();
+        const bool ghost = shell.settings().geometryGhost < 0.99f;
+        if (button("GHOST", t, px(84), ghost, true, true, display)) {
+          shell.settings().geometryGhost = ghost ? 1.0f : 0.35f;
+          request.settingsChanged = true;
+        }
+      }
     }
     ImGui::SameLine();
     if (button("MENU", t, px(78), false, false, true, display)) shell.pause();

@@ -88,4 +88,21 @@ if(TARGET chessbox_gui)
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(gui-slide PROPERTIES LABELS "render;gui" TIMEOUT 120
     ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  # Fully inside out: what was the hole is now the outside, and every piece stands on the
+  # outside with it (M17.7). Validation-clean and a picture, not a blank or a tangle.
+  add_test(NAME gui-invert
+    COMMAND chessbox_gui torus
+            --shot ${CMAKE_BINARY_DIR}/render-captures/gui-invert.ppm
+            --geometry --evert 1
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(gui-invert PROPERTIES LABELS "render;gui" TIMEOUT 120
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  # A ghosted board: the far side of the ring shows through the near side (M17.10).
+  add_test(NAME gui-ghost
+    COMMAND chessbox_gui torus
+            --shot ${CMAKE_BINARY_DIR}/render-captures/gui-ghost.ppm
+            --geometry --ghost 0.4
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(gui-ghost PROPERTIES LABELS "render;gui" TIMEOUT 120
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
 endif()

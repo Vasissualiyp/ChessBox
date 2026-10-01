@@ -167,6 +167,7 @@ render::BoardOptions optionsFrom(const app::Settings& s) {
   o.surfaceSlideU = s.geometrySlideU;
   o.surfaceSlideV = s.geometrySlideV;
   o.surfaceEvert = s.geometryEvert;
+  o.surfaceGhost = s.geometryGhost;
   return o;
 }
 
@@ -206,7 +207,9 @@ void frameBoard(app::Shell& shell) {
     const render::PlaySurface surf =
         render::PlaySurface::build(session->variant(), poseFrom(shell.settings()));
     if (!surf.empty()) {
-      session->frameOn(surf.bounds());
+      // `bounds()` already pads for the pieces, so the camera's own headroom would lift
+      // the look-at off the shape's centre and drop it down the window (M17.11).
+      session->frameOn(surf.bounds(), 0.0f);
       return;
     }
   }
@@ -244,7 +247,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
                  const std::string& script, const std::string& screen, float overtureT,
                  int previewDims, bool clip, int clipFrames, float clipT0, float clipT1,
                  bool cinema, const std::string& followMode, float moveT, int benchFrames,
-                 bool geometry, float evert, float slideU, float slideV) {
+                 bool geometry, float evert, float slideU, float slideV, float ghost) {
   // Captures use default settings, never the person's own. A screenshot that changes
   // because whoever ran it likes a larger interface is not a screenshot of the game -
   // and `ctest -R gui-` would then pass or fail by whose machine it ran on.
@@ -267,6 +270,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
   shell->settings().geometryEvert = evert;
   shell->settings().geometrySlideU = slideU;
   shell->settings().geometrySlideV = slideV;
+  shell->settings().geometryGhost = ghost;
 #ifdef CB_HAVE_IMGUI
   frameBoard(*shell);
 #endif
@@ -536,6 +540,7 @@ int main(int argc, char** argv) {
   float evert = 0.0f;
   float slideU = 0.0f;
   float slideV = 0.0f;
+  float ghost = 1.0f;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "-h" || arg == "--help") {
@@ -560,7 +565,8 @@ int main(int argc, char** argv) {
           "ms/frame.\n"
           "--geometry draws the play board as its own shape (a cylinder, a torus, ...),\n"
           "and --evert 0..1 turns that shape through itself - a torus inside out,\n"
-          "while --slide and --slide-v move the board round the shape, in cells.\n"
+          "while --slide and --slide-v move the board round the shape, in cells, and\n"
+          "--ghost 0.35..1 makes it translucent so the far side shows through.\n"
           "--dims 2..4 is how many dimensions the designer's move preview shows.\n");
       return 0;
     }
@@ -590,6 +596,8 @@ int main(int argc, char** argv) {
       slideU = std::strtof(argv[++i], nullptr);
     else if (arg == "--slide-v" && i + 1 < argc)
       slideV = std::strtof(argv[++i], nullptr);
+    else if (arg == "--ghost" && i + 1 < argc)
+      ghost = std::strtof(argv[++i], nullptr);
     else if (arg == "--follow" && i + 1 < argc)
       followMode = argv[++i];
     else if (arg == "--move-t" && i + 1 < argc)
@@ -606,7 +614,7 @@ int main(int argc, char** argv) {
     return captureFrame(variantName.empty() ? "standard" : variantName, targetPath,
                         script, screen, overtureT, previewDims, !clipDir.empty(),
                         clipFrames, clipT0, clipT1, cinema, followMode, moveT,
-                        benchFrames, geometry, evert, slideU, slideV);
+                        benchFrames, geometry, evert, slideU, slideV, ghost);
   }
 
   auto shell = makeShell();
@@ -750,15 +758,16 @@ int main(int argc, char** argv) {
           break;
         case SDL_EVENT_MOUSE_MOTION:
           if (sliding && shell->hasGame()) {
-            // Drag the board round its own surface: left and right along the files, up
-            // and down along the ranks where the ranks are glued. Roughly a cell per
+            // Drag the board round its own surface: left and right along the ranks, up
+            // and down along the files. On a cylinder the ranks are free, so left/right
+            // does nothing and up/down carries the board (M17.8). Roughly a cell per
             // seventy pixels, and the pose is a pure function of the number, so dragging
             // back retraces it with nothing remembered between frames.
             app::Settings& st = shell->settings();
-            st.geometrySlideU += e.motion.xrel * 0.014f;
             if (render::PlaySurface::slidesAlongRanks(shell->session()->variant())) {
-              st.geometrySlideV += e.motion.yrel * 0.014f;
+              st.geometrySlideV += e.motion.xrel * 0.014f;
             }
+            st.geometrySlideU += e.motion.yrel * 0.014f;
           } else if (panning && shell->hasGame()) {
             // Drag the board with the middle button: slide the look-at point in the
             // camera plane, scaled so it tracks the pixels at any zoom.
@@ -836,11 +845,11 @@ int main(int argc, char** argv) {
               break;
             case SDLK_LEFTBRACKET:
             case SDLK_RIGHTBRACKET:
-              // The turn, for a keyboard: the same pose the drag reaches, in steps.
+              // The turn, for a keyboard: the same target the INVERT button sets, which
+              // the front end then eases the pose towards (M17.7). `]` turns it inside
+              // out, `[` brings it back.
               if (inGame && !twoPlayer && optionsFor(*shell).surface) {
-                app::Settings& st = shell->settings();
-                const float step = e.key.key == SDLK_RIGHTBRACKET ? 0.05f : -0.05f;
-                st.geometryEvert = std::clamp(st.geometryEvert + step, 0.0f, 1.0f);
+                shell->settings().geometryInvert = e.key.key == SDLK_RIGHTBRACKET;
               }
               break;
 #endif
@@ -887,6 +896,20 @@ int main(int argc, char** argv) {
       // Out of focus by the same amount the camera has stepped back, so the two read as
       // one movement. Past the pause it is already fully soft.
       renderer->setBlur(std::min(steppedBack, 1.0f));
+    }
+
+    // Ease the eversion towards the INVERT button's target, over about half a second. The
+    // ramp lives here and not in the pose, so the pose stays a pure function of its
+    // number and a still stays reproducible (M17.7).
+    {
+      app::Settings& st = shell->settings();
+      const float target = st.geometryInvert ? 1.0f : 0.0f;
+      const float step = dt * 2.0f;
+      if (st.geometryEvert < target) {
+        st.geometryEvert = std::min(target, st.geometryEvert + step);
+      } else if (st.geometryEvert > target) {
+        st.geometryEvert = std::max(target, st.geometryEvert - step);
+      }
     }
 
     // Set once the interface has built this frame: the surface view draws the board

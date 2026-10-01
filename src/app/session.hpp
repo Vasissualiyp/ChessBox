@@ -121,7 +121,12 @@ class Session {
   /// from. The geometry view needs this: the shape is a different size from the flat
   /// board and sits somewhere else entirely, so framing on the layout's own bounds
   /// leaves the board off in a corner of the window.
-  void frameOn(const view::Bounds& b);
+  ///
+  /// `headroom` is how far above the box the camera should look - a piece's crown must
+  /// not be clipped. A caller whose bounds already include room for what stands on them
+  /// (the play surface pads for its pieces) passes 0, so the look-at stays on the box's
+  /// centre instead of being lifted off it (M17.11).
+  void frameOn(const view::Bounds& b, float headroom = 1.4f);
 
   /// Look straight down with no perspective, for a machine that would rather not draw
   /// the scene in three dimensions - and for a player who simply prefers a diagram.

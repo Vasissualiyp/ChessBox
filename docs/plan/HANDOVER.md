@@ -105,13 +105,20 @@ interface over the flat board (no camera control, labels showed through).**
 has no coordinate labels or seam rails yet, and the eversion passes through genuinely
 degenerate embeddings (the spindle torus, the cylinder's own fold), drawn honestly.
 
-**Next, and specified**: M17.7-M17.12 in the same plan - an INVERT control with the pieces
-staying on the outside, the drag axes swapped, the slide's lap fixed (it wraps every two
-*cells* instead of two laps, one line in `wrapSlide`), semi-transparent squares (the board
-pipeline has blending off today), the shape centred, and the shapes above two dimensions:
-`torus3d` as nested shells, `hyper4` as a hypercube, `t6` as the quintic. The last one
-generalises `PlaySurface` into a `PlayShape` and should wait for the other five. D ≥ 3 stays a no-op because the
-ordinary extruded view already is the lattice.
+**Next, and specified**: M17.7-M17.12 in the same plan.
+
+**M17.7-M17.11 are built (2026-09-30).** The drag axes are swapped (left/right along the
+ranks, up/down along the files, M17.8); the slide wraps after two laps - `fmod(s, 2*nx)` in
+cells, in `PlaySurface` alone (M17.9); the shape is framed on its own centre with
+`headroom = 0` (M17.11); an `INVERT` button and `]`/`[` set a target the front end eases,
+and the outward normal is chosen away from the shape's axis so pieces stay outside after the
+eversion (M17.7); a `GHOST` button and `--ghost` blend the board through a second pipeline
+with depth writes off (M17.10). Tests and `gui-invert`/`gui-ghost` captures are in.
+
+**Remaining: M17.12, the shapes above two dimensions** - `torus3d` as nested shells,
+`hyper4` as a hypercube, `t6` as the quintic, with the adjacency invariant deciding whether
+each embedding is a board or merely a picture. It generalises `PlaySurface` into a
+`PlayShape` and is its own milestone-sized step; not started.
 
 ### 5. Then Wave 2
 

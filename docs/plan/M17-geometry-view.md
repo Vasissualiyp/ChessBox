@@ -402,3 +402,45 @@ home after a lap, the eversion's identity at rest and its turn at full, continui
 picking following the drawing), `tests/render/test_offscreen_render.cpp` (a
 validation-clean GPU render of `torus` on its surface) and
 `ctest -R "gui-geometry|gui-evert|gui-slide"` (the capture flags).
+
+---
+
+## Status: M17.7 - M17.11 built (2026-09-30)
+
+The next increment, done in the plan's order.
+
+- **M17.8 - the drag axes are the right way round.** Middle-drag left/right slides along
+  the ranks and up/down along the files; the `slidesAlongRanks` gate moved with it, so on
+  a cylinder (ranks free) left/right does nothing and up/down carries the board.
+- **M17.9 - a full lap, not a two-cell one.** The wrap lives in one place, in
+  `PlaySurface`, in cells, as `fmod(s, 2 * nx)` / `fmod(s, 2 * nz)` - the board's own
+  extent. `Settings::sanitize` no longer guesses `fmod(..., 16)`. The test now asserts the
+  period reproduces the board, two cells does not, and a tenth of a cell moves no seat by
+  half a cell.
+- **M17.11 - the shape is centred.** Measured first: the board's centre was ~30 px below
+  the window centre because `OrbitCamera::frame` lifts the look-at by its `headroom` for
+  piece crowns, and `PlaySurface::bounds()` already pads for the pieces, so the target was
+  double-counted. `Session::frameOn` takes a `headroom` and the geometry view passes 0.
+- **M17.7 - INVERT, and pieces that stay outside.** A `INVERT` button beside `SHAPE`
+  (shown while the shape is showing) sets `Settings::geometryInvert`, a *target* the front
+  end eases `geometryEvert` to over ~half a second; `]`/`[` set the same target. The pose
+  stays a pure function of its number. The outward normal is now chosen by the side away
+  from the shape's axis (the cross-section centroid, precomputed once per rank), so the
+  eversion's reversal of the parametrisation's handedness no longer leaves every piece
+  inside the turned-out shape.
+- **M17.10 - GHOST.** `Settings::geometryGhost` (0.35 to 1) with a `GHOST` button and a
+  `--ghost` capture flag. The board mesh's alpha rides in `MeshVertex::color.a`; a second
+  pipeline - same shaders and vertex input, `blendEnable` with src-alpha/one-minus-src-
+  alpha, `depthWriteEnable = false` - draws it after the opaque pieces. The pieces stay
+  opaque. Measured correction to the plan: a ghosted board's luminance *variance* is
+  lower, not higher (blending averages the two sheets); the test asserts the picture
+  changed, is validation-clean, and that `ghost = 1` is bit-identical.
+
+Tests: the M17.7 pieces-outside-the-axis sweep over `evert` 0..1, the M17.11 framing test,
+the M17.10 GPU render (`ghost` differs, `1` is a no-op), and `gui-invert` / `gui-ghost`
+captures. `tests/render/test_play_surface.cpp`, `tests/render/test_offscreen_render.cpp`.
+
+**Remaining: M17.12, the shapes above two dimensions** - `torus3d` as nested shells,
+`hyper4` as a hypercube, `t6` as the quintic, with the adjacency invariant deciding whether
+each embedding is a board or merely a picture. It is its own milestone-sized step and is
+not started.

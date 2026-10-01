@@ -62,6 +62,7 @@ tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID 
 ./build/dev/src/gui/chessbox_gui torus --shot o.ppm --geometry        # the board as its shape
 ./build/dev/src/gui/chessbox_gui torus --shot o.ppm --geometry --evert 1  # ...turned inside out
 ./build/dev/src/gui/chessbox_gui torus --shot o.ppm --geometry --slide 2.5  # ...slid round it
+./build/dev/src/gui/chessbox_gui torus --shot o.ppm --geometry --ghost 0.4  # ...translucent, you see through it
 ```
 
 **A build directory remembers which shell configured it.** One configured under
@@ -335,10 +336,27 @@ These are the ones that have actually cost time here, not hypotheticals.
   standing on this one.
 - **The pose is `SurfacePose`, and it is presentation only** - it never enters
   `VariantId`. `slideU`/`slideV` move the board *along* its surface (middle-drag on the
-  shape, `--slide`/`--slide-v`): sliding one cell along the files is sampling at
-  `u + 1/nx`, so a1 lands exactly where b1 was and a lap of a Moebius band comes home
-  mirrored. `evert` turns the surface through itself (`[`/`]`, `--evert`). Each is pure in
-  its number, like an overture.
+  shape: left/right along the ranks, up/down along the files; `--slide`/`--slide-v`):
+  sliding one cell along the files is sampling at `u + 1/nx`, so a1 lands exactly where b1
+  was and a lap of a Moebius band comes home mirrored. The wrap is `fmod(s, 2 * nx)` in
+  *cells*, in `PlaySurface` alone - `Settings` does not know the board's extent (M17.9).
+  `evert` turns the surface through itself: the `INVERT` button and `]`/`[` set a **target**
+  (`Settings::geometryInvert`) the front end eases `geometryEvert` to, so the pose stays a
+  pure function of its number (M17.7). Both are pure in their numbers, like an overture.
+- **"Outward" is the side away from the shape's axis, not the formula's sign.** The
+  eversion sweeps the ring radius through zero and reverses the parametrisation's
+  handedness, so `cross(dv, du)` alone points *into* the turned-out shape and leaves every
+  piece hidden inside it. `PlaySurface` precomputes the cross-section centroid per rank
+  and flips the normal to point away from it (M17.7).
+- **The geometry view is framed with `headroom = 0`.** `OrbitCamera::frame` lifts the
+  look-at for piece crowns, but `PlaySurface::bounds()` already pads for the pieces, so
+  the default headroom double-counts and drops the shape ~30 px down the window.
+  `Session::frameOn` takes a `headroom` for exactly this (M17.11).
+- **A ghosted board is a second pipeline, not an alpha on the existing one.** `GHOST`
+  (`Settings::geometryGhost`, `--ghost`) puts the board mesh's alpha in
+  `MeshVertex::color.a` and draws it, after the opaque pieces, with `blendEnable` and
+  `depthWriteEnable = false` (`BoardRenderer::surfaceBlendPipeline_`). The pieces stay
+  opaque. Alpha 1 is bit-identical to the opaque path (M17.10).
 - **An 8-cell figure-eight is aliased, and that is why `lemniscateAngle` exists.** Equally
   spaced values of the Klein cross-section's angle land in pairs, which made every other
   file twice the width of its neighbour. The curve is walked at constant speed instead;

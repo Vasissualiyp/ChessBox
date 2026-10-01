@@ -57,6 +57,14 @@ struct Settings {
   /// All three are a pose of the same board - the cells, the moves and the position are
   /// untouched - and each is a pure function of its number, so a capture reproduces.
   float geometryEvert{0.0f};
+  /// The INVERT button's *target*: true asks the front end to ease `geometryEvert` to 1,
+  /// false back to 0. The ramp lives in the front end, not in the pose, so a pose stays a
+  /// pure function of its number and a still stays reproducible (M17.7).
+  bool geometryInvert{false};
+  /// How opaque the geometry view's board mesh is, 1 fully opaque down to `kGhostMin` as
+  /// a ghost, so the far side of the shape and the pieces on it show through. The pieces
+  /// stay opaque; the point is to see them (M17.10).
+  float geometryGhost{1.0f};
   /// Which flat-piece icon set to draw: "faceted" or "primitive". A name rather than an
   /// enum because this layer is below the renderer, where the sets are defined, and a
   /// settings file should stay readable anyway.

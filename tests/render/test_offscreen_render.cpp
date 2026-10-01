@@ -20,6 +20,7 @@
 #include "render/vulkan_context.hpp"
 #ifdef CB_HAVE_IMGUI
 #include "render/overture_scene.hpp"  // derivedSurfaceAt, for the geometry view (M17)
+#include "render/play_surface.hpp"
 #endif
 #include "support/variants.hpp"
 #include "view/theme.hpp"
@@ -591,6 +592,52 @@ TEST_CASE("the geometry view renders the board on its surface", "[render][gpu]")
   CHECK(img->distinctColors() > 8);
   CHECK(img->luminanceVariance() > 20.0);
   REQUIRE(writePpm(*img, capturePath("surface-torus")).has_value());
+}
+
+TEST_CASE("a ghosted board shows the far side through the near side", "[render][gpu]") {
+  // M17.10. The board mesh is drawn after the opaque pieces with depth writes off, so the
+  // far side blends over the near one. The picture gains structure; the pieces, drawn
+  // opaque first, are unaffected.
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("torus"));
+  const Position p = Position::startPosition(v);
+  const view::PositionView snap = view::PositionView::capture(p);
+  auto target = OffscreenTarget::create(gpu().ctx, 512, 384);
+  REQUIRE(target.has_value());
+  auto renderer = BoardRenderer::create(gpu().ctx);
+  REQUIRE(renderer.has_value());
+  BoardOptions options = renderer->options();
+  options.surface = true;
+  renderer->setOptions(options);
+  const view::ViewConfig cfg = view::ViewConfig::forBoard(v.dims);
+  const PlaySurface surf = PlaySurface::build(v);
+  const view::OrbitCamera cam =
+      view::OrbitCamera::frame(surf.bounds(), 512.0f / 384.0f, 0.0f);
+
+  (void)gpu().ctx.takeValidationMessages();
+  const auto opaque = renderer->renderToImage(*target, snap, cfg, cam);
+  REQUIRE(opaque.has_value());
+  REQUIRE(gpu().ctx.validationErrorCount() == 0);
+  const auto opaquePixels = *opaque;  // keep the image, the target is drawn over
+
+  options.surfaceGhost = 0.35f;
+  renderer->setOptions(options);
+  const auto ghost = renderer->renderToImage(*target, snap, cfg, cam);
+  REQUIRE(ghost.has_value());
+  CAPTURE(gpu().ctx.takeValidationMessages());
+  REQUIRE(gpu().ctx.validationErrorCount() == 0);
+  // The far side now contributes, so the picture is different (blending averages the two
+  // sheets, so its variance is lower, not higher - the plan guessed the sign).
+  CHECK(ghost->rgba != opaquePixels.rgba);
+  CHECK(ghost->distinctColors() > 8);
+  REQUIRE(writePpm(*ghost, capturePath("surface-ghost")).has_value());
+
+  // And 1 is a strict no-op: the ghost alpha is the only thing that changed.
+  options.surfaceGhost = 1.0f;
+  renderer->setOptions(options);
+  const auto restored = renderer->renderToImage(*target, snap, cfg, cam);
+  REQUIRE(restored.has_value());
+  CHECK(restored->rgba == opaquePixels.rgba);
 }
 #endif  // CB_HAVE_IMGUI
 

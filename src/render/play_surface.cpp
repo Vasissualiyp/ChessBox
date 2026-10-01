@@ -77,10 +77,12 @@ std::array<float, 4> quatOf(const view::Vec3& ex, const view::Vec3& ey,
 
 /// Every warp in the catalogue repeats after two laps of either lattice axis - one lap
 /// for the orientable ones, two where a seam reverses a coordinate and the board has to
-/// go round twice to come home. Keeping the slide inside that window costs nothing and
-/// stops a long drag grinding the trigonometry down to noise.
-float wrapSlide(float s) {
-  return std::fmod(s, 2.0f);
+/// go round twice to come home. `period` is that distance in *cells* (two laps, `2 * nx`
+/// or `2 * nz`); the wrap lives here, in cells, because only the board knows its own
+/// extent (M17.9). Keeping the slide inside that window costs nothing and stops a long
+/// drag grinding the trigonometry down to noise.
+float wrapSlide(float s, float period) {
+  return std::fmod(s, period);
 }
 
 }  // namespace
@@ -110,13 +112,53 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
 
   // The slide is in cells; the surface is parametrised over the whole board. Taken out of
   // the pose and folded into every sample, so nothing below this line knows about it.
-  const float su = wrapSlide(pose.slideU) / fnx;
-  const float sv = slidesAlongRanks(v) ? wrapSlide(pose.slideV) / fnz : 0.0f;
+  // Two laps is `2 * nx` cells along the files and `2 * nz` along the ranks, so a full
+  // drag carries a1 all the way round and home rather than snapping after two squares.
+  const float su = wrapSlide(pose.slideU, 2.0f * fnx) / fnx;
+  const float sv = slidesAlongRanks(v) ? wrapSlide(pose.slideV, 2.0f * fnz) / fnz : 0.0f;
   pose.slideU = 0.0f;
   pose.slideV = 0.0f;
   const auto at = [&](float u, float vv) { return sample(kind, pose, u + su, vv + sv); };
+
+  // The gapless grid first: every patch and seat is cut from it, the pick ray is tested
+  // against it, and the shape's axis is its cross-section centroid. Sampling the surface
+  // once, up front, is what keeps the three in step - ADR-0011's invariant.
+  const int cu = nx * kSubdiv + 1;
+  const int cv = nz * kSubdiv + 1;
+  s.corners_.reserve(static_cast<std::size_t>(cu * cv));
+  for (int i = 0; i < cu; ++i) {
+    for (int j = 0; j < cv; ++j) {
+      s.corners_.push_back(at(static_cast<float>(i) / static_cast<float>(nx * kSubdiv),
+                              static_cast<float>(j) / static_cast<float>(nz * kSubdiv)));
+    }
+  }
+
+  // The shape's axis at each rank: the centroid of the cross-section. "Outward" at a
+  // point is the side away from it, and that is how the normal stays outward after the
+  // eversion sweeps the ring radius through zero and reverses the parametrisation's
+  // handedness. `cross(dv, du)` alone would leave every piece standing inside the
+  // turned-out shape, hidden and unplayable (M17.7).
+  std::vector<view::Vec3> axisAt(static_cast<std::size_t>(cv));
+  for (int j = 0; j < cv; ++j) {
+    view::Vec3 sum{0.0f, 0.0f, 0.0f};
+    for (int i = 0; i < cu; ++i) {
+      sum = sum + s.corners_[static_cast<std::size_t>(i * cv + j)];
+    }
+    axisAt[static_cast<std::size_t>(j)] = sum * (1.0f / static_cast<float>(cu));
+  }
+  const auto axisRef = [&](float vv) {
+    const float t = vv * static_cast<float>(nz * kSubdiv);
+    const int j0 = std::clamp(static_cast<int>(std::floor(t)), 0, cv - 1);
+    const int j1 = std::min(j0 + 1, cv - 1);
+    const float a = t - static_cast<float>(j0);
+    return axisAt[static_cast<std::size_t>(j0)] * (1.0f - a) +
+           axisAt[static_cast<std::size_t>(j1)] * a;
+  };
   const auto nrm = [&](float u, float vv) {
-    return normalAt(kind, pose, u + su, vv + sv, nx, nz);
+    view::Vec3 n = normalAt(kind, pose, u + su, vv + sv, nx, nz);
+    const view::Vec3 out = at(u, vv) - axisRef(vv);
+    if (view::length(out) > 1e-5f && view::dot(n, out) < 0.0f) n = n * -1.0f;
+    return n;
   };
 
   s.seats_.reserve(static_cast<std::size_t>(nx * nz));
@@ -164,19 +206,6 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
         seat.quat = quatOf(ex, view::cross(seat.normal, ex), seat.normal);
       }
       s.seats_.push_back(seat);
-    }
-  }
-
-  // The gapless grid the pick ray is tested against: the corners of every sub-quad, edge
-  // to edge with no board showing between them, so no pixel over the shape resolves to
-  // nothing. The same surface the patches were cut from, sampled without the inset.
-  const int cu = nx * kSubdiv + 1;
-  const int cv = nz * kSubdiv + 1;
-  s.corners_.reserve(static_cast<std::size_t>(cu * cv));
-  for (int i = 0; i < cu; ++i) {
-    for (int j = 0; j < cv; ++j) {
-      s.corners_.push_back(at(static_cast<float>(i) / static_cast<float>(nx * kSubdiv),
-                              static_cast<float>(j) / static_cast<float>(nz * kSubdiv)));
     }
   }
 

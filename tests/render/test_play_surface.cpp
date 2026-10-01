@@ -274,15 +274,35 @@ TEST_CASE("the board slides round its own surface", "[render]") {
                    WithinAbs(0.0f, 1e-4f));
       }
     }
-    // And a whole lap brings the board home. One lap for the orientable surfaces; a
-    // Moebius band comes back with its ranks reversed and needs a second.
-    SurfacePose lap;
-    lap.slideU = static_cast<float>(2 * nx);
-    const PlaySurface home = PlaySurface::build(v, lap);
+    // A full period - two laps, `2 * nx` cells - brings the board home exactly. The old
+    // wrap was `fmod(s, 2.0f)` in cells, so the board snapped home after *two* squares;
+    // this is the assertion that catches it (M17.9).
+    SurfacePose period;
+    period.slideU = static_cast<float>(2 * nx);
+    const PlaySurface home = PlaySurface::build(v, period);
     for (std::size_t i = 0; i < rest.seats().size(); ++i) {
       CHECK(home.seats()[i].cell == rest.seats()[i].cell);
       CHECK_THAT(dist(home.seats()[i].centre, rest.seats()[i].centre),
                  WithinAbs(0.0f, 1e-3f));
+    }
+    // Two cells is not a lap: the board has moved, it has not come back.
+    SurfacePose two;
+    two.slideU = 2.0f;
+    const PlaySurface moved = PlaySurface::build(v, two);
+    bool differs = false;
+    for (std::size_t i = 0; i < rest.seats().size(); ++i) {
+      if (dist(moved.seats()[i].centre, rest.seats()[i].centre) > 0.1f) differs = true;
+    }
+    CHECK(differs);
+    // Continuity: a slide of a tenth of a cell moves every seat by well under a cell, so
+    // the board travels rather than teleporting.
+    const PlaySurface tiny = PlaySurface::build(v, [] {
+      SurfacePose p;
+      p.slideU = 0.1f;
+      return p;
+    }());
+    for (std::size_t i = 0; i < rest.seats().size(); ++i) {
+      CHECK(dist(tiny.seats()[i].centre, rest.seats()[i].centre) < 0.5f);
     }
   }
 }
@@ -444,6 +464,64 @@ TEST_CASE("only a glued two-dimensional board has a play surface", "[render]") {
   CHECK(PlaySurface::build(test::loadVariant("mirrorbox")).empty());
   CHECK(PlaySurface::build(test::loadVariant("cube5")).empty());
   CHECK_FALSE(PlaySurface::build(test::loadVariant("torus")).empty());
+}
+
+TEST_CASE("a piece stands on the outside at every eversion", "[render]") {
+  // M17.7. The eversion sweeps the ring radius through zero and reverses the
+  // parametrisation's handedness, so a normal taken straight from `cross(dv, du)` points
+  // *into* the turned-out shape past the halfway point, leaving every piece hidden
+  // inside it. "Outward" is the side away from the shape's axis (the cross-section
+  // centroid), which does not flip; a piece's foot plus a slab of thickness must be
+  // further from the axis than its seat is.
+  for (const std::string& name : kShapes) {
+    const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
+    const int nx = static_cast<int>(v.dims.extent(0));
+    const int nz = static_cast<int>(v.dims.extent(1));
+    for (float evert : {0.0f, 0.25f, 0.5f, 0.75f, 1.0f}) {
+      CAPTURE(name, evert);
+      SurfacePose pose;
+      pose.evert = evert;
+      const PlaySurface s = PlaySurface::build(v, pose);
+      // seats are laid out f-major: index f * nz + r.
+      for (int r = 0; r < nz; ++r) {
+        view::Vec3 axis{0.0f, 0.0f, 0.0f};
+        for (int f = 0; f < nx; ++f) {
+          axis = axis + s.seats()[static_cast<std::size_t>(f * nz + r)].centre;
+        }
+        axis = axis * (1.0f / static_cast<float>(nx));
+        for (int f = 0; f < nx; ++f) {
+          const SurfaceSeat& seat = s.seats()[static_cast<std::size_t>(f * nz + r)];
+          const view::Vec3 foot =
+              seat.centre + seat.normal * (PlaySurface::kThickness * 0.5f);
+          CHECK(view::length(foot - axis) >= view::length(seat.centre - axis) - 1e-4f);
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("the shape is framed on its own centre", "[render]") {
+  // M17.11. `PlaySurface::bounds()` already pads for the pieces, so the camera's headroom
+  // must be 0 when framing on it - otherwise the look-at is lifted off the shape's centre
+  // and the board drops down the window. The projected bounds centre is the window
+  // centre.
+  for (const std::string& name : kShapes) {
+    const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
+    const PlaySurface s = PlaySurface::build(v);
+    const view::Bounds b = s.bounds();
+    const view::Vec3 centre{(b.minX + b.maxX) * 0.5f, (b.minY + b.maxY) * 0.5f,
+                            (b.minZ + b.maxZ) * 0.5f};
+    for (const float aspect : {1.6f, 0.8f}) {
+      CAPTURE(name, aspect);
+      const view::OrbitCamera cam = view::OrbitCamera::frame(b, aspect, 0.0f);
+      const float w = 1600.0f;
+      const float h = w / aspect;
+      const view::OrbitCamera::ScreenPoint sp = cam.project(centre, aspect, w, h);
+      REQUIRE(sp.visible);
+      CHECK(std::abs(sp.x - w * 0.5f) < 0.02f * w);
+      CHECK(std::abs(sp.y - h * 0.5f) < 0.02f * h);
+    }
+  }
 }
 
 #endif  // CB_HAVE_IMGUI

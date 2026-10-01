@@ -232,6 +232,33 @@ Result<void> BoardRenderer::buildPipeline() {
     return fail(ErrorCode::Internal,
                 "cannot create the graphics pipeline: " + describe(r));
   }
+
+  // The geometry view's ghost board (M17.10): the same shaders and vertex input, with
+  // alpha blending on and depth writes off. Drawn after the opaque pieces, it lets the
+  // far side of the shape show through the near side; the pieces stay solid, which is
+  // the point of seeing through.
+  VkPipelineColorBlendAttachmentState blendOn{};
+  blendOn.blendEnable = VK_TRUE;
+  blendOn.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+  blendOn.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+  blendOn.colorBlendOp = VK_BLEND_OP_ADD;
+  blendOn.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+  blendOn.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+  blendOn.alphaBlendOp = VK_BLEND_OP_ADD;
+  blendOn.colorWriteMask = blend.colorWriteMask;
+  VkPipelineColorBlendStateCreateInfo cbOn = cb;
+  cbOn.pAttachments = &blendOn;
+  VkPipelineDepthStencilStateCreateInfo dsNoWrite = ds;
+  dsNoWrite.depthWriteEnable = VK_FALSE;
+  VkGraphicsPipelineCreateInfo gpiOn = gpi;
+  gpiOn.pColorBlendState = &cbOn;
+  gpiOn.pDepthStencilState = &dsNoWrite;
+  if (const VkResult r = vkCreateGraphicsPipelines(
+          ctx_->device(), VK_NULL_HANDLE, 1, &gpiOn, nullptr, &surfaceBlendPipeline_);
+      r != VK_SUCCESS) {
+    return fail(ErrorCode::Internal,
+                "cannot create the ghost board pipeline: " + describe(r));
+  }
   return {};
 }
 
@@ -676,6 +703,10 @@ InstanceSet BoardRenderer::buildInstances(
       // the difference between a chequerboard and a smooth grey ring.
       float groove[4]{};
       toFloat4(mix(fill, theme_.boardRim, 0.62f), groove);
+      // The ghost alpha rides in the vertex colour (M17.10); the pieces are separate
+      // instances and stay opaque.
+      rgba[3] *= options_.surfaceGhost;
+      groove[3] *= options_.surfaceGhost;
       const std::uint32_t base = static_cast<std::uint32_t>(out.surfaceVertices.size());
       // The face a player looks at, then the same grid pushed in along its own normals.
       // A square has thickness for the same reason the flat board's cells do: an edge you
@@ -1437,7 +1468,12 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
       }
       // And one more for the geometry view's board, which is a mesh rather than a shape
       // repeated: the same pipeline, a different vertex buffer, one identity instance.
+      // A ghosted board takes the blended pipeline instead - depth writes off, so the far
+      // side blends over the near one (M17.10).
       if (!set.surfaceIndices.empty()) {
+        vkCmdBindPipeline(
+            cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            options_.surfaceGhost < 0.99f ? surfaceBlendPipeline_ : pipeline_);
         vkCmdBindVertexBuffers(cmd, 0, 1, &surfaceVertexBuffer_[frame], &zero);
         vkCmdBindIndexBuffer(cmd, surfaceIndexBuffer_[frame], 0, VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(cmd, static_cast<std::uint32_t>(set.surfaceIndices.size()), 1, 0,
@@ -1584,6 +1620,7 @@ BoardRenderer& BoardRenderer::operator=(BoardRenderer&& o) noexcept {
   std::swap(frag_, o.frag_);
   std::swap(layout_, o.layout_);
   std::swap(pipeline_, o.pipeline_);
+  std::swap(surfaceBlendPipeline_, o.surfaceBlendPipeline_);
   std::swap(blurVert_, o.blurVert_);
   std::swap(blurFrag_, o.blurFrag_);
   std::swap(blurLayout_, o.blurLayout_);
@@ -1619,6 +1656,8 @@ BoardRenderer::~BoardRenderer() {
   if (ctx_ == nullptr || ctx_->device() == VK_NULL_HANDLE) return;
   const VkDevice d = ctx_->device();
   if (pipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(d, pipeline_, nullptr);
+  if (surfaceBlendPipeline_ != VK_NULL_HANDLE)
+    vkDestroyPipeline(d, surfaceBlendPipeline_, nullptr);
   if (layout_ != VK_NULL_HANDLE) vkDestroyPipelineLayout(d, layout_, nullptr);
   if (backdropPipeline_ != VK_NULL_HANDLE)
     vkDestroyPipeline(d, backdropPipeline_, nullptr);

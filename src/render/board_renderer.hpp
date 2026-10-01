@@ -73,6 +73,9 @@ struct BoardOptions {
   /// How far the surface has been turned through itself, 0 to 1 - a torus pulled inside
   /// out through its own hole, a cylinder rolled back over itself.
   float surfaceEvert{0.0f};
+  /// The board mesh's alpha, 1 opaque down to a translucent ghost so the far side of the
+  /// shape and the pieces on it show through (M17.10). The pieces stay opaque.
+  float surfaceGhost{1.0f};
 };
 
 /// Instances grouped by the shape that draws them - one draw call per shape.
@@ -200,6 +203,9 @@ class BoardRenderer {
   VkShaderModule frag_{VK_NULL_HANDLE};
   VkPipelineLayout layout_{VK_NULL_HANDLE};
   VkPipeline pipeline_{VK_NULL_HANDLE};
+  /// The same shaders and vertex input as `pipeline_`, with alpha blending and no depth
+  /// writes - the geometry view's ghost board (M17.10). The opaque path is unchanged.
+  VkPipeline surfaceBlendPipeline_{VK_NULL_HANDLE};
 
   // The lit ground the board stands on, drawn first across the whole frame.
   VkShaderModule backdropVert_{VK_NULL_HANDLE};

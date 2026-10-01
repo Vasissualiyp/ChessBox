@@ -100,6 +100,10 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.geometryView = asBool(value);
     else if (key == "geometry_evert")
       s.geometryEvert = asFloat(value, s.geometryEvert);
+    else if (key == "geometry_invert")
+      s.geometryInvert = asBool(value);
+    else if (key == "geometry_ghost")
+      s.geometryGhost = asFloat(value, s.geometryGhost);
     else if (key == "geometry_slide_u")
       s.geometrySlideU = asFloat(value, s.geometrySlideU);
     else if (key == "geometry_slide_v")
@@ -163,6 +167,8 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "flat_view = " << boolText(flatView) << '\n';
   out << "geometry_view = " << boolText(geometryView) << '\n';
   out << "geometry_evert = " << geometryEvert << '\n';
+  out << "geometry_invert = " << boolText(geometryInvert) << '\n';
+  out << "geometry_ghost = " << geometryGhost << '\n';
   out << "geometry_slide_u = " << geometrySlideU << '\n';
   out << "geometry_slide_v = " << geometrySlideV << '\n';
   out << "animate_moves = " << boolText(animateMoves) << '\n';
@@ -189,10 +195,10 @@ void Settings::sanitize() {
   frameCap = std::clamp(frameCap, 0, 360);
   pieceHeightScale = std::clamp(pieceHeightScale, 0.0f, 2.0f);
   geometryEvert = std::clamp(geometryEvert, 0.0f, 1.0f);
-  // The surfaces repeat after two laps of either axis, so anything outside that is the
-  // same pose written longhand.
-  geometrySlideU = std::fmod(geometrySlideU, 16.0f);
-  geometrySlideV = std::fmod(geometrySlideV, 16.0f);
+  // Never fully transparent: a board you cannot see is not a ghost, it is gone.
+  geometryGhost = std::clamp(geometryGhost, 0.35f, 1.0f);
+  // The slide is not wrapped here: its period is two laps of the *board*, which this
+  // layer does not know. `PlaySurface` wraps it against the board's own extent (M17.9).
   animationSpeed = std::clamp(animationSpeed, 0.25f, 4.0f);
   overtureSpeed = std::clamp(overtureSpeed, 0.25f, 4.0f);
   orbitSensitivity = std::clamp(orbitSensitivity, 0.1f, 4.0f);
