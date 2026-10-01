@@ -73,6 +73,11 @@ struct OrbitCamera {
   /// - framing, zoom, picking - keeps working, which is why it is a flag on the camera
   /// rather than a second camera class.
   bool orthographic{false};
+  /// Roll about the view direction, radians. Zero for every ordinary view - the board is
+  /// looked at with world up on screen. The geometry view's chase camera sets it so the
+  /// piece's own up (its surface normal) is the view's up, and the piece stands
+  /// vertically in the middle of the frame (M17.16 revision).
+  float roll{0.0f};
 
   /// Frame the whole laid-out scene, whatever its dimensionality.
   ///

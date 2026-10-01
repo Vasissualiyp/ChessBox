@@ -100,10 +100,19 @@ TEST_CASE("a surface tile lies along the surface's own axes", "[render]") {
       CHECK(view::dot(view::cross(ex, ey), ez) > 0.99f);
       // And it is the *surface's* frame: +Z is the outward normal the tile was given.
       CHECK_THAT(dist(ez, t.normal), WithinAbs(0.0f, 1e-3f));
-      // +X follows the files: stepping one cell along the file axis moves that way.
+      // +X follows the files: stepping one cell along the file axis moves that way. The
+      // Klein figure-eight's own chord reverses at its crossing, so there the claim is
+      // the frame's *continuity* - it agrees with its neighbour rather than with the
+      // chord (M17.18).
       const Coord co = v.dims.toCoord(t.cell);
       const int f =
           co.c[0] + 1 < static_cast<int>(v.dims.extent(0)) ? co.c[0] + 1 : co.c[0] - 1;
+      if (name == "klein") {
+        const view::Vec3 nextEx =
+            byQuat(seatAt(s, v, f, co.c[1]).quat, view::Vec3{1, 0, 0});
+        CHECK(view::dot(ex, nextEx) > 0.0f);
+        continue;
+      }
       const float sign = co.c[0] + 1 < static_cast<int>(v.dims.extent(0)) ? 1.0f : -1.0f;
       const view::Vec3 along =
           view::normalize((seatAt(s, v, f, co.c[1]).centre - t.centre) * sign);
@@ -742,6 +751,98 @@ TEST_CASE("align turns an inner-ring cell toward the camera", "[render]") {
   // An open tube/ribbon has nothing to align.
   CHECK(alignSlideU(test::loadVariant("cylinder"), 0, cam) == 0.0f);
   CHECK(alignSlideU(test::loadVariant("mobius"), 0, cam) == 0.0f);
+}
+
+TEST_CASE("Klein's normal field is continuous except at its seam", "[render]") {
+  // M17.18. A non-orientable shape has no globally consistent outward normal, so one flip
+  // must exist; the defect was that it landed *twice*, mid-board, at the cross-section's
+  // numerically unstable pinch. The continuity walk moves it to the one place a player
+  // expects it - the glued file edge - and nowhere else.
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("klein"));
+  const int nx = static_cast<int>(v.dims.extent(0));
+  const int nz = static_cast<int>(v.dims.extent(1));
+  constexpr int kSide = kSurfaceSubdiv + 1;
+  const auto patchOf = [&](const PlaySurface& s, int f, int r) -> const SurfacePatch& {
+    const CellId want = v.dims.toCell(Coord::of({f, r}));
+    for (const SurfacePatch& p : s.patches()) {
+      if (p.cell == want) return p;
+    }
+    throw std::runtime_error("no patch");
+  };
+  const auto seatOf = [&](const PlaySurface& s, int f, int r) -> const SurfaceSeat& {
+    const CellId want = v.dims.toCell(Coord::of({f, r}));
+    for (const SurfaceSeat& t : s.seats()) {
+      if (t.cell == want) return t;
+    }
+    throw std::runtime_error("no seat");
+  };
+
+  for (const float slide : {0.0f, 1.0f, 2.0f, 3.5f}) {
+    CAPTURE(slide);
+    SurfacePose pose;
+    pose.slideU = slide;
+    const PlaySurface s = PlaySurface::build(v, pose);
+    for (int r = 0; r < nz; ++r) {
+      for (int f = 0; f + 1 < nx; ++f) {
+        // Within one square, and across the gap into the next file: never opposed.
+        const SurfacePatch& p = patchOf(s, f, r);
+        for (int j = 0; j < kSide; ++j) {
+          for (int i = 0; i + 1 < kSide; ++i) {
+            CHECK(view::dot(p.normal[static_cast<std::size_t>(i * kSide + j)],
+                            p.normal[static_cast<std::size_t>((i + 1) * kSide + j)]) >
+                  0.0f);
+          }
+        }
+        const SurfacePatch& q = patchOf(s, f + 1, r);
+        for (int j = 0; j < kSide; ++j) {
+          CHECK(view::dot(p.normal[static_cast<std::size_t>(kSurfaceSubdiv * kSide + j)],
+                          q.normal[static_cast<std::size_t>(j)]) > 0.0f);
+        }
+        // The piece's own frame is continuous too.
+        const view::Vec3 ea = byQuat(seatOf(s, f, r).quat, view::Vec3{1, 0, 0});
+        const view::Vec3 eb = byQuat(seatOf(s, f + 1, r).quat, view::Vec3{1, 0, 0});
+        CHECK(view::dot(ea, eb) > 0.0f);
+      }
+      // The file axis is the orientation-preserving one here (klein glues its *rank* with
+      // a file flip), so the field closes across the file wrap too. The single
+      // unavoidable flip lives at the rank seam, which a per-rank walk deliberately does
+      // not close.
+      const SurfacePatch& last = patchOf(s, nx - 1, r);
+      const SurfacePatch& first = patchOf(s, 0, r);
+      for (int j = 0; j < kSide; ++j) {
+        CHECK(view::dot(last.normal[static_cast<std::size_t>(kSurfaceSubdiv * kSide + j)],
+                        first.normal[static_cast<std::size_t>(j)]) > 0.0f);
+      }
+    }
+  }
+}
+
+TEST_CASE("the chase camera centres a piece and stands it up", "[render]") {
+  // M17.16 (revised): following a move is one continuous chase, the piece centred with
+  // its own up (surface normal) pointing up the screen - so it reads as following behind
+  // it.
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("torus"));
+  const PlaySurface surf = PlaySurface::build(v);
+  const float w = 1000.0f;
+  const float h = 700.0f;
+  const float aspect = w / h;
+  for (std::size_t i = 0; i < surf.seats().size(); i += 7) {
+    const SurfaceSeat& seat = surf.seats()[i];
+    SurfaceMoveSample piece;
+    piece.position = seat.centre;
+    piece.normal = seat.normal;
+    const view::Vec3 travel = byQuat(seat.quat, view::Vec3{1, 0, 0});
+    const view::OrbitCamera cam = surfaceChaseCamera(piece, travel, 4.0f);
+    const view::OrbitCamera::ScreenPoint sp = cam.project(piece.position, aspect, w, h);
+    REQUIRE(sp.visible);
+    CHECK(std::abs(sp.x - w * 0.5f) < 1.0f);
+    CHECK(std::abs(sp.y - h * 0.5f) < 1.0f);
+    // The normal points up the screen, and not sideways.
+    const view::OrbitCamera::ScreenPoint up =
+        cam.project(piece.position + piece.normal, aspect, w, h);
+    CHECK(up.y < sp.y);
+    CHECK(std::abs(up.x - sp.x) < 8.0f);
+  }
 }
 
 #endif  // CB_HAVE_IMGUI

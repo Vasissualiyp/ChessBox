@@ -133,6 +133,45 @@ Vec3 OrbitCamera::eye() const {
          Vec3{std::sin(yaw) * cp, -std::cos(yaw) * cp, std::sin(pitch)} * distance;
 }
 
+namespace {
+
+/// The camera's view basis (forward, right, up), with `roll` applied about the view
+/// direction. The one place the roll lives, so `viewProj` and `pickRay` cannot disagree
+/// about which way is up on screen.
+void cameraBasis(const OrbitCamera& cam, Vec3& f, Vec3& r, Vec3& u) {
+  f = normalize(cam.target - cam.eye());
+  r = normalize(cross(f, cam.upHint()));
+  u = cross(r, f);
+  if (cam.roll != 0.0f) {
+    const float c = std::cos(cam.roll);
+    const float s = std::sin(cam.roll);
+    const Vec3 r2 = r * c + u * s;
+    const Vec3 u2 = u * c - r * s;
+    r = r2;
+    u = u2;
+  }
+}
+
+Mat4 lookFrom(const Vec3& eye, const Vec3& f, const Vec3& r, const Vec3& u) {
+  Mat4 m{};
+  m[0] = r.x;
+  m[4] = r.y;
+  m[8] = r.z;
+  m[12] = -dot(r, eye);
+  m[1] = u.x;
+  m[5] = u.y;
+  m[9] = u.z;
+  m[13] = -dot(u, eye);
+  m[2] = -f.x;
+  m[6] = -f.y;
+  m[10] = -f.z;
+  m[14] = dot(f, eye);
+  m[15] = 1;
+  return m;
+}
+
+}  // namespace
+
 Vec3 OrbitCamera::upHint() const {
   return std::abs(std::cos(pitch)) < 1e-3f ? Vec3{0, 1, 0} : Vec3{0, 0, 1};
 }
@@ -161,7 +200,9 @@ Mat4 OrbitCamera::viewProj(float aspect) const {
       orthographic
           ? cb::view::orthographic(distance * std::tan(fovY * 0.5f), aspect, nearZ, farZ)
           : perspective(fovY, aspect, nearZ, farZ);
-  return multiply(proj, lookAt(eye(), target, upHint()));
+  Vec3 f{}, r{}, u{};
+  cameraBasis(*this, f, r, u);
+  return multiply(proj, lookFrom(eye(), f, r, u));
 }
 
 OrbitCamera::Ray OrbitCamera::pickRay(float px, float py, float width,
@@ -169,9 +210,8 @@ OrbitCamera::Ray OrbitCamera::pickRay(float px, float py, float width,
   // Reconstruct the ray from the camera basis rather than by inverting the matrix:
   // fewer operations, no near-singular cases, and it is obvious what it does.
   const Vec3 e = eye();
-  const Vec3 forward = normalize(target - e);
-  const Vec3 right = normalize(cross(forward, upHint()));
-  const Vec3 up = cross(right, forward);
+  Vec3 forward{}, right{}, up{};
+  cameraBasis(*this, forward, right, up);
 
   const float aspect = width > 0 ? width / height : 1.0f;
   const float t = std::tan(fovY * 0.5f);

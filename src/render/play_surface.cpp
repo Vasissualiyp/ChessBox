@@ -147,11 +147,8 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
     }
   }
 
-  // The shape's axis at each rank: the centroid of the cross-section. "Outward" at a
-  // point is the side away from it, and that is how the normal stays outward after the
-  // eversion sweeps the ring radius through zero and reverses the parametrisation's
-  // handedness. `cross(dv, du)` alone would leave every piece standing inside the
-  // turned-out shape, hidden and unplayable (M17.7).
+  // The shape's axis at each rank: the centroid of the cross-section, used only to seed
+  // the normal walk at file 0 (M17.18).
   std::vector<view::Vec3> axisAt(static_cast<std::size_t>(cv));
   for (int j = 0; j < cv; ++j) {
     view::Vec3 sum{0.0f, 0.0f, 0.0f};
@@ -160,20 +157,70 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
     }
     axisAt[static_cast<std::size_t>(j)] = sum * (1.0f / static_cast<float>(cu));
   }
-  const auto axisRef = [&](float vv) {
-    const float t = vv * static_cast<float>(nz * kSubdiv);
-    const int j0 = std::clamp(static_cast<int>(std::floor(t)), 0, cv - 1);
-    const int j1 = std::min(j0 + 1, cv - 1);
-    const float a = t - static_cast<float>(j0);
-    return axisAt[static_cast<std::size_t>(j0)] * (1.0f - a) +
-           axisAt[static_cast<std::size_t>(j1)] * a;
-  };
+
+  // The normal field, built by a continuity walk rather than a per-point test against the
+  // centroid. A non-orientable shape has no globally consistent outward normal, so the
+  // one unavoidable flip has to land *somewhere*; the walk puts it exactly at the file
+  // edge the variant already glues (it never closes the loop), instead of at the Klein
+  // cross-section's pinch, where the centroid test divides by ~zero and the sign comes
+  // out as noise two samples apart (M17.18).
+  std::vector<view::Vec3> normals(static_cast<std::size_t>(cu * cv));
+  for (int j = 0; j < cv; ++j) {
+    const float fv = static_cast<float>(j) / static_cast<float>(nz * kSubdiv);
+    for (int i = 0; i < cu; ++i) {
+      const float fu = static_cast<float>(i) / static_cast<float>(nx * kSubdiv);
+      view::Vec3 n = normalAt(kind, pose, fu + su, fv + sv, nx, nz);
+      if (i == 0) {
+        const view::Vec3 out = s.corners_[static_cast<std::size_t>(i * cv + j)] -
+                               axisAt[static_cast<std::size_t>(j)];
+        if (view::length(out) > 1e-5f && view::dot(n, out) < 0.0f) n = n * -1.0f;
+      } else if (view::dot(n, normals[static_cast<std::size_t>((i - 1) * cv + j)]) <
+                 0.0f) {
+        n = n * -1.0f;
+      }
+      normals[static_cast<std::size_t>(i * cv + j)] = n;
+    }
+  }
+  // Bilinear lookup into the already-continuous field, so two patch corners a fraction of
+  // a cell apart cannot come back opposite.
   const auto nrm = [&](float u, float vv) {
-    view::Vec3 n = normalAt(kind, pose, u + su, vv + sv, nx, nz);
-    const view::Vec3 out = at(u, vv) - axisRef(vv);
-    if (view::length(out) > 1e-5f && view::dot(n, out) < 0.0f) n = n * -1.0f;
+    const float gi = std::clamp(u, 0.0f, 1.0f) * static_cast<float>(cu - 1);
+    const float gj = std::clamp(vv, 0.0f, 1.0f) * static_cast<float>(cv - 1);
+    const int i0 = static_cast<int>(std::floor(gi));
+    const int j0 = static_cast<int>(std::floor(gj));
+    const int i1 = std::min(i0 + 1, cu - 1);
+    const int j1 = std::min(j0 + 1, cv - 1);
+    const float a = gi - static_cast<float>(i0);
+    const float b = gj - static_cast<float>(j0);
+    view::Vec3 n =
+        normals[static_cast<std::size_t>(i0 * cv + j0)] * ((1.0f - a) * (1.0f - b)) +
+        normals[static_cast<std::size_t>(i1 * cv + j0)] * (a * (1.0f - b)) +
+        normals[static_cast<std::size_t>(i0 * cv + j1)] * ((1.0f - a) * b) +
+        normals[static_cast<std::size_t>(i1 * cv + j1)] * (a * b);
+    n = view::length(n) > 1e-6f ? view::normalize(n) : view::Vec3{0.0f, 0.0f, 1.0f};
     return inverted ? n * -1.0f : n;
   };
+
+  // The per-cell file tangent (`ex`), also by a continuity walk: seed file 0, then keep
+  // each next file's tangent agreeing with the last. The piece's own frame reads it, so a
+  // mid-board flip would tip the pieces too.
+  std::vector<view::Vec3> exField(static_cast<std::size_t>(nx * nz));
+  for (int r = 0; r < nz; ++r) {
+    for (int f = 0; f < nx; ++f) {
+      const float u = (static_cast<float>(f) + 0.5f) / fnx;
+      const float vv = (static_cast<float>(r) + 0.5f) / fnz;
+      const view::Vec3 n = nrm(u, vv);
+      const view::Vec3 along = at(u + 0.5f / fnx, vv) - at(u - 0.5f / fnx, vv);
+      const view::Vec3 flat = along - n * view::dot(along, n);
+      view::Vec3 ex = view::length(flat) > 1e-6f ? view::normalize(flat)
+                                                 : view::Vec3{1.0f, 0.0f, 0.0f};
+      if (f > 0 &&
+          view::dot(ex, exField[static_cast<std::size_t>((f - 1) * nz + r)]) < 0.0f) {
+        ex = ex * -1.0f;
+      }
+      exField[static_cast<std::size_t>(f * nz + r)] = ex;
+    }
+  }
 
   s.seats_.reserve(static_cast<std::size_t>(nx * nz));
   s.patches_.reserve(static_cast<std::size_t>(nx * nz));
@@ -210,14 +257,10 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
                            view::length(seat.centre - at(u - 1.0f / fnx, vv)));
       seat.stepV = 0.5f * (view::length(at(u, vv + 1.0f / fnz) - seat.centre) +
                            view::length(seat.centre - at(u, vv - 1.0f / fnz)));
-      // Measured across the whole cell, not at a point: a piece should line up with the
-      // row it stands in, and on a Klein bottle's crossing the tangent at the seat and
-      // the direction of the next square are most of a right angle apart.
-      const view::Vec3 along = at(u + 0.5f / fnx, vv) - at(u - 0.5f / fnx, vv);
-      const view::Vec3 flat = along - seat.normal * view::dot(along, seat.normal);
-      if (view::length(flat) > 1e-6f) {
-        const view::Vec3 ex = view::normalize(flat);
-        seat.quat = quatOf(ex, view::cross(seat.normal, ex), seat.normal);
+      const view::Vec3 ex = exField[static_cast<std::size_t>(f * nz + r)];
+      const view::Vec3 ey = view::cross(seat.normal, ex);
+      if (view::length(ey) > 1e-6f) {
+        seat.quat = quatOf(ex, view::normalize(ey), seat.normal);
       }
       s.seats_.push_back(seat);
     }
@@ -334,6 +377,34 @@ SurfaceMoveSample surfaceMoveSample(const view::MovePath& path, const PlaySurfac
   out.quat = local < 0.5f ? sa.quat : sb.quat;
   out.fit = fitOf(sa) + (fitOf(sb) - fitOf(sa)) * local;
   return out;
+}
+
+view::OrbitCamera surfaceChaseCamera(const SurfaceMoveSample& piece,
+                                     const view::Vec3& travel, float distance) {
+  view::OrbitCamera cam;
+  cam.target = piece.position;
+  cam.distance = std::max(0.5f, distance);
+  view::Vec3 forward = travel;
+  if (view::length(forward) < 1e-5f) forward = view::Vec3{0.0f, -1.0f, 0.0f};
+  forward = view::normalize(forward);
+  // Behind the piece along the travel, a little above the surface (along the normal):
+  // eye = target - forward*distance + normal*(distance*0.35).
+  const view::Vec3 toEye = view::normalize(forward * -1.0f + piece.normal * 0.35f);
+  cam.pitch = std::asin(std::clamp(toEye.z, -0.99f, 0.99f));
+  cam.yaw = std::atan2(toEye.x, -toEye.y);
+  // Roll so the piece's own up is screen up: the angle from the unrolled up to the
+  // normal's component perpendicular to the view direction.
+  const view::Vec3 viewDir = toEye * -1.0f;  // eye -> target, unit
+  const view::Vec3 upHint{0.0f, 0.0f, 1.0f};
+  const view::Vec3 up0 = view::normalize(
+      view::cross(view::normalize(view::cross(viewDir, upHint)), viewDir));
+  view::Vec3 nPerp = piece.normal - viewDir * view::dot(piece.normal, viewDir);
+  if (view::length(nPerp) > 1e-5f) {
+    nPerp = view::normalize(nPerp);
+    cam.roll =
+        std::atan2(view::dot(view::cross(up0, nPerp), viewDir), view::dot(up0, nPerp));
+  }
+  return cam;
 }
 
 float alignSlideU(const VariantSpec& v, CellId target, const view::OrbitCamera& camera) {

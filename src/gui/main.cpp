@@ -216,6 +216,21 @@ view::OrbitCamera boardCamera(const app::Shell& shell) {
     const render::PlaySurface surf =
         render::PlaySurface::build(session->variant(), poseFrom(shell.settings()));
     if (!surf.empty()) {
+      // Following a move: one continuous chase, the piece centred and standing upright on
+      // its own normal (M17.16, revised). The travel direction is the route's, sampled a
+      // little ahead so a leap is followed across its arc too.
+      if (session->shotInFlight()) {
+        const view::MovePath& path = session->animation().path();
+        const float t = session->animation().progress();
+        const render::SurfaceMoveSample here = render::surfaceMoveSample(path, surf, t);
+        const render::SurfaceMoveSample ahead =
+            render::surfaceMoveSample(path, surf, std::min(1.0f, t + 0.05f));
+        view::Vec3 travel = ahead.position - here.position;
+        if (view::length(travel) < 1e-5f) travel = here.normal;  // any tangent will do
+        const view::Bounds b = surf.bounds();
+        const float span = std::max({b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ});
+        return render::surfaceChaseCamera(here, travel, std::max(2.0f, 0.4f * span));
+      }
       return session->cameraOver(surfacePlacements(surf), surf.bounds(),
                                  view::ViewConfig{});
     }

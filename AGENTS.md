@@ -394,10 +394,17 @@ These are the ones that have actually cost time here, not hypotheticals.
   `boundaryKind` (M17.13).
 - **A move on the shape is sampled, not teleported.** `render::surfaceMoveSample` walks the
   seats `view::MoveAnimation::path()` names (a leap arcs, a glide hugs; a seam step is not a
-  cut), and `Session::cameraOver(placements, bounds, cfg)` is the one move-camera blend, asked
-  against the surface's seats so the camera follows on the shape. `ALIGN`
-  (`Settings::geometryAlign`, `torus`/`klein` only) searches a slide offset that turns the
-  followed cell toward the camera (M17.15-M17.17).
+  cut). Following it is **one continuous chase** - `render::surfaceChaseCamera` centres the
+  piece, sits the camera behind it along the travel, and rolls the frame so the piece's own
+  up (its surface normal) is the view's up. `OrbitCamera::roll` is applied in `viewProj`
+  *and* `pickRay` (the one `cameraBasis`), or the draw and the pick disagree; it is 0 for
+  every ordinary view. `ALIGN` (`Settings::geometryAlign`, `torus`/`klein` only) searches a
+  slide offset that turns the followed cell toward the camera (M17.15-M17.17).
+- **A normal field is built by a continuity walk, not a per-point test.** On a non-orientable
+  shape one flip is unavoidable; `PlaySurface::build` seeds file 0 against the cross-section
+  centroid and then makes each next sample agree with its neighbour, never closing the loop,
+  so the flip lands at the seam instead of at the Klein cross-section's pinch, where the
+  centroid test divides by ~zero (M17.18).
 - **An 8-cell figure-eight is aliased, and that is why `lemniscateAngle` exists.** Equally
   spaced values of the Klein cross-section's angle land in pairs, which made every other
   file twice the width of its neighbour. The curve is walked at constant speed instead;

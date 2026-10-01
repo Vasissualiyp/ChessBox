@@ -1194,3 +1194,25 @@ the M17.16 `cameraOver` no-op and follow cases, and the M17.17 facing search. Al
 
 **Remaining:** M17.12's larger limits (level/aeon adjacency on the stacked shapes, and any
 sliced-`t6` view) and the M17.5 "no surface coordinates or seam rails yet" note.
+
+---
+
+## Status: M17.18 and the chase camera (2026-09-30)
+
+- **M17.18 - Klein's normal field is continuous except at its seam.** `PlaySurface::build`
+  replaced the per-point "flip against the cross-section centroid" with two **continuity
+  walks**: a `normals` grid over the gapless corners (seed file 0 against the centroid, then
+  each next sample agrees with the last, never closing the loop), and a per-cell `ex` walk.
+  `nrm` is now a bilinear lookup into the continuous field. This moves the one unavoidable
+  flip of a non-orientable shape off the lemniscate's numerically unstable pinch (where the
+  centroid test divided by ~zero and returned noise two samples apart) and onto the seam the
+  walk does not close. Tests: every adjacent fine normal sample and every adjacent seat frame
+  is non-opposed, at several `slideU` values; the flanking file cells keep agreeing.
+- **The chase camera (M17.16, revised).** Following a move on the shape is now **one
+  continuous chase** rather than M11's lead/pull/cut: `render::surfaceChaseCamera` centres
+  the piece, puts the camera behind it along the route's travel, and **rolls** the frame
+  (`OrbitCamera::roll`, applied in `viewProj` and `pickRay`) so the piece's own up - its
+  surface normal - is the view's up. So the piece stands vertically in the middle of the
+  view, the way a third-person follow reads. `main::boardCamera` uses it whenever a shot is
+  in flight on the surface and the settled framing otherwise. Test: every seat, projected
+  through the chase, is centred with its normal pointing up the screen.

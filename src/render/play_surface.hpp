@@ -48,6 +48,15 @@ struct SurfaceMoveSample {
 [[nodiscard]] float alignSlideU(const VariantSpec& v, CellId target,
                                 const view::OrbitCamera& camera);
 
+/// A chase camera for a followed move on the shape (M17.16, revised): the piece centred,
+/// the camera behind it along `travel`, and the frame rolled so the piece's own up (its
+/// surface normal) is the view's up - so the piece stands vertically in the middle of the
+/// view, the way a third-person follow would. One camera for one continuous move; the
+/// route is `surfaceMoveSample`'s, never cut at a seam.
+[[nodiscard]] view::OrbitCamera surfaceChaseCamera(const SurfaceMoveSample& piece,
+                                                   const view::Vec3& travel,
+                                                   float distance);
+
 /// How many corners a square is cut into per axis. A square on a curved board is not a
 /// square: it is a patch of the surface, and this is how finely that patch is sampled.
 inline constexpr int kSurfaceSubdiv = 4;
