@@ -91,6 +91,10 @@ struct OrbitCamera {
   /// World up for the view basis. Looking straight down, the usual +Z is parallel to
   /// the view direction and gives a degenerate basis, so the board's +Y takes over.
   [[nodiscard]] Vec3 upHint() const;
+  /// The camera's view basis (forward, right, up) with `roll` applied - the same basis
+  /// `viewProj` and `pickRay` use. Exposed so a caller blending two cameras (M17.19) uses
+  /// the renderer's basis and not a second derivation of it.
+  void basis(Vec3& forward, Vec3& right, Vec3& up) const;
   [[nodiscard]] Mat4 viewProj(float aspect) const;
 
   /// A world point in pixels, origin top left - the inverse of pickRay. `visible` is
@@ -117,5 +121,14 @@ struct OrbitCamera {
 /// and it works with no GPU at all, which is what makes interaction testable headlessly.
 int pickBox(const OrbitCamera::Ray& ray, const std::vector<Placement>& boxes,
             const Vec3& halfExtent);
+
+/// Blend two orbit cameras: the eye travels in a straight line between them and the
+/// orientation is a quaternion slerp, so the view turns the shortest way and never swings
+/// the long way round (M17.19). Interpolating yaw/pitch/roll separately - or the eye
+/// *direction* by a plain lerp, which walks through the origin when the two views nearly
+/// oppose - is what produced the 720-degree spins this replaces. At `t = 0` this is `a`,
+/// at `t = 1` it is `b`.
+[[nodiscard]] OrbitCamera slerpCamera(const OrbitCamera& a, const OrbitCamera& b,
+                                      float t);
 
 }  // namespace cb::view

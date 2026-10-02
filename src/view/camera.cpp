@@ -176,6 +176,123 @@ Vec3 OrbitCamera::upHint() const {
   return std::abs(std::cos(pitch)) < 1e-3f ? Vec3{0, 1, 0} : Vec3{0, 0, 1};
 }
 
+void OrbitCamera::basis(Vec3& forward, Vec3& right, Vec3& up) const {
+  cameraBasis(*this, forward, right, up);
+}
+
+namespace {
+
+/// A unit quaternion, camera-local to world. Only what the camera blend needs.
+struct Quat {
+  float x{0}, y{0}, z{0}, w{1};
+};
+
+/// The rotation whose images of the local axes are `right`, `up`, `back` (the columns of
+/// a camera-to-world matrix). Branches on the largest diagonal, like `quatOf` in the play
+/// surface: the naive trace formula loses precision near a half-turn.
+Quat quatFromBasis(const Vec3& right, const Vec3& up, const Vec3& back) {
+  const float m00 = right.x, m01 = up.x, m02 = back.x;
+  const float m10 = right.y, m11 = up.y, m12 = back.y;
+  const float m20 = right.z, m21 = up.z, m22 = back.z;
+  const float trace = m00 + m11 + m22;
+  Quat q;
+  if (trace > 0.0f) {
+    const float s = std::sqrt(trace + 1.0f) * 2.0f;
+    q = {(m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s, 0.25f * s};
+  } else if (m00 > m11 && m00 > m22) {
+    const float s = std::sqrt(1.0f + m00 - m11 - m22) * 2.0f;
+    q = {0.25f * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s};
+  } else if (m11 > m22) {
+    const float s = std::sqrt(1.0f + m11 - m00 - m22) * 2.0f;
+    q = {(m01 + m10) / s, 0.25f * s, (m12 + m21) / s, (m02 - m20) / s};
+  } else {
+    const float s = std::sqrt(1.0f + m22 - m00 - m11) * 2.0f;
+    q = {(m02 + m20) / s, (m12 + m21) / s, 0.25f * s, (m10 - m01) / s};
+  }
+  const float len = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+  if (len > 1e-8f) {
+    q.x /= len;
+    q.y /= len;
+    q.z /= len;
+    q.w /= len;
+  }
+  return q;
+}
+
+Vec3 rotate(const Quat& q, const Vec3& v) {
+  const Vec3 u{q.x, q.y, q.z};
+  const Vec3 t = cross(u, v) * 2.0f;
+  return v + t * q.w + cross(u, t);
+}
+
+/// Shortest-path slerp. The dot-product sign flip is what picks the short way round.
+Quat slerp(Quat a, Quat b, float t) {
+  float d = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+  if (d < 0.0f) {
+    b = {-b.x, -b.y, -b.z, -b.w};
+    d = -d;
+  }
+  if (d > 0.9995f) {  // nearly parallel: a normalized lerp is stable and equivalent
+    Quat out{a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t,
+             a.w + (b.w - a.w) * t};
+    const float len =
+        std::sqrt(out.x * out.x + out.y * out.y + out.z * out.z + out.w * out.w);
+    if (len > 1e-8f) {
+      out.x /= len;
+      out.y /= len;
+      out.z /= len;
+      out.w /= len;
+    }
+    return out;
+  }
+  const float theta = std::acos(std::clamp(d, -1.0f, 1.0f));
+  const float s = std::sin(theta);
+  const float wa = std::sin((1.0f - t) * theta) / s;
+  const float wb = std::sin(t * theta) / s;
+  return {a.x * wa + b.x * wb, a.y * wa + b.y * wb, a.z * wa + b.z * wb,
+          a.w * wa + b.w * wb};
+}
+
+}  // namespace
+
+OrbitCamera slerpCamera(const OrbitCamera& a, const OrbitCamera& b, float t) {
+  t = std::clamp(t, 0.0f, 1.0f);
+  Vec3 fa{}, ra{}, ua{}, fb{}, rb{}, ub{};
+  a.basis(fa, ra, ua);
+  b.basis(fb, rb, ub);
+  const Quat qa = quatFromBasis(ra, ua, fa * -1.0f);
+  const Quat qb = quatFromBasis(rb, ub, fb * -1.0f);
+  const Quat q = slerp(qa, qb, t);
+  const Vec3 back = rotate(q, Vec3{0.0f, 0.0f, 1.0f});  // target -> eye
+  const Vec3 wantUp = rotate(q, Vec3{0.0f, 1.0f, 0.0f});
+  Vec3 e = back;
+  if (length(e) > 1e-6f) e = normalize(e);
+
+  OrbitCamera out;
+  out.fovY = a.fovY;
+  out.nearZ = a.nearZ;
+  out.farZ = a.farZ;
+  out.orthographic = a.orthographic;
+  out.distance = std::max(0.5f, a.distance + (b.distance - a.distance) * t);
+  out.pitch = std::asin(std::clamp(e.z, -0.999f, 0.999f));
+  out.yaw = std::atan2(e.x, -e.y);
+  // The eye travels a straight line; the look-at is derived so the camera still sits on
+  // it and looks along the slerped direction.
+  const Vec3 eye = a.eye() + (b.eye() - a.eye()) * t;
+  out.target = eye - e * out.distance;
+  // Roll so the constructed camera's up is the slerped up, via the same basis the
+  // renderer will use (after the pitch clamp and with the camera's own up-hint).
+  const Vec3 viewDir = e * -1.0f;
+  const Vec3 r0 = normalize(cross(viewDir, out.upHint()));
+  const Vec3 up0 = cross(r0, viewDir);
+  Vec3 nPerp = wantUp - viewDir * dot(wantUp, viewDir);
+  if (length(nPerp) > 1e-5f) {
+    nPerp = normalize(nPerp);
+    out.roll = -std::atan2(dot(cross(up0, nPerp), viewDir), dot(up0, nPerp));
+  }
+  return out;
+}
+
 OrbitCamera::ScreenPoint OrbitCamera::project(const Vec3& world, float aspect,
                                               float width, float height) const {
   const Mat4 vp = viewProj(aspect);

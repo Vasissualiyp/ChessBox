@@ -491,6 +491,20 @@ view::OrbitCamera surfaceFollowCamera(const view::MovePath& path, const PlaySurf
   return surfaceChaseCamera(here, travel, distance, upright, lift);
 }
 
+bool followClips(const view::MovePath& path, const PlaySurface& surf, float t,
+                 float lookahead, float distance, float lift) {
+  if (surf.empty()) return false;
+  const float eps = 0.02f;
+  const float t2 = std::min(1.0f, std::max(0.0f, t + lookahead));
+  // The camera travels from where it is now to where the follow puts it next; if that
+  // segment, or the line from there to the piece, crosses a tile, the board has to turn.
+  const view::OrbitCamera now = surfaceFollowCamera(path, surf, t, distance, false, lift);
+  const view::OrbitCamera next =
+      surfaceFollowCamera(path, surf, t2, distance, false, lift);
+  const view::Vec3 piece = surfaceMoveSample(path, surf, t2).position;
+  return surf.blocked(now.eye(), next.eye(), eps) || surf.blocked(next.eye(), piece, eps);
+}
+
 namespace {
 
 /// The outward normal of one seat at a candidate slide, without building the whole

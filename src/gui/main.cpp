@@ -231,27 +231,6 @@ view::OrbitCamera blendCamera(const view::OrbitCamera& base,
   return out;
 }
 
-/// Blend two orbit cameras by interpolating the *eye direction* (and the roll) rather
-/// than yaw/pitch separately. The choreography's camera is an intrinsic frame - up is the
-/// piece's upright, right is `a x b` - and yaw/pitch/roll are not linear in that frame:
-/// interpolating them component-wise turns the camera through angles it should not visit,
-/// and the flat blend's positive-pitch clamp would refuse to look at a piece whose
-/// uprights point below the horizon. At `k = 1` this is `want`, to the bit.
-view::OrbitCamera blendShapeCamera(const view::OrbitCamera& base,
-                                   const view::OrbitCamera& want, float k) {
-  view::OrbitCamera out = base;
-  out.target = base.target + (want.target - base.target) * k;
-  out.distance = std::max(0.5f, base.distance + (want.distance - base.distance) * k);
-  const view::Vec3 be = view::normalize(base.eye() - base.target);
-  const view::Vec3 we = view::normalize(want.eye() - want.target);
-  view::Vec3 e = be + (we - be) * k;
-  e = view::length(e) > 1e-5f ? view::normalize(e) : we;
-  out.pitch = std::asin(std::clamp(e.z, -0.999f, 0.999f));
-  out.yaw = std::atan2(e.x, -e.y);
-  out.roll = base.roll + wrapAngle(want.roll - base.roll) * k;
-  return out;
-}
-
 /// How far the chase camera sits from the followed piece: close enough to make the piece
 /// the subject, at a fraction of the shape's span. The anti-clip search tests occlusion
 /// at this same distance, so a seat it finds clear is clear for the camera that follows.
@@ -289,14 +268,9 @@ struct ShapeMoveSequence {
   view::OrbitCamera camera{};    ///< the effective camera for the frame just computed
   render::SlideOffset startOffset{};  ///< the transient offset when the move began
   render::SlideOffset alignStart{};   ///< Align's target: clear from the start camera
-  render::SlideOffset chaseStart{};   ///< Approach's target: clear behind the piece
-  render::SlideOffset travelFrom{};
-  render::SlideOffset travelTo{};
-  render::SlideOffset returnFrom{};
-  render::SlideOffset offset{};  ///< the live transient offset, written to settings
+  render::SlideOffset travelTo{};     ///< Travel's target: clear along the route
+  render::SlideOffset offset{};       ///< the live transient offset, written to settings
   CellId trackedCell{kInvalidCell};
-  float cellElapsed{0.0f};
-  render::ShapeStage lastStage{render::ShapeStage::Done};
 };
 
 /// The choreography to hand a path that must not run it: an inactive sequence falls back
@@ -417,11 +391,38 @@ namespace {
 constexpr float kShapeAlignSeconds = 0.7f;
 constexpr float kShapeApproachSeconds = 0.9f;
 constexpr float kShapeReturnSeconds = 0.9f;
-constexpr float kShapeCellMorphSeconds = 0.4f;
+/// How fast the board may morph while a move is followed, in lattice cells of slide per
+/// second at morph speed 1. A target half a period away is then a turn the eye can follow
+/// rather than a flip - which is why the morph is a bounded step and not an eased jump
+/// (M17.19).
+constexpr float kShapeMorphRate = 6.0f;
+/// How far ahead of the piece the morph looks for a camera that is about to cross the
+/// board, as a fraction of the move. A small window is enough: the camera moves a little
+/// each frame, and the board must already be turning by the time it gets there.
+constexpr float kShapeLookahead = 0.06f;
 
-render::SlideOffset mixSlide(const render::SlideOffset& a, const render::SlideOffset& b,
-                             float t) {
-  return {a.u + (b.u - a.u) * t, a.v + (b.v - a.v) * t};
+/// Move one slide coordinate toward `goal` by at most `maxStep`, the short way round the
+/// `period` (0 when the axis does not wrap). The result is brought back into [0, period).
+float stepSlideCoord(float cur, float goal, float maxStep, float period) {
+  if (period <= 0.0f) {
+    const float d = goal - cur;
+    if (std::abs(d) <= maxStep) return goal;
+    return cur + (d > 0.0f ? maxStep : -maxStep);
+  }
+  float d = std::fmod(goal - cur, period);
+  if (d > period * 0.5f) d -= period;
+  if (d < -period * 0.5f) d += period;
+  if (std::abs(d) <= maxStep) return std::fmod(cur + d + period, period);
+  float out = std::fmod(cur + (d > 0.0f ? maxStep : -maxStep), period);
+  if (out < 0.0f) out += period;
+  return out;
+}
+
+render::SlideOffset stepSlide(const render::SlideOffset& cur,
+                              const render::SlideOffset& goal, float maxStepU,
+                              float maxStepV, float periodU, float periodV) {
+  return {stepSlideCoord(cur.u, goal.u, maxStepU, periodU),
+          stepSlideCoord(cur.v, goal.v, maxStepV, periodV)};
 }
 
 }  // namespace
@@ -461,18 +462,24 @@ void updateShapeSequence(app::Shell& shell, ShapeMoveSequence& seq, float dt) {
     fresh.camera = from;
     fresh.startOffset = {st.geometryAlignOffset, st.geometryAlignOffsetV};
     fresh.offset = fresh.startOffset;
-    if (st.geometryAlign) {
-      const view::Vec3 toCam = view::normalize(from.eye() - from.target);
-      fresh.alignStart = render::alignSlideToFace(session->variant(), path.from, toCam,
-                                                  std::max(1.0f, from.distance));
-    } else {
-      fresh.alignStart = fresh.startOffset;
+    // Morph at the start only if the player's own line to the piece is actually blocked
+    // by a square - the morph exists to clear a blocked view, not to turn a clear one.
+    {
+      const render::PlaySurface startSurf = render::PlaySurface::build(
+          session->variant(), poseFrom(st, session->variant()));
+      const view::Vec3 piece = render::surfaceMoveSample(path, startSurf, 0.0f).position;
+      const bool blocked =
+          st.geometryAlign && startSurf.blocked(from.eye(), piece, 0.02f);
+      if (blocked) {
+        const view::Vec3 toCam = view::normalize(from.eye() - from.target);
+        fresh.alignStart = render::alignSlideToFace(session->variant(), path.from, toCam,
+                                                    std::max(1.0f, from.distance));
+      } else {
+        fresh.alignStart = fresh.startOffset;
+      }
     }
     seq = fresh;
     session->setMoveProgress(0.0f);
-    // The target behind the piece at the start of travel; `alignStart` is the clear-from-
-    // the-player's-eye one, this is the clear-from-behind-the-piece one.
-    seq.chaseStart = alignOffsetFor(shell, path.from);
   }
   if (!seq.active) return;
 
@@ -499,37 +506,71 @@ void updateShapeSequence(app::Shell& shell, ShapeMoveSequence& seq, float dt) {
   const render::PlaySurface surf =
       render::PlaySurface::build(session->variant(), poseFrom(st, session->variant()));
 
+  // The morph is always the same bounded turn: move the slide toward whichever pose the
+  // stage wants, by at most a fixed rate. No stage can spin the board a half-period in a
+  // frame, which is what made the shape (and the camera with it) flip.
+  const float periodU = 2.0f * static_cast<float>(session->variant().dims.extent(0));
+  const float periodV = render::PlaySurface::slidesAlongRanks(session->variant())
+                            ? 2.0f * static_cast<float>(session->variant().dims.extent(1))
+                            : 0.0f;
+  const float step = kShapeMorphRate * speed * dt;
+  const auto morphTo = [&](const render::SlideOffset& goal) {
+    seq.offset = stepSlide(seq.offset, goal, step, step, periodU, periodV);
+  };
+  const auto sameSlide = [&](float a, float b, float period) {
+    if (period <= 0.0f) return std::abs(a - b) < 1e-3f;
+    float d = std::fmod(a - b, period);
+    if (d < 0.0f) d += period;
+    return d < 1e-3f || d > period - 1e-3f;
+  };
+  bool settled = false;
+
+  // The stages are strictly sequential, and morphing and camera motion do not overlap
+  // except inside Travel (where following and morphing go together by definition):
+  //   Align   - morph, camera still
+  //   Approach- camera to the piece, board still
+  //   Travel  - piece moves, camera follows, board morphs as needed
+  //   Return  - camera back, board still
+  //   Done    - board morphs home, camera still
   switch (beat.stage) {
     case render::ShapeStage::Align:
       // Morph in place: the camera does not move, only the board turns under it.
-      seq.offset =
-          mixSlide(seq.startOffset, seq.alignStart, render::shapeEase(beat.local));
+      morphTo(seq.alignStart);
       break;
     case render::ShapeStage::Approach:
-      seq.offset =
-          mixSlide(seq.alignStart, seq.chaseStart, render::shapeEase(beat.local));
+      // The camera flies to the piece and the board is held exactly as Align left it.
       break;
     case render::ShapeStage::Travel: {
+      // Re-aim only when the followed cell changes; the search is what says *which* way
+      // the board has to turn.
       const CellId cell = currentFollowedCell(shell, surf);
       if (cell != seq.trackedCell) {
         seq.trackedCell = cell;
-        seq.travelFrom = seq.offset;
         seq.travelTo = alignOffsetFor(shell, cell);
-        seq.cellElapsed = 0.0f;
       }
-      seq.cellElapsed += dt;
-      const float local = render::shapeEase(
-          std::min(1.0f, seq.cellElapsed * speed / kShapeCellMorphSeconds));
-      seq.offset = mixSlide(seq.travelFrom, seq.travelTo, local);
+      // Look ahead at where the camera is going. While its own path would cross a square,
+      // morph the board toward the clear pose; once the path is clear, hold the pose that
+      // cleared it.
+      const bool clip = render::followClips(path, surf, beat.local, kShapeLookahead,
+                                            chaseEyeDistance(surf), followLift(st));
+      if (st.geometryAlign && clip) morphTo(seq.travelTo);
       break;
     }
     case render::ShapeStage::Return:
-      if (seq.lastStage != render::ShapeStage::Return) seq.returnFrom = seq.offset;
-      seq.offset =
-          mixSlide(seq.returnFrom, seq.startOffset, render::shapeEase(beat.local));
+      // The camera flies back and the board is held exactly as Travel left it - the shape
+      // is turned home only after the camera has arrived (Done).
       break;
     case render::ShapeStage::Done:
-      seq.offset = seq.startOffset;
+      // Camera home and still: morph the board back to the player's own pose, at the same
+      // bounded rate. The stage is time-boxed, but a big offset needs longer: keep
+      // turning until it is actually home, so ending the sequence never snaps the shape.
+      if (sameSlide(seq.offset.u, seq.startOffset.u, periodU) &&
+          sameSlide(seq.offset.v, seq.startOffset.v, periodV)) {
+        seq.offset = seq.startOffset;
+        settled = true;
+      } else {
+        morphTo(seq.startOffset);
+      }
       break;
   }
 
@@ -578,12 +619,11 @@ void updateShapeSequence(app::Shell& shell, ShapeMoveSequence& seq, float dt) {
   // Blend against the player's *live* camera, not the frozen start: an orbit made during
   // the shot is theirs and shows through, and the return has nothing to snap from when it
   // ends (the old flat camera folded its shot in as an offset for the same reason).
-  seq.camera = blendShapeCamera(session->playerCamera(), want, amount);
-  seq.lastStage = beat.stage;
+  seq.camera = view::slerpCamera(session->playerCamera(), want, amount);
 
   st.geometryAlignOffset = seq.offset.u;
   st.geometryAlignOffsetV = seq.offset.v;
-  if (beat.stage == render::ShapeStage::Done) seq.active = false;
+  if (settled) seq.active = false;
 }
 
 /// Put the camera round whatever the board has just become.

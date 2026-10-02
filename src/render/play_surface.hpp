@@ -113,6 +113,14 @@ inline constexpr float kDefaultFollowLift = 0.57735027f;
                                                     float distance, bool upright,
                                                     float lift = kDefaultFollowLift);
 
+/// True when the chase camera's own path over the next `lookahead` of the move - the
+/// segment its eye moves along, or its line to the piece at the end of that step - would
+/// cross the board. This is the condition the morph exists to clear (M17.19): the front
+/// end looks ahead, and turns the board only while this is true. Pure in `t`.
+[[nodiscard]] bool followClips(const view::MovePath& path, const PlaySurface& surf,
+                               float t, float lookahead, float distance,
+                               float lift = kDefaultFollowLift);
+
 /// The slide offsets that turn `target`'s cell toward a camera looking along `toCamera`
 /// (unit, the direction from the cell toward the eye), preferring offsets where nothing
 /// on the shape lies between the two, tested at `eyeDistance`. This is the turntable

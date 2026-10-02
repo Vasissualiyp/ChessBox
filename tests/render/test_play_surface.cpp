@@ -1264,4 +1264,33 @@ TEST_CASE("a followed move's camera beats align, approach, travel, then return",
   CHECK(shapeEase(0.9f) > 0.9f);
 }
 
+TEST_CASE("the look-ahead morph sees the camera about to cross the board", "[render]") {
+  // M17.19: the morph is driven by looking at where the camera is going. On the torus's
+  // inner ring the chase camera's own path crosses the tube; the aligned board clears it.
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("torus"));
+  const int nz = static_cast<int>(v.dims.extent(1));
+  const auto cell = [&](int f, int r) { return v.dims.toCell(Coord::of({f, r})); };
+  view::MovePath path;
+  path.from = cell(0, 0);
+  path.to = cell(0, nz / 2);
+  for (int r = 0; r < nz / 2; ++r) {
+    path.steps.push_back(
+        {cell(0, r), cell(0, r + 1), view::StepKind::Interior, {}, 0, Side::Max});
+  }
+  const PlaySurface surf = PlaySurface::build(v);
+  const float eye = 6.0f;
+  // At the far end the piece is on the inner side; the unaided camera path crosses the
+  // tube, which is exactly the condition the morph exists to clear.
+  CHECK(followClips(path, surf, 0.85f, 0.06f, eye));
+  // Turn the board so the followed cell presents its outer face, and the path is clear.
+  const view::Vec3 travel{0.0f, 0.0f, 1.0f};
+  const SlideOffset off = alignSlideU(v, cell(0, nz / 2), travel, eye);
+  SurfacePose pose;
+  pose.slideU = off.u;
+  pose.slideV = off.v;
+  const PlaySurface turned = PlaySurface::build(v, pose);
+  // At the destination the aligned board's view line to the piece is clear.
+  CHECK_FALSE(followClips(path, turned, 1.0f, 0.0f, eye));
+}
+
 #endif  // CB_HAVE_IMGUI

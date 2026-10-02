@@ -80,26 +80,38 @@ states each frame's `t` outright. A clip frame at time `t` is byte-identical to 
 
 ## Following a move on a shape (M17.19)
 
-When the geometry view is on and the move camera is not `off`, a played move runs a four-beat
+When the geometry view is on and the move camera is not `off`, a played move runs a
 choreography instead of M11's lead/pull blend. It is what makes a torus read as a place the
-piece travels *through*.
+piece travels *through*. The stages are **strictly sequential**, and morphing and camera
+motion do not overlap outside Travel (where following and morphing go together by
+definition):
 
-- **Align.** The camera does not move; the board **morphs** - its `PlaySurface` slide - so the
-  player's own line to the start square is clear (`alignSlideToFace`).
+- **Align.** The camera is still; the board **morphs** - its `PlaySurface` slide - only if the
+  player's own line to the start square is actually blocked (`alignSlideToFace`).
 - **Approach.** The camera flies from the player's view to the chase pose behind the piece at
-  the start of its route. The piece is held still through Align and Approach, so it never
-  moves before the camera has reached it.
-- **Travel.** The piece travels; the camera follows, and the board keeps morphing so the
-  followed cell stays visible (`alignSlideU`).
-- **Return.** The piece lands; the camera flies back to the player's view and the board morphs
-  home (the transient offset returns to the player's own slide).
+  the start of its route, **with the board held still**. The piece is pinned at the start
+  through Align and Approach, so it never moves before the camera has reached it.
+- **Travel.** The piece travels; the camera follows, and the board morphs **only when the
+  camera's own next path would cross a square** (`render::followClips`), toward the clear pose
+  (`alignSlideU`).
+- **Return.** The camera flies back to the player's view, board still.
+- **Done.** The board morphs home to the player's own slide, camera still; the sequence does
+  not end until it is actually home, so nothing snaps.
 
 `render::shapeBeat(elapsed, align, approach, travel, return)` is the pure timeline
 (`docs/plan/M17-geometry-view.md`); the front end owns the clock
 (`ShapeMoveSequence` in `src/gui/main.cpp`) and drives the move animation's own progress from
-it, so the piece is pinned through the lead-in and the return. `blendShapeCamera` interpolates
-the *eye direction* and roll, never yaw/pitch/roll component-wise, and adopts the chase frame
-**fully** during Travel.
+it, so the piece is pinned through the lead-in and the return.
+
+### The camera move is a quaternion slerp
+
+Stages 1→2 and 3→4 move the camera with `view::slerpCamera(a, b, t)`: the **eye travels a
+straight line** (`a.eye() + (b.eye() - a.eye()) t`, with the look-at derived from it) and the
+**orientation is a quaternion slerp** on the shortest arc, converted back to yaw/pitch/roll
+through the renderer's own `cameraBasis`. Interpolating yaw/pitch/roll separately, or the eye
+*direction* by a plain lerp (which walks through the origin when the two views nearly oppose),
+is what produced the 720-degree spins this replaces. During Travel the chase frame is adopted
+**fully** (`t = 1`), so the piece is exactly upright.
 
 ### The chase frame
 

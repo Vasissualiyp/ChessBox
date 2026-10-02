@@ -1355,6 +1355,20 @@ that a followed move ran at a few frames per second.
 - **Tests.** The pure `shapeBeat` timeline; `surfaceChaseCamera`'s right `= n`, up `= c x n`
   read from the matrix the renderer uses; the existing follow/anti-clip tests still pass.
 
-**Still open:** the morph is currently a per-cell target; the next step is a continuous,
-look-ahead morph - compute the camera's next position and rotate the board only when the
-camera's own path would pass through the squares.
+**Morphing (follow-up, same day).** The morph is now **look-ahead and rate-bounded**, and the
+camera moves are quaternion blends:
+
+- `render::followClips(path, surf, t, lookahead, distance, lift)` asks whether the chase
+  camera's own next path (its eye segment, or its line to the piece) would cross a square.
+  Travel morphs toward the clear pose **only while that is true**; every stage moves the slide
+  by at most `kShapeMorphRate` cells/s (`Settings::shapeMorphSpeed`), so no stage can spin the
+  board a half-period in a frame - which was the flip.
+- The stages are strictly sequential: Align (morph, camera still) → Approach (camera to piece,
+  board still) → Travel (piece follows, board morphs) → Return (camera back, board still) →
+  Done (board morphs home, camera still, sequence does not end until home).
+- Stages 1→2 and 3→4 use `view::slerpCamera`: the eye travels a straight line and the
+  orientation is a quaternion slerp on the shortest arc (`tests/unit/view/test_camera.cpp`),
+  replacing a blend that lerped the eye direction through the origin and produced 720-degree
+  spins.
+
+**Still open:** the M17.5 surface coordinates and seam rails; M17.12's larger limits.
