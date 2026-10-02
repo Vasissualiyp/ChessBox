@@ -153,6 +153,56 @@ so a clip of it is reproducible.
 - **The dwell and any ambient motion must stay out of the deterministic frame**, or clips stop
   reproducing — the M12.1 ambient-orbit rule again.
 
+## M12.7 Save and load a game (the game saver)
+
+**Want.** Save a played game to a file - the move history *and* the variant it was played on -
+so it can be loaded and played again later, replayed through the move camera, or handed to the
+M12.6 runner for a clip. "Save this, open it tomorrow, watch it again."
+
+**What it is.** A self-contained game file: enough to reconstruct the exact position and the
+whole move list, with no presentation state in it. It is the user-facing form of the replay
+corpus (ARCH §11) and the input the M12.6 runner already wants.
+
+**Build.**
+
+- **Format.** A text document reusing what already exists: the variant **name** and its
+  `VariantId` (so a rules change since the save is detected, not silently misapplied), an
+  optional starting **FEN-N** (`src/io/fen.hpp`), and the move history in the engine's own
+  notation (`src/io/notation.hpp`). The same parser the M12.6 runner uses reads it; a saved
+  game is a playable notation file with a header.
+- **Load.** Resolve the variant, load the start position, then replay the moves to rebuild the
+  current position and history - so the game can be **continued**, **replayed** (M12.3) or
+  **played back** by the M12.6 runner, all from one file.
+- **Compatibility is explicit.** If the variant's `VariantId` differs from the save's, refuse
+  with a message naming the mismatch rather than replaying a game the rules no longer describe.
+  A load→save→load round-trip leaves the position hash and the move list unchanged (the same
+  discipline as the M7.0.2 variant round-trip).
+- **Where.** A saves directory beside settings (`Settings::defaultPath()`'s neighbourhood);
+  **Save** / **Load** in the pause menu, and `--save FILE` / `--load FILE` on the command line.
+- **Presentation is not saved.** Camera mode, pose, slide and theme are not in the file: a
+  loaded game looks however the player's settings say, the way a `VariantId` never carries a
+  model or an icon. It must **not** enter `VariantId`, and it must never carry narrative.
+
+**Tests.**
+
+- Save after N moves, load, and the position hash and move history match the saved position.
+- Load→save→load is unchanged, and a replayed clip of the loaded game is byte-identical to the
+  clip of the original.
+- A file whose variant `VariantId` no longer matches is refused with a clear message.
+- `standard`, a glued variant and a 4-D variant all save and load.
+
+**Acceptance.**
+
+1. A game is saved to a file and reopened later: the same position, the same move list, and
+   the same replay.
+2. The saved file plays through M12.6 with no conversion step.
+3. A save made before a rules change is refused rather than misreplayed.
+
+**Risks and non-goals.** Not a database or a gallery of games (that is M9 content); not a
+multiplayer/network save (M8 owns the move stream); no engine or geometry change. The format
+is data over the notation and FEN-N the engine already speaks, so the risk is the compatibility
+check being skipped - which is exactly what the `VariantId` test pins.
+
 ## Tests and acceptance
 
 - **Clip determinism:** the same clip arguments produce byte-identical frame files on a
