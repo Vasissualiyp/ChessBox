@@ -277,5 +277,11 @@ The save/load half of the runner's file format is in.
   round-trip (hash and move count), replay-from-its-own-start, illegal-move naming,
   `VariantId` mismatch, malformed headers, and a glued variant.
 
-**Still to do:** the runner (`--play FILE --clip DIR`, M12.6) and the in-game Save/Load
-menu entries.
+**In-game menu (2026-10-01).** The pause menu gains a **GAME FILES** section: a name field,
+**Save** and **Load** buttons, and a selectable list of the games already in the saves
+folder. `Shell::saveGame/loadGame/savedGames` own the directory (`games` beside the settings
+file) and sanitize the name; `Session::saveGame/loadGame` do the I/O and replay. Loading a
+file for a different variant starts that variant first. Tests in
+`tests/unit/app/test_shell.cpp` (round-trip through the shell, bad name, missing game).
+
+**Still to do:** the runner (`--play FILE --clip DIR`, M12.6).

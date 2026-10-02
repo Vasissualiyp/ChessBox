@@ -41,6 +41,10 @@ struct UiRequest {
   /// A purely visual setting changed - the icon set, say - and has to reach the
   /// interface rather than the engine.
   bool applyLooks{false};
+  /// Save or load the named game (in the shell's games directory). One frame's request.
+  bool saveGame{false};
+  bool loadGame{false};
+  std::string gameName;
 };
 
 /// The game's interface: rails, ledger, status, promotion, library.
@@ -198,6 +202,8 @@ class Ui {
   /// interface holds no opinion of its own about it.
   IconStyle iconStyle_{IconStyle::Faceted};
   float scale_{1.0f};
+  /// The name in the pause menu's save/load field, kept between frames.
+  char gameName_[64]{"quick"};
   /// The shell's clock, and where it is in a screen change. `enter_` runs 0 to 1 as a
   /// screen arrives; the menu is scaled and faded along it, which is as close to a
   /// camera push as a 2-D draw list gets.

@@ -2,9 +2,11 @@
 #include "app/session.hpp"
 
 #include <algorithm>
+#include <fstream>
 #include <sstream>
 
 #include "io/fen.hpp"
+#include "io/game_file.hpp"
 #include "io/notation.hpp"
 
 namespace cb::app {
@@ -631,6 +633,29 @@ Result<void> Session::loadFen(std::string_view fen) {
   selected_ = kInvalidCell;
   message_ = "position set";
   refreshSnapshot();
+  return {};
+}
+
+Result<void> Session::saveGame(const std::filesystem::path& path) const {
+  const std::string text = toGameFileText(*variant_, *game_);
+  std::ofstream out(path, std::ios::trunc);
+  if (!out) return fail(ErrorCode::Internal, "cannot write '" + path.string() + "'");
+  out << text;
+  if (!out) return fail(ErrorCode::Internal, "writing '" + path.string() + "' failed");
+  return {};
+}
+
+Result<void> Session::loadGame(const GameFile& file) {
+  if (!file.variant.empty() && file.variant != variant_->name) {
+    return fail(ErrorCode::ValidationError, "game file is for variant '" + file.variant +
+                                                "', not '" + variant_->name + "'");
+  }
+  if (auto ok = applyGameFile(file, *game_); !ok.has_value()) return ok;
+  selected_ = kInvalidCell;
+  pending_ = PendingPromotion{};
+  message_ = "game loaded";
+  refreshSnapshot();
+  refreshTemporalView();
   return {};
 }
 

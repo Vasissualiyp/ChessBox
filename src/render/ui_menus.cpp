@@ -532,6 +532,38 @@ UiRequest Ui::buildPause(app::Shell& shell) {
     shell.go(app::Screen::PauseQuitConfirm);
   }
 
+  // Saved games (M12.7): write the running game to a named file, or reopen one. The files
+  // live in a `games` folder beside the settings; the list is whatever is already there.
+  ImGui::Dummy(ImVec2(0, px(10)));
+  ImGui::PushFont(static_cast<ImFont*>(fontSmall_));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::TextUnformatted("GAME FILES");
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
+  ImGui::SetNextItemWidth(px(228.0f));
+  ImGui::InputText("##gamename", gameName_, sizeof(gameName_));
+  if (button("Save", t, px(108), false, false, true, display)) {
+    request.saveGame = true;
+    request.gameName = gameName_;
+  }
+  ImGui::SameLine();
+  if (button("Load", t, px(108), false, false, true, display)) {
+    request.loadGame = true;
+    request.gameName = gameName_;
+  }
+  if (!shell.message().empty()) {
+    ImGui::PushFont(static_cast<ImFont*>(fontSmall_));
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+    ImGui::TextUnformatted(shell.message().c_str());
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+  }
+  for (const std::string& g : shell.savedGames()) {
+    if (ImGui::Selectable(g.c_str())) {
+      std::snprintf(gameName_, sizeof(gameName_), "%s", g.c_str());
+    }
+  }
+
   // The keys, where a player looks for them.
   ImGui::Dummy(ImVec2(0, px(10)));
   ImGui::PushFont(static_cast<ImFont*>(fontSmall_));

@@ -502,3 +502,45 @@ TEST_CASE("the curated captions show no undefined term", "[unit][app]") {
     check();
   }
 }
+
+TEST_CASE("a game is saved and reopened through the shell", "[unit][app]") {
+  const auto settings = tempSettings("save-load.conf");
+  auto shell = makeShell(settings);
+  REQUIRE(shell->startGame("standard").has_value());
+  app::Session& s = *shell->session();
+
+  // Two legal clicks, whatever they are, so there is a position worth saving.
+  for (int i = 0; i < 2; ++i) {
+    REQUIRE_FALSE(s.game().legalMoves().empty());
+    const Move m = s.game().legalMoves().front();
+    app::Action a;
+    a.kind = app::ActionKind::ClickCell;
+    a.cell = m.from;
+    REQUIRE(s.apply(a).has_value());
+    a.cell = m.to;
+    REQUIRE(s.apply(a).has_value());
+  }
+  const std::uint64_t hash = s.game().position().hash();
+  const std::size_t plies = s.game().plyCount();
+
+  REQUIRE(shell->saveGame("mygame").has_value());
+  REQUIRE(shell->savedGames() == std::vector<std::string>{"mygame"});
+
+  // Start something else, then reopen the saved game: the shell switches back to the
+  // saved variant and reproduces the position.
+  REQUIRE(shell->startGame("klein").has_value());
+  REQUIRE(shell->loadGame("mygame").has_value());
+  CHECK(shell->currentVariant() == "standard");
+  CHECK(shell->screen() == Screen::Game);
+  CHECK(shell->session()->game().position().hash() == hash);
+  CHECK(shell->session()->game().plyCount() == plies);
+}
+
+TEST_CASE("save/load rejects a bad name and a missing game", "[unit][app]") {
+  const auto settings = tempSettings("save-load-bad.conf");
+  auto shell = makeShell(settings);
+  REQUIRE(shell->startGame("standard").has_value());
+  CHECK_FALSE(shell->saveGame("").has_value());
+  CHECK_FALSE(shell->saveGame("../escape").has_value());
+  CHECK_FALSE(shell->loadGame("does-not-exist").has_value());
+}

@@ -121,6 +121,16 @@ class Shell {
   void setVariantLoader(VariantLoader loader);
   Result<void> startGame(const std::string& variantName);
 
+  /// Saved games live in a `games` folder beside the settings file.
+  [[nodiscard]] std::filesystem::path gamesDir() const;
+  /// Save the running game as `name` (a `.cbgame` file in `gamesDir`).
+  Result<void> saveGame(const std::string& name);
+  /// Load the saved game `name`, starting its variant first when it is not the current
+  /// one.
+  Result<void> loadGame(const std::string& name);
+  /// The names of the saved games, sorted, for a menu to list.
+  [[nodiscard]] std::vector<std::string> savedGames() const;
+
   /// A variant's advertised difficulty, for the library's order and its colours.
   /// Resolved through the loader once and remembered; a name that will not load is
   /// `Other` rather than an error, because the picker must still be able to draw it.

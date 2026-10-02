@@ -2,7 +2,11 @@
 #include "app/shell.hpp"
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 
+#include "io/game_file.hpp"
 #include "io/variant_toml.hpp"
 
 namespace cb::app {
@@ -310,6 +314,84 @@ Result<void> Shell::startGame(const std::string& variantName) {
   screen_ = Screen::Game;
   previous_ = Screen::MainMenu;
   return {};
+}
+
+std::filesystem::path Shell::gamesDir() const {
+  return settingsPath_.parent_path() / "games";
+}
+
+namespace {
+/// A name safe to turn into a file name: no separators, no traversal, nothing exotic.
+bool validGameName(const std::string& name) {
+  if (name.empty() || name.size() > 64) return false;
+  for (const char c : name) {
+    const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                    (c >= '0' && c <= '9') || c == ' ' || c == '-' || c == '_';
+    if (!ok) return false;
+  }
+  return true;
+}
+}  // namespace
+
+Result<void> Shell::saveGame(const std::string& name) {
+  if (session_ == nullptr)
+    return fail(ErrorCode::ValidationError, "there is no game to save");
+  if (!validGameName(name)) {
+    message_ = "a game name can use letters, digits, spaces, '-' and '_'";
+    return fail(ErrorCode::ValidationError, message_);
+  }
+  std::error_code ec;
+  std::filesystem::create_directories(gamesDir(), ec);
+  const auto path = gamesDir() / (name + ".cbgame");
+  if (auto ok = session_->saveGame(path); !ok.has_value()) {
+    message_ = ok.error().message;
+    return ok;
+  }
+  message_ = "saved '" + name + "'";
+  return {};
+}
+
+Result<void> Shell::loadGame(const std::string& name) {
+  if (!validGameName(name)) {
+    message_ = "a game name can use letters, digits, spaces, '-' and '_'";
+    return fail(ErrorCode::ValidationError, message_);
+  }
+  std::ifstream in(gamesDir() / (name + ".cbgame"));
+  if (!in) {
+    message_ = "no saved game called '" + name + "'";
+    return fail(ErrorCode::ValidationError, message_);
+  }
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  auto file = parseGameFile(ss.str());
+  if (!file.has_value()) {
+    message_ = file.error().format();
+    return fail(file.error().code, file.error().message);
+  }
+  // The file names its variant; start it first if it is not the one already loaded.
+  if (session_ == nullptr || file->variant != currentVariant_) {
+    if (auto ok = startGame(file->variant); !ok.has_value()) return ok;
+  }
+  if (auto ok = session_->loadGame(*file); !ok.has_value()) {
+    message_ = ok.error().message;
+    return ok;
+  }
+  message_ = "loaded '" + name + "'";
+  screen_ = Screen::Game;
+  previous_ = Screen::Paused;
+  return {};
+}
+
+std::vector<std::string> Shell::savedGames() const {
+  std::vector<std::string> names;
+  std::error_code ec;
+  for (const auto& e : std::filesystem::directory_iterator(gamesDir(), ec)) {
+    if (e.is_regular_file() && e.path().extension() == ".cbgame") {
+      names.push_back(e.path().stem().string());
+    }
+  }
+  std::sort(names.begin(), names.end());
+  return names;
 }
 
 void Shell::pause() {

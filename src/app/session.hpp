@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -13,6 +14,10 @@
 #include "view/move_camera.hpp"
 #include "view/seams.hpp"
 #include "view/snapshot.hpp"
+
+namespace cb {
+struct GameFile;  // io/game_file.hpp; only a reference is needed here
+}
 
 namespace cb::app {
 
@@ -199,6 +204,12 @@ class Session {
   /// Replace the current position from FEN-N, discarding history. Used for setting up a
   /// study or a test position, and by the front end's position entry.
   Result<void> loadFen(std::string_view fen);
+
+  /// Write this game (variant, start position, move history) to a game file (M12.7).
+  Result<void> saveGame(const std::filesystem::path& path) const;
+  /// Replay a parsed game file into this session. Fails if the file names a different
+  /// variant; a front end starts that variant first.
+  Result<void> loadGame(const GameFile& file);
 
   /// Resolve a pixel to a cell and act on it. Returns kInvalidCell if the click missed
   /// the board, which is not an error - it deselects, like clicking off a board does.

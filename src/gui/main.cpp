@@ -1404,6 +1404,16 @@ int main(int argc, char** argv) {
       frameBoard(*shell);
       wasSurface = optionsFor(*shell).surface;
     }
+    if (request.saveGame) (void)shell->saveGame(request.gameName);
+    if (request.loadGame) {
+      if (shell->loadGame(request.gameName).has_value()) {
+        // The loaded game may be a different variant, so treat it like a variant load:
+        // refresh the renderer and put the camera round whatever is now drawn.
+        renderer->setOptions(optionsFor(*shell));
+        frameBoard(*shell);
+        wasSurface = optionsFor(*shell).surface;
+      }
+    }
     if (request.settingsChanged) {
       shell->applySettings();
       renderer->setOptions(optionsFor(*shell));
