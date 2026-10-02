@@ -85,10 +85,11 @@ float wrapSlide(float s, float period) {
   return std::fmod(s, period);
 }
 
-/// How high a gliding piece hovers, in cells, while it travels: one cell, enough that the
-/// base clears the squares everywhere including a torus's inner ring, where the chord
-/// between two seats dips furthest below the surface (M17.19).
-constexpr float kSurfaceHoverCells = 1.0f;
+/// How high a gliding piece hovers, in cells, while it travels. It reaches the genuine
+/// surface point at each boundary, so the path only needs a small lift to clear the half-
+/// cell chords either side of it; 0.4 of a cell reads as a hover without floating
+/// (M17.19).
+constexpr float kSurfaceHoverCells = 0.4f;
 
 /// The hover's own envelope over the move: 0 on the square at either end, 1 through the
 /// body, with a smooth ramp at each end so the piece does not pop.
