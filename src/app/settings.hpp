@@ -87,6 +87,10 @@ struct Settings {
   /// How far the chase camera looks down on the followed piece, in degrees above the
   /// surface's tangent plane: 0 is directly behind, 90 straight overhead.
   float followElevationDeg{30.0f};
+  /// How fast the shape-follow choreography moves (M17.19): the align, approach and
+  /// return stages and the per-cell morph all divide by this. 1 is the designed pace;
+  /// smaller is slower and more legible, larger is a quicker cut.
+  float shapeMorphSpeed{1.0f};
   /// How a move is followed on a shape: "chase" is the third-person camera that sits
   /// behind the piece along its route - the shipped follow. "turntable" instead keeps the
   /// player's camera angle and turns the **board** (the slide a middle-drag gives). A

@@ -111,6 +111,10 @@ class MoveAnimation {
   [[nodiscard]] float progress() const noexcept {
     return duration_ > 0.0f && elapsed_ < duration_ ? elapsed_ / duration_ : 1.0f;
   }
+  /// The full length of the running move in seconds, 0 when nothing is animating. The
+  /// shape-follow choreography (M17.19) needs it to budget its Travel stage before the
+  /// move has finished.
+  [[nodiscard]] float duration() const noexcept { return active_ ? duration_ : 0.0f; }
   [[nodiscard]] CellId travellingTo() const noexcept { return to_; }
   /// The route this animation was last started with. Needed by anything that samples a
   /// *different* placement of the same move - the geometry view's surface sampler, which

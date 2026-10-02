@@ -78,6 +78,55 @@ Settings: `cameraMode` (`off`/`piece`/`route`) and `followStrength`.
 states each frame's `t` outright. A clip frame at time `t` is byte-identical to the
 `--shot` at the same `t`.
 
+## Following a move on a shape (M17.19)
+
+When the geometry view is on and the move camera is not `off`, a played move runs a four-beat
+choreography instead of M11's lead/pull blend. It is what makes a torus read as a place the
+piece travels *through*.
+
+- **Align.** The camera does not move; the board **morphs** - its `PlaySurface` slide - so the
+  player's own line to the start square is clear (`alignSlideToFace`).
+- **Approach.** The camera flies from the player's view to the chase pose behind the piece at
+  the start of its route. The piece is held still through Align and Approach, so it never
+  moves before the camera has reached it.
+- **Travel.** The piece travels; the camera follows, and the board keeps morphing so the
+  followed cell stays visible (`alignSlideU`).
+- **Return.** The piece lands; the camera flies back to the player's view and the board morphs
+  home (the transient offset returns to the player's own slide).
+
+`render::shapeBeat(elapsed, align, approach, travel, return)` is the pure timeline
+(`docs/plan/M17-geometry-view.md`); the front end owns the clock
+(`ShapeMoveSequence` in `src/gui/main.cpp`) and drives the move animation's own progress from
+it, so the piece is pinned through the lead-in and the return. `blendShapeCamera` interpolates
+the *eye direction* and roll, never yaw/pitch/roll component-wise, and adopts the chase frame
+**fully** during Travel.
+
+### The chase frame
+
+The camera's frame is intrinsic to the piece, not to world up:
+
+- `a` - the direction of motion (the route's travel), `b` - the piece's upright (its surface
+  normal), `n = a x b` - across it,
+- `c = -a cos(theta) + b sin(theta)` - `-a` rotated up by the elevation (`lift = tan`), the
+  piece-to-eye direction,
+- the camera's **right is `n`**, its **up is `c x n`**.
+
+`c x n` is the piece's upright projected perpendicular to the view - the projection of `b`.
+`(a x b) x c = n x c` is its negative and points *down* the piece; using that order hangs the
+piece upside down. `render::surfaceChaseCamera` builds this frame explicitly and
+`tests/render/test_play_surface.cpp` ("the chase frame's axes are the piece's own") pins
+`right = n`, `up = c x n` out of the matrix the renderer actually uses.
+
+### Cost
+
+The align search scores ~100 candidate slides per followed cell. It used to build a whole
+`PlaySurface` (patches, seats, picker) for each, which cost ~0.24 s/frame on a Debug build
+(~5 fps during a followed move). On an orientable ring it now ranks candidates with a
+single-cell normal probe and builds the full surface only until one comes back unoccluded -
+the same argmax (an unoccluded candidate always outscores an occluded one), a couple of
+builds instead of 144. A non-orientable shape keeps the exact per-candidate build, because a
+lone raw normal is not the field its continuity walk draws with.
+
 ## Extending it
 
 A new camera *choice* is a field on `CameraPolicy` (data); a new *geometry* is a new

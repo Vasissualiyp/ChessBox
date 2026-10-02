@@ -47,6 +47,33 @@ struct SlideOffset {
   float v{0.0f};
 };
 
+/// The stages a followed move's camera passes through on a shape (M17.19). The move is
+/// bracketed: first the board **morphs** (the slide) until the camera's own line to the
+/// start square is clear, then the camera flies to the piece, then the piece travels with
+/// the camera chasing it, and finally the camera flies back while the board morphs home.
+/// The piece is held still through `Align`/`Approach` so it does not start moving before
+/// the camera has reached it.
+enum class ShapeStage : std::uint8_t { Align, Approach, Travel, Return, Done };
+
+/// Where a shape-followed move is in its camera choreography, and how far through the
+/// stage. Pure in `elapsed`, so a capture that states a time reproduces it.
+struct ShapeBeat {
+  ShapeStage stage{ShapeStage::Done};
+  float local{1.0f};  ///< 0..1 within the stage (1 once done)
+};
+
+/// Map elapsed sequence seconds to a stage and its local progress. Lead-in is
+/// `alignSeconds` then `approachSeconds`; the middle is the move's own `travelSeconds`;
+/// `returnSeconds` is the fly-back. A zero-length stage is skipped (its boundary falls
+/// through to the next). Pure.
+[[nodiscard]] ShapeBeat shapeBeat(float elapsed, float alignSeconds,
+                                  float approachSeconds, float travelSeconds,
+                                  float returnSeconds) noexcept;
+
+/// Smoothstep on `local` in [0,1], the ease every stage uses so nothing starts or stops
+/// with a jerk.
+[[nodiscard]] float shapeEase(float local) noexcept;
+
 /// The chase camera's elevation above the followed piece's tangent plane, expressed as a
 /// tangent (the ratio of the eye's normal lift to its distance behind), for a caller with
 /// no setting: 30 degrees. `Settings::followElevationDeg` overrides it.

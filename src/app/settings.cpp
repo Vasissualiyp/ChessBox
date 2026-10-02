@@ -116,6 +116,8 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.followUpright = asBool(value);
     else if (key == "follow_elevation")
       s.followElevationDeg = asFloat(value, s.followElevationDeg);
+    else if (key == "shape_morph_speed")
+      s.shapeMorphSpeed = asFloat(value, s.shapeMorphSpeed);
     else if (key == "shape_follow")
       s.shapeFollow = value;
     else if (key == "geometry_slide_u")
@@ -191,6 +193,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "geometry_align = " << boolText(geometryAlign) << '\n';
   out << "follow_upright = " << boolText(followUpright) << '\n';
   out << "follow_elevation = " << followElevationDeg << '\n';
+  out << "shape_morph_speed = " << shapeMorphSpeed << '\n';
   out << "shape_follow = " << shapeFollow << '\n';
   out << "geometry_slide_u = " << geometrySlideU << '\n';
   out << "geometry_slide_v = " << geometrySlideV << '\n';
@@ -234,6 +237,7 @@ void Settings::sanitize() {
   volumeEffects = std::clamp(volumeEffects, 0.0f, 1.0f);
   followStrength = std::clamp(followStrength, 0.0f, 1.0f);
   followElevationDeg = std::clamp(followElevationDeg, 5.0f, 80.0f);
+  shapeMorphSpeed = std::clamp(shapeMorphSpeed, 0.25f, 4.0f);
   if (cameraMode != "off" && cameraMode != "piece" && cameraMode != "route") {
     cameraMode = "off";
   }

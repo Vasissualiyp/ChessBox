@@ -962,6 +962,8 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::SliderFloat("Follow strength", &s.followStrength, 0.0f, 1.0f, "%.2f");
   ImGui::SliderFloat("Camera above the piece", &s.followElevationDeg, 5.0f, 80.0f,
                      "%.0f deg");
+  // How fast the shape-follow choreography morphs and moves (M17.19).
+  ImGui::SliderFloat("Morph speed", &s.shapeMorphSpeed, 0.25f, 2.5f, "%.2fx");
   ImGui::Checkbox("Keep the followed piece upright", &s.followUpright);
   ImGui::Checkbox("Stop the shape clipping the followed piece", &s.geometryAlign);
   ImGui::EndDisabled();
@@ -1096,6 +1098,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       before.invertOrbitY != s.invertOrbitY || before.cameraMode != s.cameraMode ||
       before.followStrength != s.followStrength ||
       before.followElevationDeg != s.followElevationDeg ||
+      before.shapeMorphSpeed != s.shapeMorphSpeed ||
       before.followUpright != s.followUpright ||
       before.geometryAlign != s.geometryAlign || before.shapeFollow != s.shapeFollow ||
       before.confirmMoves != s.confirmMoves || before.autoPromoteTo != s.autoPromoteTo ||

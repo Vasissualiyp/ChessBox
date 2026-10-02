@@ -1324,3 +1324,37 @@ an amount that can be set.
   radius via `SurfacePose::openness`, leaving the cross-section - the material's
   thickness - unchanged. It opens a tight torus/Klein bottle's hole and lengthens the
   Moebius loop, which are otherwise hard to read at the shipped ratios.
+
+---
+
+## Status: M17.19 - the shape-follow choreography, an intrinsic camera frame, and the align hot spot (2026-10-01)
+
+Play asked for the shape follow to be a sequence - morph clear, fly to the piece, travel, fly
+home - for the camera to rotate with the piece to each new direction of motion, and reported
+that a followed move ran at a few frames per second.
+
+- **The choreography.** A followed move on a shape is four stages
+  (`render::shapeBeat`): **Align** (the camera stays, the board morphs clear of the player's
+  line to the start square), **Approach** (the camera flies to the piece; the piece is held
+  still), **Travel** (the piece moves, the camera chases, the board keeps morphing), **Return**
+  (the camera flies home, the board morphs back). `ShapeMoveSequence` in `src/gui/main.cpp`
+  owns the clock and pins the move animation's progress through the lead-in and the return.
+  Settings: **Morph speed** (`Settings::shapeMorphSpeed`).
+- **The frame is the piece's, built explicitly.** `surfaceChaseCamera` takes `a` (the travel),
+  `b` (the piece's upright = its surface normal), `n = a x b` and
+  `c = -a cos(theta) + b sin(theta)` (the piece-to-eye vector, `-a` tilted up by the
+  elevation). The camera's **right is `n`**, its **up is `c x n`**. `(a x b) x c` is the
+  negative and hangs the piece upside down. `blendShapeCamera` interpolates the eye direction
+  and the roll (not yaw/pitch component-wise) and adopts the frame **fully** during Travel -
+  a half-applied frame was leaving the piece half-upright.
+- **The align search no longer dominates the frame.** It had built a whole `PlaySurface` for
+  each of ~100 candidate slides (measured: a followed move at ~5 fps in Debug). On an
+  orientable ring it now ranks candidates with a single-cell normal probe and builds the full
+  surface only until one is unoccluded - the identical argmax, a couple of builds instead of
+  100+. A non-orientable shape keeps the exact per-candidate build.
+- **Tests.** The pure `shapeBeat` timeline; `surfaceChaseCamera`'s right `= n`, up `= c x n`
+  read from the matrix the renderer uses; the existing follow/anti-clip tests still pass.
+
+**Still open:** the morph is currently a per-cell target; the next step is a continuous,
+look-ahead morph - compute the camera's next position and rotate the board only when the
+camera's own path would pass through the squares.

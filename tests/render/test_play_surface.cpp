@@ -910,6 +910,47 @@ TEST_CASE("the chase camera's up really is the piece's up", "[render]") {
   }
 }
 
+TEST_CASE("the chase frame's axes are the piece's own: right a x b, up c x n",
+          "[render]") {
+  // The exact frame the camera is built from, not "the piece roughly upright": `a` is the
+  // direction of motion, `b` the piece's upright, `n = a x b`, and `c` the back-and-up
+  // vector (`-a` rotated up by the elevation: the piece-to-eye direction). The camera's
+  // right must be `n` and its up `c x n`. The looser test above would not catch a wrong
+  // horizontal, which is why this reads the basis out of the matrix the renderer uses.
+  for (const std::string& name : kShapes) {
+    const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
+    const PlaySurface surf = PlaySurface::build(v);
+    const float aspect = 1000.0f / 700.0f;
+    for (std::size_t i = 0; i < surf.seats().size(); i += 5) {
+      const SurfaceSeat& seat = surf.seats()[i];
+      SurfaceMoveSample piece;
+      piece.position = seat.centre;
+      piece.normal = seat.normal;
+      piece.quat = seat.quat;
+      const view::Vec3 a0 = byQuat(seat.quat, view::Vec3{1, 0, 0});
+      const view::OrbitCamera cam = surfaceChaseCamera(piece, a0, 4.0f, true);
+      const view::Mat4 vp = cam.viewProj(aspect);
+      // `right` is lookFrom's first row; the world direction that points *up* the screen
+      // is the negation of the second row, because the projection flips Y for Vulkan.
+      const view::Vec3 right = view::normalize(view::Vec3{vp[0], vp[4], vp[8]});
+      const view::Vec3 up = view::normalize(view::Vec3{-vp[1], -vp[5], -vp[9]});
+      // The frame the construction asks for.
+      const view::Vec3 a = view::normalize(a0);
+      view::Vec3 b = piece.normal - a * view::dot(piece.normal, a);
+      b = view::normalize(b);
+      const view::Vec3 n = view::normalize(view::cross(a, b));
+      const float lift = kDefaultFollowLift;
+      const float cosT = 1.0f / std::sqrt(1.0f + lift * lift);
+      const float sinT = lift * cosT;
+      const view::Vec3 c = view::normalize(a * -cosT + b * sinT);
+      const view::Vec3 wantUp = view::normalize(view::cross(c, n));
+      CAPTURE(name, i);
+      CHECK_THAT(view::dot(right, n), WithinAbs(1.0f, 1e-3f));
+      CHECK_THAT(view::dot(up, wantUp), WithinAbs(1.0f, 1e-3f));
+    }
+  }
+}
+
 namespace {
 
 /// The camera's screen-up axis in world space, read from the matrix it actually projects
@@ -1185,6 +1226,42 @@ TEST_CASE("the Klein gluing seams are ordinary cell steps, not gaps", "[render]"
       CHECK(seam > 0.4f * widestU);
     }
   }
+}
+
+TEST_CASE("a followed move's camera beats align, approach, travel, then return",
+          "[render]") {
+  // M17.19: the piece is held still through the lead-in (Align/Approach) and only starts
+  // travelling once the camera has reached it; the return is a separate stage after the
+  // move. Pure in elapsed, so a capture that states a time reproduces it.
+  constexpr float kAlign = 0.6f, kApproach = 0.8f, kTravel = 1.5f, kReturn = 0.8f;
+  const auto beat = [&](float e) {
+    return shapeBeat(e, kAlign, kApproach, kTravel, kReturn);
+  };
+
+  CHECK(beat(0.0f).stage == ShapeStage::Align);
+  CHECK(beat(0.3f).stage == ShapeStage::Align);
+  CHECK_THAT(beat(0.3f).local, WithinAbs(0.5f, 1e-4f));  // half-way through align
+  CHECK(beat(kAlign).stage == ShapeStage::Approach);     // the boundary falls through
+  CHECK_THAT(beat(kAlign).local, WithinAbs(0.0f, 1e-4f));
+  CHECK(beat(kAlign + 0.4f).stage == ShapeStage::Approach);
+  CHECK(beat(kAlign + kApproach).stage == ShapeStage::Travel);
+  // Travel's local tracks the move's own progress.
+  CHECK_THAT(beat(kAlign + kApproach + 0.75f).local, WithinAbs(0.5f, 1e-4f));
+  CHECK(beat(kAlign + kApproach + kTravel).stage == ShapeStage::Return);
+  CHECK(beat(kAlign + kApproach + kTravel + 0.4f).stage == ShapeStage::Return);
+  CHECK(beat(kAlign + kApproach + kTravel + kReturn + 0.01f).stage == ShapeStage::Done);
+  CHECK(beat(100.0f).stage == ShapeStage::Done);
+
+  // A zero-length stage is skipped rather than producing a division by zero.
+  CHECK(shapeBeat(0.0f, 0.0f, 0.5f, 1.0f, 0.5f).stage == ShapeStage::Approach);
+  CHECK(shapeBeat(0.0f, 0.0f, 0.0f, 0.0f, 0.0f).stage == ShapeStage::Done);
+
+  // The ease is a smoothstep: flat at both ends, monotone between.
+  CHECK_THAT(shapeEase(0.0f), WithinAbs(0.0f, 1e-6f));
+  CHECK_THAT(shapeEase(0.5f), WithinAbs(0.5f, 1e-6f));
+  CHECK_THAT(shapeEase(1.0f), WithinAbs(1.0f, 1e-6f));
+  CHECK(shapeEase(0.1f) < 0.1f);
+  CHECK(shapeEase(0.9f) > 0.9f);
 }
 
 #endif  // CB_HAVE_IMGUI

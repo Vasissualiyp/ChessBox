@@ -231,6 +231,27 @@ view::OrbitCamera blendCamera(const view::OrbitCamera& base,
   return out;
 }
 
+/// Blend two orbit cameras by interpolating the *eye direction* (and the roll) rather
+/// than yaw/pitch separately. The choreography's camera is an intrinsic frame - up is the
+/// piece's upright, right is `a x b` - and yaw/pitch/roll are not linear in that frame:
+/// interpolating them component-wise turns the camera through angles it should not visit,
+/// and the flat blend's positive-pitch clamp would refuse to look at a piece whose
+/// uprights point below the horizon. At `k = 1` this is `want`, to the bit.
+view::OrbitCamera blendShapeCamera(const view::OrbitCamera& base,
+                                   const view::OrbitCamera& want, float k) {
+  view::OrbitCamera out = base;
+  out.target = base.target + (want.target - base.target) * k;
+  out.distance = std::max(0.5f, base.distance + (want.distance - base.distance) * k);
+  const view::Vec3 be = view::normalize(base.eye() - base.target);
+  const view::Vec3 we = view::normalize(want.eye() - want.target);
+  view::Vec3 e = be + (we - be) * k;
+  e = view::length(e) > 1e-5f ? view::normalize(e) : we;
+  out.pitch = std::asin(std::clamp(e.z, -0.999f, 0.999f));
+  out.yaw = std::atan2(e.x, -e.y);
+  out.roll = base.roll + wrapAngle(want.roll - base.roll) * k;
+  return out;
+}
+
 /// How far the chase camera sits from the followed piece: close enough to make the piece
 /// the subject, at a fraction of the shape's span. The anti-clip search tests occlusion
 /// at this same distance, so a seat it finds clear is clear for the camera that follows.
@@ -249,6 +270,39 @@ float followLift(const app::Settings& s) {
 
 }  // namespace
 
+/// The four-beat choreography for a followed move on a shape (M17.19). On a move the
+/// board
+/// **morphs** (its slide) until the player's own line to the start square is clear, the
+/// camera flies to the piece, the piece travels with the camera chasing it, and the
+/// camera flies home while the board morphs back. The piece is held still until the
+/// camera has reached it, so nothing moves before you are looking at it. Pure beats in
+/// `render::shapeBeat`; this holds only the clock and the values that must persist
+/// between frames. Inactive means "no choreography": the old follow behaviour (a
+/// capture's, too).
+struct ShapeMoveSequence {
+  bool active{false};
+  float elapsed{0.0f};
+  float travelSeconds{1.0f};
+  CellId tokenFrom{kInvalidCell};
+  CellId tokenTo{kInvalidCell};
+  view::OrbitCamera startCam{};  ///< the player's own camera when the move began
+  view::OrbitCamera camera{};    ///< the effective camera for the frame just computed
+  render::SlideOffset startOffset{};  ///< the transient offset when the move began
+  render::SlideOffset alignStart{};   ///< Align's target: clear from the start camera
+  render::SlideOffset chaseStart{};   ///< Approach's target: clear behind the piece
+  render::SlideOffset travelFrom{};
+  render::SlideOffset travelTo{};
+  render::SlideOffset returnFrom{};
+  render::SlideOffset offset{};  ///< the live transient offset, written to settings
+  CellId trackedCell{kInvalidCell};
+  float cellElapsed{0.0f};
+  render::ShapeStage lastStage{render::ShapeStage::Done};
+};
+
+/// The choreography to hand a path that must not run it: an inactive sequence falls back
+/// to the steady-state follow, which is what every capture wants.
+const ShapeMoveSequence kNoShapeSequence{};
+
 /// The seats as a placement list, so the move camera can be asked for its blend against
 /// the shape instead of the flat layout (M17.16).
 std::vector<view::Placement> surfacePlacements(const render::PlaySurface& surf) {
@@ -263,11 +317,17 @@ std::vector<view::Placement> surfacePlacements(const render::PlaySurface& surf) 
 /// The effective camera for what is drawn right now: the move-camera blend against the
 /// shape while the geometry view is on, the session's own camera otherwise. One function
 /// so the render and the pick cannot ask for different cameras (ADR-0011).
-view::OrbitCamera boardCamera(const app::Shell& shell) {
+///
+/// While a shape-follow choreography is running (`seq.active`) that is the camera,
+/// because it is already a blend of the player's own view and the follow (M17.19). The
+/// rest of this is the capture path's steady-state follow - a `--clip` of a move never
+/// runs the choreography, and its frames must stay byte-for-byte what they were.
+view::OrbitCamera boardCamera(const app::Shell& shell, const ShapeMoveSequence& seq) {
   const app::Session* session = shell.session();
   if (session == nullptr) return {};
   const app::Settings& st = shell.settings();
   if (optionsFor(shell).surface) {
+    if (seq.active) return seq.camera;
     const render::PlaySurface surf =
         render::PlaySurface::build(session->variant(), poseFrom(st, session->variant()));
     if (!surf.empty()) {
@@ -346,6 +406,184 @@ render::SlideOffset alignOffsetFor(const app::Shell& shell, CellId followed) {
   const view::OrbitCamera base = session->playerCamera();
   const view::Vec3 toCamera = view::normalize(base.eye() - base.target);
   return render::alignSlideToFace(session->variant(), followed, toCamera, base.distance);
+}
+
+namespace {
+
+/// The base lengths of the choreography's three camera stages, in seconds, at morph speed
+/// 1.0; `Settings::shapeMorphSpeed` divides them, so the slider slows or hurries the
+/// whole lead-in and return without touching the move itself. The travel's own length is
+/// the move animation's.
+constexpr float kShapeAlignSeconds = 0.7f;
+constexpr float kShapeApproachSeconds = 0.9f;
+constexpr float kShapeReturnSeconds = 0.9f;
+constexpr float kShapeCellMorphSeconds = 0.4f;
+
+render::SlideOffset mixSlide(const render::SlideOffset& a, const render::SlideOffset& b,
+                             float t) {
+  return {a.u + (b.u - a.u) * t, a.v + (b.v - a.v) * t};
+}
+
+}  // namespace
+
+/// Advance the shape-follow choreography one frame (M17.19). It leaves the effective
+/// camera in `seq.camera` and the transient slide in the settings. The piece's own clock
+/// is driven here too: pinned at the start through the lead-in, running during Travel,
+/// pinned at the end through the return - so nothing moves before the camera has reached
+/// it, and nothing moves again once it has landed.
+void updateShapeSequence(app::Shell& shell, ShapeMoveSequence& seq, float dt) {
+  app::Session* session = shell.session();
+  app::Settings& st = shell.settings();
+  if (session == nullptr || !shell.showsBoard() || !optionsFor(shell).surface ||
+      !render::hasPlaySurface(session->variant())) {
+    seq.active = false;
+    return;
+  }
+  if (st.cameraMode == "off" || session->followStrength() <= 0.0f) {
+    seq.active = false;
+    return;
+  }
+
+  const view::MovePath& path = session->animation().path();
+  const bool animating = session->animation().active();
+
+  if (animating &&
+      (!seq.active || seq.tokenFrom != path.from || seq.tokenTo != path.to)) {
+    // A new move. The camera to start from is the last one actually drawn, so a move that
+    // begins while an earlier return is still running has no cut.
+    const view::OrbitCamera from = seq.active ? seq.camera : session->playerCamera();
+    ShapeMoveSequence fresh;
+    fresh.active = true;
+    fresh.travelSeconds = std::max(1e-3f, session->animation().duration());
+    fresh.tokenFrom = path.from;
+    fresh.tokenTo = path.to;
+    fresh.startCam = from;
+    fresh.camera = from;
+    fresh.startOffset = {st.geometryAlignOffset, st.geometryAlignOffsetV};
+    fresh.offset = fresh.startOffset;
+    if (st.geometryAlign) {
+      const view::Vec3 toCam = view::normalize(from.eye() - from.target);
+      fresh.alignStart = render::alignSlideToFace(session->variant(), path.from, toCam,
+                                                  std::max(1.0f, from.distance));
+    } else {
+      fresh.alignStart = fresh.startOffset;
+    }
+    seq = fresh;
+    session->setMoveProgress(0.0f);
+    // The target behind the piece at the start of travel; `alignStart` is the clear-from-
+    // the-player's-eye one, this is the clear-from-behind-the-piece one.
+    seq.chaseStart = alignOffsetFor(shell, path.from);
+  }
+  if (!seq.active) return;
+
+  const float speed = std::clamp(st.shapeMorphSpeed, 0.25f, 4.0f);
+  const float alignSec = kShapeAlignSeconds / speed;
+  const float approachSec = kShapeApproachSeconds / speed;
+  const float returnSec = kShapeReturnSeconds / speed;
+
+  seq.elapsed += dt;
+  const render::ShapeBeat beat =
+      render::shapeBeat(seq.elapsed, alignSec, approachSec, seq.travelSeconds, returnSec);
+
+  // Pin the piece: still through the lead-in, travelling in the middle, landed through
+  // the return.
+  const float moveT = beat.stage == render::ShapeStage::Travel ? beat.local
+                      : (beat.stage == render::ShapeStage::Done ||
+                         beat.stage == render::ShapeStage::Return)
+                          ? 1.0f
+                          : 0.0f;
+  session->setMoveProgress(moveT);
+
+  // The surface at the pose drawn last frame (the offset is written below, so the camera
+  // leads the morph by a frame - invisible, and it keeps this to one surface build).
+  const render::PlaySurface surf =
+      render::PlaySurface::build(session->variant(), poseFrom(st, session->variant()));
+
+  switch (beat.stage) {
+    case render::ShapeStage::Align:
+      // Morph in place: the camera does not move, only the board turns under it.
+      seq.offset =
+          mixSlide(seq.startOffset, seq.alignStart, render::shapeEase(beat.local));
+      break;
+    case render::ShapeStage::Approach:
+      seq.offset =
+          mixSlide(seq.alignStart, seq.chaseStart, render::shapeEase(beat.local));
+      break;
+    case render::ShapeStage::Travel: {
+      const CellId cell = currentFollowedCell(shell, surf);
+      if (cell != seq.trackedCell) {
+        seq.trackedCell = cell;
+        seq.travelFrom = seq.offset;
+        seq.travelTo = alignOffsetFor(shell, cell);
+        seq.cellElapsed = 0.0f;
+      }
+      seq.cellElapsed += dt;
+      const float local = render::shapeEase(
+          std::min(1.0f, seq.cellElapsed * speed / kShapeCellMorphSeconds));
+      seq.offset = mixSlide(seq.travelFrom, seq.travelTo, local);
+      break;
+    }
+    case render::ShapeStage::Return:
+      if (seq.lastStage != render::ShapeStage::Return) seq.returnFrom = seq.offset;
+      seq.offset =
+          mixSlide(seq.returnFrom, seq.startOffset, render::shapeEase(beat.local));
+      break;
+    case render::ShapeStage::Done:
+      seq.offset = seq.startOffset;
+      break;
+  }
+
+  // The followed pose, at the move's own progress: start of travel in Approach, the
+  // moving piece in Travel, the landed piece in Return.
+  const float followT = beat.stage == render::ShapeStage::Travel ? beat.local
+                        : (beat.stage == render::ShapeStage::Done ||
+                           beat.stage == render::ShapeStage::Return)
+                            ? 1.0f
+                            : 0.0f;
+  view::OrbitCamera want = session->playerCamera();
+  if (st.shapeFollow == "chase") {
+    want = render::surfaceFollowCamera(path, surf, followT, chaseEyeDistance(surf),
+                                       st.followUpright, followLift(st));
+  } else {
+    // Turntable: the player's own angle is kept - only the look-at follows the piece. The
+    // shape is what turns, in the offset below.
+    want.target = render::surfaceMoveSample(path, surf, followT).position;
+  }
+
+  // How much of the piece's own frame the camera takes, per beat. Align leaves the view
+  // entirely alone (only the board turns under it); the camera reaches the piece over
+  // Approach and holds that frame exactly through Travel - right is `a x b`, up the
+  // piece's upright - then gives the player's view back over Return. The ends of every
+  // stage are eased, so the camera never starts or stops with a jerk and nothing "jump
+  // cuts". `followStrength` is not folded in here: a half-applied intrinsic frame is a
+  // half-upright piece, which is the defect this replaces.
+  float amount = 1.0f;
+  switch (beat.stage) {
+    case render::ShapeStage::Align:
+      amount = 0.0f;
+      break;
+    case render::ShapeStage::Approach:
+      amount = render::shapeEase(beat.local);
+      break;
+    case render::ShapeStage::Return:
+      amount = 1.0f - render::shapeEase(beat.local);
+      break;
+    case render::ShapeStage::Done:
+      amount = 0.0f;
+      break;
+    case render::ShapeStage::Travel:
+      amount = 1.0f;
+      break;
+  }
+  // Blend against the player's *live* camera, not the frozen start: an orbit made during
+  // the shot is theirs and shows through, and the return has nothing to snap from when it
+  // ends (the old flat camera folded its shot in as an offset for the same reason).
+  seq.camera = blendShapeCamera(session->playerCamera(), want, amount);
+  seq.lastStage = beat.stage;
+
+  st.geometryAlignOffset = seq.offset.u;
+  st.geometryAlignOffsetV = seq.offset.v;
+  if (beat.stage == render::ShapeStage::Done) seq.active = false;
 }
 
 /// Put the camera round whatever the board has just become.
@@ -567,7 +805,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
           shell->session()->timelineLinks());
     }
     const view::OrbitCamera camera =
-        shell->showsBoard() ? boardCamera(*shell) : view::OrbitCamera{};
+        shell->showsBoard() ? boardCamera(*shell, kNoShapeSequence) : view::OrbitCamera{};
     const std::function<void(VkCommandBuffer)> drawUi = [&](VkCommandBuffer cmd) {
       (*ui)->record(cmd);
     };
@@ -842,10 +1080,9 @@ int main(int argc, char** argv) {
   /// Whether the board was its own shape last frame, so the camera can be put round
   /// whatever it has just become.
   bool wasSurface = false;
-  /// The ALIGN search's target cell and offset, so the sweep runs once per followed cell
-  /// rather than every frame (M17.17).
-  CellId lastAlignCell = kInvalidCell;
-  render::SlideOffset alignTarget{};
+  /// The camera choreography for a followed move on a shape (M17.19): hold, morph,
+  /// approach, travel, morph home. Inactive on the flat board and in every capture.
+  ShapeMoveSequence shapeSeq;
   auto lastFrame = std::chrono::steady_clock::now();
   float fps = 0.0f;
 
@@ -1098,49 +1335,11 @@ int main(int argc, char** argv) {
       }
     }
 
-    // ALIGN (M17.17): while a followed move is in flight, ease the ring so the followed
-    // cell presents its outer face to the camera. The search runs once per followed cell,
-    // not every frame - the value only needs to change when the target cell does.
-    {
-      app::Settings& st = shell->settings();
-      app::Session* session = shell->session();
-      bool following = false;
-      if (st.geometryAlign && session != nullptr && session->shotInFlight()) {
-        following = true;
-        const render::PlaySurface alignSurf = render::PlaySurface::build(
-            session->variant(), poseFrom(st, session->variant()));
-        const CellId current = currentFollowedCell(*shell, alignSurf);
-        if (current != lastAlignCell) {
-          lastAlignCell = current;
-          alignTarget = alignOffsetFor(*shell, current);
-        }
-      } else {
-        lastAlignCell = kInvalidCell;
-      }
-      // Ease towards the representative of the target nearest the current offset: the
-      // slide wraps, so 15 and 1 are one cell apart, not fourteen.
-      const auto ease = [&](float target, float& offset, float period) {
-        if (period > 0.0f) {
-          while (target - offset > period * 0.5f) target -= period;
-          while (offset - target > period * 0.5f) target += period;
-        }
-        offset += (target - offset) * std::min(1.0f, dt * 2.0f);
-        if (period > 0.0f) {
-          offset = std::fmod(offset, period);
-          if (offset < 0.0f) offset += period;
-        }
-      };
-      const float periodU =
-          session != nullptr
-              ? 2.0f * static_cast<float>(session->variant().dims.extent(0))
-              : 0.0f;
-      const float periodV =
-          session != nullptr
-              ? 2.0f * static_cast<float>(session->variant().dims.extent(1))
-              : 0.0f;
-      ease(following ? alignTarget.u : 0.0f, st.geometryAlignOffset, periodU);
-      ease(following ? alignTarget.v : 0.0f, st.geometryAlignOffsetV, periodV);
-    }
+    // The shape-follow choreography (M17.19): align, approach, travel, return. It drives
+    // the piece's clock and the transient slide, and leaves the effective camera in
+    // `shapeSeq` for `boardCamera`. On the flat board and in captures it stays inactive,
+    // so the old follow behaviour is untouched.
+    updateShapeSequence(*shell, shapeSeq, dt);
 
     // Set once the interface has built this frame: the surface view draws the board
     // itself, so the ordinary renderer stays out of the way (M17).
@@ -1218,14 +1417,17 @@ int main(int argc, char** argv) {
         shell->session()->setBoardAspect(boardRect.width / boardRect.height);
       }
       syncMarks(*renderer, *shell->session());
-      shell->session()->advanceAnimation(dt);
+      // The choreography drives the animation's own progress while it is running (the
+      // piece is pinned through the lead-in and the return); advancing it here too would
+      // fight that. Outside the choreography it advances as it always did.
+      if (!shapeSeq.active) shell->session()->advanceAnimation(dt);
       instances = renderer->buildInstances(
           shell->session()->snapshot(), shell->session()->viewConfig(),
           &shell->session()->seams(), &shell->session()->animation(),
           [&](CellId c) { return shell->session()->boardVisible(c); },
           [&](CellId c) { return shell->session()->game().cellInPresent(c); },
           shell->session()->timelineLinks());
-      camera = boardCamera(*shell);
+      camera = boardCamera(*shell, shapeSeq);
     }
 
     const auto overlay = [&](VkCommandBuffer cmd) {
