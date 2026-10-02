@@ -93,6 +93,66 @@ Camera policy (M11.1) is data. M12 lets it be authored and shared:
 
 ---
 
+## M12.6 Play a game from notation (the marketing runner)
+
+**Want.** Insert a pre-defined game — a list of moves — and have the app play it *automatically*,
+move after move, so a marketing clip is the whole game rather than one hand-driven move.
+"Insert a known game, hit record, get the same video every time."
+
+**What it is.** A runner over the notation the engine already speaks
+(`src/io/notation.hpp`, FEN-N in `src/io/fen.hpp`): a text file names the variant and an
+optional starting position, then lists the moves. The runner loads it and plays each move in
+order with the M11 move camera and the shape-follow choreography (M17.19), cinema-framed
+(M12.1). It is a *pure function of the game and the timing* — no wall clock, no interaction —
+so a clip of it is reproducible.
+
+**Build.**
+
+- **Input.** A game file: a small header naming the `variant` and optionally a `start` FEN-N,
+  then one move per line in the engine's notation. Reuse the existing parser; do not invent a
+  second notation. A malformed or illegal move **stops** at that move with a message naming it
+  and the position, leaving the last legal move in place.
+- **Player.** Advance one move per dwell: apply the move (which already starts the animation
+  and the camera choreography), wait for the shot to settle, pause a settable dwell so the eye
+  can follow, then the next. The runner lives in `src/app` (drives a `Session`), so it is
+  headless and testable; the front end only forwards its clock.
+- **Camera and pacing.** The existing settings choose the shot: `cameraMode`/`shapeFollow`,
+  `followElevationDeg`, and the M17.19 choreography. A `--pace`/`--dwell` (seconds between
+  moves) states the tempo for a clip; `--camera`/`--follow` pick the shot. Cinema mode
+  (M12.1) drops the interface.
+- **Determinism.** Like an overture, the runner reads no clock and no previous session: given
+  (file, dwell, camera settings) it emits the same sequence of frames. `--play FILE` drives
+  it interactively; `--clip DIR` over `--play FILE` writes the numbered frames.
+- **Getting it in front of a user.** A "Watch a game" / "Demo" action built from the same
+  runner, so a capture — and later the packaged demo (M16.3) — can play a canonical game with
+  one command. The game files are plain content; the store trailer is a command plus a file.
+
+**Tests.**
+
+- A game file plays move-for-move; the final position and the move count match the file.
+- An illegal/malformed move stops at that move with the right message, position unchanged past
+  the last legal move.
+- `--play FILE --clip DIR` is byte-identical on a second run.
+- A game that wraps a glued seam / crosses a torus exercises the shape choreography,
+  validation-clean.
+
+**Acceptance.**
+
+1. Given a notation file of N moves, the app plays all N automatically and reproducibly; a clip
+   of the whole game is byte-identical on re-export.
+2. The starting position can be stated (FEN-N), so a game can begin from a set-up diagram.
+3. `standard`, a glued variant and a 4-D variant all play from the same file format (the
+   variant is named in the header).
+
+**Risks and non-goals.**
+
+- **Not an analysis tool or an opponent.** The moves are given; there is no search (that is
+  M10). It is a player of a script, nothing more.
+- **Must not read the private narrative.** A marketing game is a plain notation file; the
+  campaign/story stays in the private sibling repo (AGENTS.md's invariant).
+- **The dwell and any ambient motion must stay out of the deterministic frame**, or clips stop
+  reproducing — the M12.1 ambient-orbit rule again.
+
 ## Tests and acceptance
 
 - **Clip determinism:** the same clip arguments produce byte-identical frame files on a
@@ -144,3 +204,9 @@ muxing stays external.
 
 **Deferred to Wave 4:** camera presets (M12.4, needs M9) and live spectating (M12.5, needs
 M8). The `[camera]` document extension rides M12.4.
+
+**Planned, Wave 1 (2026-10-01): M12.6, play a game from notation.** The marketing runner:
+insert a pre-defined game as a notation file and have it play itself — every move, in order,
+through the move camera and the M17.19 shape choreography — so a clip is the whole game and a
+trailer is a file plus a command. It shares the deterministic contract with cinema and clip
+export, so `--play FILE --clip DIR` reproduces byte-for-byte.
