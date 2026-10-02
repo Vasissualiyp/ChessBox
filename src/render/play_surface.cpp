@@ -85,6 +85,12 @@ float wrapSlide(float s, float period) {
   return std::fmod(s, period);
 }
 
+/// How far a gliding piece rises over the boundary between two squares, in world units:
+/// the arc that keeps its base off the board on the chord between two seats (M17.19).
+/// About a fifth of an ordinary cell - visible as a hover, small enough not to read as a
+/// hop.
+constexpr float kSurfaceGlideLift = 0.2f;
+
 }  // namespace
 
 float shapeEase(float local) noexcept {
@@ -379,17 +385,35 @@ SurfaceMoveSample surfaceMoveSample(const view::MovePath& path, const PlaySurfac
     if (st == nullptr) return out;
     seats.push_back(st);
   }
+  std::vector<view::Vec3> centres;
+  centres.reserve(seats.size());
+  for (const SurfaceSeat* s : seats) centres.push_back(s->centre);
+
+  // The travel polyline reaches the *boundary* between two squares, not a straight chord
+  // from centre to centre: a waypoint on the shared edge (orthogonal move) or shared
+  // corner (diagonal move) is inserted between each pair. It is the midpoint of the two
+  // seats - exactly the edge/corner on a flat board - lifted along their blended normal,
+  // so the piece arcs up over the grid line. On a curved board that lift is what keeps
+  // the piece's base from passing *through* the squares: the chord between two seats dips
+  // below the surface, and the arc clears it.
   std::vector<view::Vec3> points;
-  points.reserve(seats.size());
-  for (const SurfaceSeat* s : seats) points.push_back(s->centre);
+  points.reserve(seats.size() * 2 - 1);
+  points.push_back(centres.front());
+  for (std::size_t i = 1; i < centres.size(); ++i) {
+    view::Vec3 n = seats[i - 1]->normal + seats[i]->normal;
+    n = view::length(n) > 1e-6f ? view::normalize(n) : seats[i]->normal;
+    points.push_back((centres[i - 1] + centres[i]) * 0.5f + n * kSurfaceGlideLift);
+    points.push_back(centres[i]);
+  }
   out.position = view::pointAlong(points, t);
 
-  // Orientation snaps to the nearer route cell as the piece passes it; the scale blends,
-  // so a piece does not visibly resize at a cell boundary.
-  std::vector<float> cum(points.size(), 0.0f);
+  // Orientation snaps to the nearer route *cell* as the piece passes it - the boundary
+  // waypoint is not a cell; the scale blends, so a piece does not visibly resize at a
+  // cell boundary.
+  std::vector<float> cum(centres.size(), 0.0f);
   float total = 0.0f;
-  for (std::size_t i = 1; i < points.size(); ++i) {
-    total += view::length(points[i] - points[i - 1]);
+  for (std::size_t i = 1; i < centres.size(); ++i) {
+    total += view::length(centres[i] - centres[i - 1]);
     cum[i] = total;
   }
   std::size_t i = 1;

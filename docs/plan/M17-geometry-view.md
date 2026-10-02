@@ -1371,4 +1371,14 @@ camera moves are quaternion blends:
   replacing a blend that lerped the eye direction through the origin and produced 720-degree
   spins.
 
+**Piece motion (same day).** A gliding piece no longer travels a straight chord from one
+seat centre to the next. `render::surfaceMoveSample` inserts a **boundary waypoint** between
+each pair of squares - the shared edge for an orthogonal move, the shared corner for a
+diagonal one (both are the midpoint of the two seats) - so the piece goes centre → boundary →
+centre. The waypoint is lifted along the blended normal (`kSurfaceGlideLift`, about a fifth
+of a cell), so the piece **hovers** over the grid line rather than cutting through it: on a
+curved board the chord between two seats dips *below* the surface, and that lift is exactly
+what keeps the base off the squares. Orientation still snaps to the nearer route *cell* (the
+waypoint is not a cell).
+
 **Still open:** the M17.5 surface coordinates and seam rails; M17.12's larger limits.

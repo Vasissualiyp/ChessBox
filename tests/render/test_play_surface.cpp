@@ -18,6 +18,7 @@
 #include <cmath>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "render/overture_scene.hpp"
@@ -657,6 +658,35 @@ TEST_CASE("a move on the shape is sampled along the surface", "[render]") {
     }
   }
 
+  // A glide reaches the boundary between two squares and hovers over it, rather than
+  // cutting a straight chord; the waypoint is the shared edge (orthogonal) or shared
+  // corner (diagonal), lifted off the board so the base clears (M17.19).
+  {
+    for (const std::pair<int, int>& to : {std::pair{1, 0}, std::pair{1, 1}}) {
+      view::MovePath path;
+      path.from = cell(0, 0);
+      path.to = cell(to.first, to.second);
+      path.steps = {{cell(0, 0),
+                     cell(to.first, to.second),
+                     view::StepKind::Interior,
+                     {},
+                     0,
+                     Side::Max}};
+      const SurfaceSeat* a = seatOf(path.from);
+      const SurfaceSeat* b = seatOf(path.to);
+      REQUIRE(a != nullptr);
+      REQUIRE(b != nullptr);
+      const SurfaceMoveSample mid = surfaceMoveSample(path, surf, 0.5f);
+      const view::Vec3 chord = (a->centre + b->centre) * 0.5f;
+      CAPTURE(to.first, to.second);
+      CHECK(view::dot(mid.position - chord, mid.normal) > 0.05f);  // lifted off the chord
+      CHECK_THAT(dist(surfaceMoveSample(path, surf, 0.0f).position, a->centre),
+                 WithinAbs(0.0f, 1e-4f));
+      CHECK_THAT(dist(surfaceMoveSample(path, surf, 1.0f).position, b->centre),
+                 WithinAbs(0.0f, 1e-4f));
+    }
+  }
+
   // A glide across the glued file edge is not cut: on the surface the seam is one
   // continuous place, so consecutive samples stay within a cell of each other.
   {
@@ -1268,28 +1298,31 @@ TEST_CASE("the look-ahead morph sees the camera about to cross the board", "[ren
   // M17.19: the morph is driven by looking at where the camera is going. On the torus's
   // inner ring the chase camera's own path crosses the tube; the aligned board clears it.
   const VariantSpec& v = *new VariantSpec(test::loadVariant("torus"));
-  const int nz = static_cast<int>(v.dims.extent(1));
   const auto cell = [&](int f, int r) { return v.dims.toCell(Coord::of({f, r})); };
+  // A three-step rank glide that wraps toward the tube's inner side: on the unaided board
+  // the chase camera's own path crosses the tube somewhere along it. Scanning rather than
+  // pinning a `t` keeps this from riding on the glide sampler's exact arc.
   view::MovePath path;
-  path.from = cell(0, 0);
-  path.to = cell(0, nz / 2);
-  for (int r = 0; r < nz / 2; ++r) {
+  path.from = cell(1, 0);
+  path.to = cell(1, 3);
+  for (int r = 0; r < 3; ++r) {
     path.steps.push_back(
-        {cell(0, r), cell(0, r + 1), view::StepKind::Interior, {}, 0, Side::Max});
+        {cell(1, r), cell(1, r + 1), view::StepKind::Interior, {}, 0, Side::Max});
   }
   const PlaySurface surf = PlaySurface::build(v);
   const float eye = 6.0f;
-  // At the far end the piece is on the inner side; the unaided camera path crosses the
-  // tube, which is exactly the condition the morph exists to clear.
-  CHECK(followClips(path, surf, 0.85f, 0.06f, eye));
-  // Turn the board so the followed cell presents its outer face, and the path is clear.
+  bool clipped = false;
+  for (float tt = 0.0f; tt <= 1.0001f; tt += 0.05f) {
+    clipped = clipped || followClips(path, surf, tt, 0.06f, eye);
+  }
+  CHECK(clipped);
+  // Turn the board so the followed cell presents its outer face, and the view is clear.
   const view::Vec3 travel{0.0f, 0.0f, 1.0f};
-  const SlideOffset off = alignSlideU(v, cell(0, nz / 2), travel, eye);
+  const SlideOffset off = alignSlideU(v, cell(1, 3), travel, eye);
   SurfacePose pose;
   pose.slideU = off.u;
   pose.slideV = off.v;
   const PlaySurface turned = PlaySurface::build(v, pose);
-  // At the destination the aligned board's view line to the piece is clear.
   CHECK_FALSE(followClips(path, turned, 1.0f, 0.0f, eye));
 }
 
