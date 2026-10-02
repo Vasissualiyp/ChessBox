@@ -174,6 +174,8 @@ render::BoardOptions optionsFrom(const app::Settings& s) {
   o.surfaceGhost = s.geometryGhost;
   o.surfaceTwist = s.kleinTwist;
   o.surfaceOpenness = s.geometryWidth;
+  o.surfaceThickness = s.geometryThickness;
+  o.surfaceCollapseSquares = s.kleinShift;
   return o;
 }
 
@@ -195,13 +197,16 @@ render::BoardOptions optionsFor(const app::Shell& shell) {
 /// How the geometry view's surface is posed right now. The variant argument is kept so
 /// the call sites read the same as before; nothing in the pose depends on it now that the
 /// Klein twist is a plain half-turn count.
-render::SurfacePose poseFrom(const app::Settings& s, const VariantSpec&) {
+render::SurfacePose poseFrom(const app::Settings& s, const VariantSpec& v) {
   render::SurfacePose pose;
   pose.slideU = s.geometrySlideU + s.geometryAlignOffset;
   pose.slideV = s.geometrySlideV + s.geometryAlignOffsetV;
   pose.evert = s.geometryEvert;
   pose.twist = s.kleinTwist;
   pose.openness = s.geometryWidth;
+  pose.thickness = s.geometryThickness;
+  const float nx = static_cast<float>(v.dims.extent(0));
+  pose.collapsePhase = nx > 0.0f ? s.kleinShift / nx : 0.0f;
   return pose;
 }
 

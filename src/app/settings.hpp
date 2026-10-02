@@ -76,6 +76,15 @@ struct Settings {
   /// cross-section left unchanged: a larger value opens a tight torus or Klein bottle, or
   /// lengthens the Moebius loop, without thickening the material. 1 is the shipped shape.
   float geometryWidth{1.0f};
+  /// The cross-section size of a glued surface as a multiple of the shipped one - the
+  /// tube's thickness, its outer-to-inner radius - leaving the ring radius alone. A
+  /// legibility cheat like `geometryWidth`: the cells stretch around a fatter tube.
+  float geometryThickness{1.0f};
+  /// For the Klein bottle: how many board squares the cylinder is rotated about its own
+  /// axis before it is collapsed into the figure-eight (one square = 360/nx degrees).
+  /// This moves which file lands where on the figure-eight, to line the squares up at the
+  /// seam.
+  float kleinShift{0.0f};
   /// Turn the ring so the piece a followed move travels on presents its outer face to the
   /// camera, rather than the camera clipping through the tube wall to see it (M17.17).
   /// **On by default**: the clipping is a defect, not a look (M17.16 revision).

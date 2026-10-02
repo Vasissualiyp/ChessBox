@@ -154,6 +154,15 @@ struct SurfacePose {
   /// lengthens the Moebius loop, without thickening or thinning the material. 1 is the
   /// shipped shape.
   float openness{1.0f};
+  /// The cross-section size as a multiple of the shipped one - the tube's thickness, the
+  /// outer-to-inner radius - leaving the ring radius alone. A legibility cheat like
+  /// `openness`: the cells stretch around the fatter tube. 1 is the shipped shape.
+  float thickness{1.0f};
+  /// For the Klein bottle: the total rotation of one rank end relative to the other, as a
+  /// fraction of the file loop (one file = one `nx`th). It ramps from 0 at rank 0 to this
+  /// value at rank 1, so the square lines spiral round the tube rather than the whole
+  /// cylinder turning rigidly. This is not the half-turn twist. 0 is the shipped shape.
+  float collapsePhase{0.0f};
 };
 
 /// Where a lattice point lands on a derived overture's fully-formed surface, keyed by the

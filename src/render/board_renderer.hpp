@@ -79,6 +79,13 @@ struct BoardOptions {
   /// The ring or loop radius as a multiple of the shipped one, the cross-section
   /// unchanged: opens a tight torus/Klein bottle, or lengthens the Moebius loop.
   float surfaceOpenness{1.0f};
+  /// The cross-section size as a multiple of the shipped one - the tube's thickness -
+  /// leaving the ring radius alone.
+  float surfaceThickness{1.0f};
+  /// For the Klein bottle: how many board squares one rank end is rotated relative to the
+  /// other before the collapse into the figure-eight (one square = 360/nx degrees),
+  /// ramped along the rank so the square lines spiral.
+  float surfaceCollapseSquares{0.0f};
   /// The board mesh's alpha, 1 opaque down to a translucent ghost so the far side of the
   /// shape and the pieces on it show through (M17.10). The pieces stay opaque.
   float surfaceGhost{1.0f};

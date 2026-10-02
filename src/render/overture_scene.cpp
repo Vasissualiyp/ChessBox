@@ -120,11 +120,12 @@ using Pos = std::function<OvVec3(float, float)>;
 /// function with different arguments, which is the same "the next case is data" claim
 /// the engine makes about variants.
 struct TubeOpt {
-  float th{0};     ///< 0..2pi, how far the files have rolled (2pi closes the tube)
-  float ph{0};     ///< 0..2pi, how far the tube has bent into a ring
-  float tau{0};    ///< half-turn of the cross-section around the ring
-  float open{1};   ///< ring-radius multiplier; see the horn-torus note below
-  float evert{0};  ///< 0..1, how far the surface has been turned through itself
+  float th{0};         ///< 0..2pi, how far the files have rolled (2pi closes the tube)
+  float ph{0};         ///< 0..2pi, how far the tube has bent into a ring
+  float tau{0};        ///< half-turn of the cross-section around the ring
+  float open{1};       ///< ring-radius multiplier; see the horn-torus note below
+  float thickness{1};  ///< cross-section (tube) radius multiplier
+  float evert{0};      ///< 0..1, how far the surface has been turned through itself
 };
 
 /// Roll the files into a tube whose axis runs along the ranks, then optionally bend that
@@ -156,10 +157,14 @@ OvVec3 tube(float u, float v, const TubeOpt& o) {
   float b = 0.0f;
   if (o.th > 1e-4f) {
     const float R = kW / o.th;
+    // `thickness` scales the cross-section radius, not the roll: the files still run
+    // through a full 2pi, so the cells stretch around a fatter tube instead of the tube
+    // failing to close.
+    const float Rc = R * o.thickness;
     const float t = xl / R;
-    a = (R + swell) * std::sin(t);
+    a = (Rc + swell) * std::sin(t);
     // Centred on the tube rather than on the seam the tube was rolled from.
-    b = (R + swell) * std::cos(t) - R * sinc(o.th * 0.5f);
+    b = (Rc + swell) * std::cos(t) - Rc * sinc(o.th * 0.5f);
   }
   if (o.ph > 1e-4f) {
     // A closed ring *can* be turned inside out by a rotation, and this is the one: the
@@ -291,7 +296,7 @@ float lemniscateAngle(float u) {
 /// (-sin a, -sin 2a) = (sin -a, sin -2a), which is exactly a -> -a: the file reversed.
 /// So the cross-section pinches first, and then both seams close to machine precision.
 OvVec3 kleinSurf(float u, float v, float th, float pinch, float ph, float tau, float open,
-                 float evert = 0.0f) {
+                 float evert = 0.0f, float phase = 0.0f, float thickness = 1.0f) {
   const float xl = (u - 0.5f) * kW;
   const float zl = (v - 0.5f) * kH;
   float cr = xl;
@@ -305,8 +310,11 @@ OvVec3 kleinSurf(float u, float v, float th, float pinch, float ph, float tau, f
   if (pinch > 1e-4f) {
     // Comfortably smaller than the ring it will travel round, or the bottle closes
     // into a disc and the self-intersection - the whole point - has nowhere to show.
-    const float rho = (kW / kTau) * 1.05f;
-    const float a = lemniscateAngle(u);
+    const float rho = (kW / kTau) * 1.05f * thickness;
+    // `phase` is the total rotation of one rank end relative to the other, in file turns:
+    // it ramps from 0 at rank 0 to `phase` at rank 1, so the square lines spiral round
+    // the tube rather than the whole cylinder turning rigidly.
+    const float a = lemniscateAngle(u + phase * v);
     cr = lerpf(cr, rho * std::sin(a), pinch);
     ca = lerpf(ca, rho * std::sin(2.0f * a), pinch);
   }
@@ -2616,6 +2624,7 @@ OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v, SurfacePose pos
     case app::SurfaceKind::Tube: {
       TubeOpt o;
       o.th = kTau;
+      o.thickness = pose.thickness;
       o.evert = e;
       return tube(u, v, o);
     }
@@ -2623,22 +2632,23 @@ OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v, SurfacePose pos
       TubeOpt o;
       o.th = kTau;
       o.ph = kTau;
-      // The ring radius is the surface's "width"; the cross-section is its thickness and
-      // does not change with `openness`.
+      // The ring radius is the surface's "width"; `thickness` is the tube's own radius.
       o.open = 2.2f * pose.openness;
+      o.thickness = pose.thickness;
       o.evert = e;
       return tube(u, v, o);
     }
     case app::SurfaceKind::Band: {
       const float stretch = lerpf(1.0f, kMobiusStretch, clampf(pose.stretch, 0.0f, 1.0f));
-      // `len` sets the ribbon's loop radius, so widening it opens the loop and leaves the
-      // ribbon width (`kH / stretch`) alone.
-      return kMobiusStrip ? stripSurface(u, v, kW * stretch * pose.openness, kH / stretch,
-                                         kTau, 1.0f, e)
+      // `len` sets the ribbon's loop radius and `wid` its width; `openness` lengthens the
+      // loop, `thickness` widens the ribbon.
+      return kMobiusStrip ? stripSurface(u, v, kW * stretch * pose.openness,
+                                         kH / stretch * pose.thickness, kTau, 1.0f, e)
                           : band(u, v, kTau, 1.0f, e);
     }
     case app::SurfaceKind::Klein:
-      return kleinSurf(u, v, kTau, 1.0f, kTau, pose.twist, 2.05f * pose.openness, e);
+      return kleinSurf(u, v, kTau, 1.0f, kTau, pose.twist, 2.05f * pose.openness, e,
+                       pose.collapsePhase, pose.thickness);
     case app::SurfaceKind::FlatGrid:
     case app::SurfaceKind::MirrorBox:
       return flatBoard()(u, v);

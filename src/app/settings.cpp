@@ -110,6 +110,10 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.kleinTwist = asFloat(value, s.kleinTwist);
     else if (key == "geometry_width")
       s.geometryWidth = asFloat(value, s.geometryWidth);
+    else if (key == "geometry_thickness")
+      s.geometryThickness = asFloat(value, s.geometryThickness);
+    else if (key == "klein_shift")
+      s.kleinShift = asFloat(value, s.kleinShift);
     else if (key == "geometry_align")
       s.geometryAlign = asBool(value);
     else if (key == "follow_upright")
@@ -190,6 +194,8 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "geometry_ghost = " << geometryGhost << '\n';
   out << "klein_twist = " << kleinTwist << '\n';
   out << "geometry_width = " << geometryWidth << '\n';
+  out << "geometry_thickness = " << geometryThickness << '\n';
+  out << "klein_shift = " << kleinShift << '\n';
   out << "geometry_align = " << boolText(geometryAlign) << '\n';
   out << "follow_upright = " << boolText(followUpright) << '\n';
   out << "follow_elevation = " << followElevationDeg << '\n';
@@ -226,9 +232,11 @@ void Settings::sanitize() {
   geometryGhost = std::clamp(geometryGhost, 0.35f, 1.0f);
   kleinTwist = std::clamp(kleinTwist, 0.0f, 6.0f);
   geometryWidth = std::clamp(geometryWidth, 0.4f, 4.0f);
+  geometryThickness = std::clamp(geometryThickness, 0.2f, 3.0f);
+  kleinShift = std::clamp(kleinShift, 0.0f, 16.0f);
   // The slide is not wrapped here: its period is two laps of the *board*, which this
   // layer does not know. `PlaySurface` wraps it against the board's own extent (M17.9).
-  animationSpeed = std::clamp(animationSpeed, 0.25f, 4.0f);
+  animationSpeed = std::clamp(animationSpeed, 0.05f, 4.0f);
   overtureSpeed = std::clamp(overtureSpeed, 0.25f, 4.0f);
   orbitSensitivity = std::clamp(orbitSensitivity, 0.1f, 4.0f);
   zoomSensitivity = std::clamp(zoomSensitivity, 0.1f, 4.0f);

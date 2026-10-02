@@ -1324,6 +1324,17 @@ an amount that can be set.
   radius via `SurfacePose::openness`, leaving the cross-section - the material's
   thickness - unchanged. It opens a tight torus/Klein bottle's hole and lengthens the
   Moebius loop, which are otherwise hard to read at the shipped ratios.
+- **Tube width.** `Settings::geometryThickness` (slider, default 1) scales the
+  cross-section size - the tube's own radius, its outer-to-inner radius - leaving the ring
+  radius alone, via `SurfacePose::thickness`. The files still roll through a full 2pi, so
+  the cells stretch around a fatter tube rather than the tube failing to close.
+- **Slower moves.** The animation-speed floor dropped from 0.25x to 0.05x, so a piece can
+  be followed across the surface at about 1.7 s per cell.
+- **Klein square shift.** `Settings::kleinShift` (slider, default 0) rotates one rank end
+  of the cylinder relative to the other *before* the figure-eight collapse, one square =
+  360/nx degrees, via `SurfacePose::collapsePhase` and `kleinSurf`'s phase argument. The
+  rotation ramps along the rank, so the square lines spiral round the tube instead of the
+  whole cylinder turning rigidly. It is not the half-turn twist.
 
 ---
 

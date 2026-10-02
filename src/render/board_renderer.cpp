@@ -650,6 +650,9 @@ InstanceSet BoardRenderer::buildInstances(
     pose.evert = options_.surfaceEvert;
     pose.twist = options_.surfaceTwist;
     pose.openness = options_.surfaceOpenness;
+    pose.thickness = options_.surfaceThickness;
+    const float nx = static_cast<float>(v.dims.extent(0));
+    pose.collapsePhase = nx > 0.0f ? options_.surfaceCollapseSquares / nx : 0.0f;
     const PlaySurface surf = PlaySurface::build(v, pose);
 
     std::vector<Archetype> shape(v.pieces.size(), Archetype::Tower);

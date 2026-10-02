@@ -963,6 +963,10 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   // The ring/loop radius: opens a tight torus or Klein bottle (a wider hole) or lengthens
   // the Moebius loop, leaving the cross-section thickness alone.
   ImGui::SliderFloat("Shape width", &s.geometryWidth, 0.4f, 3.0f, "%.2fx");
+  ImGui::SliderFloat("Tube width", &s.geometryThickness, 0.3f, 2.5f, "%.2fx");
+  // Rotate one rank end of the cylinder relative to the other (one square = 360/nx
+  // degrees) before the figure-eight collapse, so the square lines spiral round the tube.
+  ImGui::SliderFloat("Klein square shift", &s.kleinShift, 0.0f, 7.0f, "%.0f");
   ImGui::Dummy(ImVec2(0, px(8)));
 
   heading("CAMERA", t, small);
@@ -1009,7 +1013,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   heading("ANIMATION", t, small);
   ImGui::Checkbox("Animate moves", &s.animateMoves);
   ImGui::BeginDisabled(!s.animateMoves);
-  ImGui::SliderFloat("Animation speed", &s.animationSpeed, 0.25f, 4.0f, "%.2fx");
+  ImGui::SliderFloat("Animation speed", &s.animationSpeed, 0.05f, 4.0f, "%.2fx");
   ImGui::EndDisabled();
   ImGui::PushFont(small);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
