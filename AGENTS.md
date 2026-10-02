@@ -5,6 +5,16 @@ Read this first. It is the map. Design rationale is in
 [`docs/plan/00-roadmap.md`](docs/plan/00-roadmap.md); decisions are in
 [`docs/adr/`](docs/adr/README.md).
 
+## Do not read the plot **[INVARIANT]**
+
+The game's story is a **paid asset** and is kept out of this repository entirely: it lives in
+the private sibling repo `ChessBox_Steam/` (`../ChessBox_Steam/narrative.md`). Do not open,
+read, quote or reason from it — or from any other story, cutscene or campaign-narrative
+material — unless the user explicitly asks you to work on the narrative. No code, spec, test
+or ADR may depend on it, and it must never be cited to justify a technical decision. **Never
+commit it to this repo**, and never add a tracked file that links to it. Engineering work is
+driven by the specs and the engine, never by the fiction.
+
 ## Who does what — read this before writing any code
 
 This repository is worked by more than one assistant, and they have different jobs. These
@@ -28,9 +38,10 @@ If neither role matches what you are being asked to do right now, follow the use
 non-trivial boundary topology, a Vulkan interface, a rule VM, and 5D-chess-style time
 travel. Next, in **release order** (visuals and clippable things first — see the roadmap's
 release sequence): Wave 1 M11 (move camera), M12 (clip export/cinema), M13 (generic
-overtures) and M16.1 (Coming Soon page); Wave 2 M14 (onboarding), M16.2-3 (build pipeline +
-demo) and M7 (editors); Wave 3 M10 (AI), M15 (campaign) and M8 (multiplayer); Wave 4 M9
-(Workshop); Wave 5 M16.4-5 (release). The fixed schedule anchor is **Steam Next Fest,
+overtures) and M16.1 (Coming Soon page); Wave 2 M14 (onboarding), M10.2-3 (the baseline
+opponent the demo needs), M16.2-3 (build pipeline + demo) and M7 (editors); Wave 3 M10.4-5
+(learned AI), M15 (campaign) and M8 (multiplayer); Wave 4 M9 (Workshop); Wave 5 M16.4-5
+(release). The fixed schedule anchor is **Steam Next Fest,
 February 2027**. Milestone numbers are stable IDs, not a schedule; M11 only needs M4/M6 and
 M13 lets data-only variants animate.
 See [`docs/plan/00-roadmap.md`](docs/plan/00-roadmap.md); each milestone plan ends with a
@@ -176,6 +187,7 @@ point, the layers below may not - that boundary is the whole point of where `vie
 
 | Task | Go to | Skill |
 |---|---|---|
+| Story, cutscene, campaign scenario, art, voice | the private sibling repo `ChessBox_Steam/` - **never this repo** | |
 | New piece | `variants/*.toml` (data only) | `cb-new-piece` |
 | New variant | `variants/`, goldens, `docs/variants/` | `cb-new-variant` |
 | New topology | `variants/*.toml` geometry block | `cb-new-geometry` |

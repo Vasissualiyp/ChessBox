@@ -33,9 +33,9 @@ directory. Read `docs/ARCHITECTURE.md` first.
 | M7 | GUI authoring: piece editor, then game editor | author pieces and whole variants in the GUI: vector moves, fields, rules, 3-D and 2-D models | in progress | [M7](M7-editors.md) |
 | M8 | Client–server multiplayer | authoritative server, lockstep-verified replay | not started | [M8](M8-net.md) |
 | M9 | Steam Workshop + packaging | variant packages, validation, signing, distribution | not started | [M9](M9-workshop.md) |
-| M10 | Trainable per-variant AI | search + learned eval, self-play harness | not started | [M10](M10-ai.md) |
+| M10 | Trainable per-variant AI | search + learned eval, self-play harness | **split**: M10.2-M10.3 (baseline opponent) in Wave 2; M10.4-M10.5 (learning) in Wave 3 | [M10](M10-ai.md) |
 | M11 | The move camera | follow a move through any geometry: seams, mirrors, grid axes, 4-D+ | in progress: pose/policy, portalled and grid-axis behaviour, session integration and docs done; image goldens deferred (a pose property test stands in) | [M11](M11-move-camera.md) |
-| M12 | Spectator, replay and the clip | cinema view, deterministic clip export, shared camera presets, live spectating | in progress: cinema mode and the frame-sequence clip exporter done; presets/spectator are Wave 4 | [M12](M12-broadcast.md) |
+| M12 | Spectator, replay and the clip | cinema view, deterministic clip export, play a game from notation (marketing runner), shared camera presets, live spectating | in progress: cinema mode and the frame-sequence clip exporter done; the notation runner (M12.6) is planned for the marketing clips; presets/spectator are Wave 4 | [M12](M12-broadcast.md) |
 | M13 | Generic variant overtures | a data-only variant animates on the library screen: derived surface, derived move, no scene code | in progress: signature, surface catalogue, selection and the demo move done (2-D 8x8); higher-D extruded grid outstanding | [M13](M13-overtures.md) |
 | M14 | Onboarding, tutorial and first-run polish | a stranger is playing something interesting within ten minutes and understands why it is different | in progress: the first-run welcome and the curated "start here" path are built (M14.1/M14.2); the played tutorial and the legibility/accessibility pass are not | [M14](M14-onboarding.md) |
 | M15 | Campaign: the geometry ladder | a designed progression with a concept boss per leg, ending on a `t6` puzzle finale | not started | [M15](M15-campaign.md) |
@@ -89,39 +89,49 @@ first and can ship on their own.
    app, fee, assets, trailer and content survey are the gate.
 
 **Wave 2 — polish and demo (convert, and make Next Fest).**
-5. **M14 — onboarding and first-run polish.** A stranger's first ten minutes: a tutorial,
+6. **M14 — onboarding and first-run polish.** A stranger's first ten minutes: a tutorial,
    curated start-here modes, legible defaults, and an in-game answer to "what does a rook
    do on *this* board". A powerful store page that converts badly is the failure mode this
    wave exists to prevent.
-6. **M16.2 + M16.3 — the build pipeline and the demo.** The **February 2027** Next Fest is
+7. **M10.2-M10.3 — the baseline opponent (the demo needs someone to play).** A sandbox
+   with no opponent is what makes a build read as an engine tech demo. The *minimum viable
+   opponent* - a legal move that takes what it can and never hangs a piece to an obvious
+   reply, search depth one or two, no training - is deliberately small (a weekend on top of
+   the existing movegen and legality, not a research result), and the derived evaluator
+   extends it to *every* variant by sampling mobility on that variant's own geometry. It
+   lands **before** the demo, so Next Fest has a legal opponent on every curated board;
+   M10.4-M10.5 stay in Wave 3.
+8. **M16.2 + M16.3 — the build pipeline and the demo.** The **February 2027** Next Fest is
    the target (October 2026's deadlines have passed): registration closes roughly 10-12
    weeks prior and the demo build must pass review ~3 weeks prior, so the pipeline and the
    demo must exist in **early January 2027**. Build the automated upload before it is under
    deadline, not during.
-7. **M7 — the editors.** Already in progress. Finish piece and game authoring and the
+9. **M7 — the editors.** Already in progress. Finish piece and game authoring and the
    package output; it produces demo content, delivers the "make your own" promise, and
    feeds M9.
 
-**Wave 3 — the game (someone to play against, and a reason to finish).**
-8. **M10 — the AI.** A sandbox with no opponent is the gap that shows up in reviews. The
-   derived baseline evaluator gives every shipped variant a legal opponent with no training
-   - enough to launch on.
-9. **M15 — the campaign.** Needs M10 for its bosses and M14 for its on-ramp: the ladder
-   from `standard` to the `t6` puzzle finale that gives the sandbox a shape and an ending.
-10. **M8 — multiplayer.** Authoritative server and verified replay. Independent of M10;
-    either can lead the wave, but if only one can precede the marketing peak, AI matters
-    more to a single-player store audience.
+**Wave 3 — the game (the full-strength opponent and a reason to finish).**
+10. **M10.4-M10.5 — the AI, learned.** The baseline opponent already shipped in Wave 2; this
+    is the research half - a learned, gated model that must beat the derived baseline, with
+    strength reported honestly. It raises the ceiling; it does not gate the demo or the
+    campaign.
+11. **M15 — the campaign.** Needs the search and the baseline opponent (M10.2-M10.3, from
+    Wave 2) for its bosses and M14 for its on-ramp: the ladder from `standard` to the `t6`
+    puzzle finale that gives the sandbox a shape and an ending.
+12. **M8 — multiplayer.** Authoritative server and verified replay. Independent of M10;
+    either can lead the wave, but if only one can precede the marketing peak, a stronger AI
+    matters more to a single-player store audience.
 
 **Wave 4 — content at scale.**
-11. **M9 — Workshop.** Needs M7 (packages) and M13 (overtures), so it is last by
+13. **M9 — Workshop.** Needs M7 (packages) and M13 (overtures), so it is last by
     construction - the content pipeline that gives the game its tail.
-12. **M12 remainder — shared camera presets and live spectating.** Presets ride M9;
+14. **M12 remainder — shared camera presets and live spectating.** Presets ride M9;
     live spectating rides M8.
 
 **Wave 5 — release.**
-13. **M16.4 + M16.5 — the release checklist and launch.** After the game wave, so the
-    marketing peak lands with an opponent (M10), a campaign (M15) and a content pipeline
-    (M9) already in place - the reviews punish the gap otherwise.
+15. **M16.4 + M16.5 — the release checklist and launch.** After the game wave, so the
+    marketing peak lands with an opponent (M10.2-M10.5), a campaign (M15) and a content
+    pipeline (M9) already in place - the reviews punish the gap otherwise.
 
 Waves 1-2 are what the marketing timeline cares about: days-to-weeks of work on top of an
 already-done M0-M6, every step independently shippable, and the February 2027 Next Fest is
@@ -152,7 +162,9 @@ not be quietly broken.
 - **M7 onward is scheduled by the release sequence, not by number.** M11-M14 are numbered
   after M10 only because the sequence is append-only and M7 was already in progress; the
   build order is the Release sequence section above. That is where "visuals and clippable
-  things before multiplayer, AI and Workshop" is stated and defended.
+  things before multiplayer, learned AI and Workshop" is stated and defended - with one
+  exception: the *baseline* opponent (M10.2-M10.3) is small and lands in Wave 2, because a
+  Next Fest demo needs someone to play, not a research result.
 - **Escape hatch:** if visible progress is needed sooner than M4, M2 ends with a
   terminal (TUI) multi-slice viewer — cheap, testable, and enough to play 3D/4D
   boards by hand. The Vulkan work stays where it is.

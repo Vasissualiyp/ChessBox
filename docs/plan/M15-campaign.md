@@ -11,6 +11,11 @@ boss is **fair and winnable**, tests a specific concept rather than raw search s
 and is validated by the live engine so a rule change cannot silently break it. The whole
 campaign runs deterministically and every screen is `--shot`-able.
 
+The fiction that motivates this ladder — the descent to the fabric of reality, why it ends
+on `t6` — is maintained **privately** in the sibling repo `ChessBox_Steam/`, not in this
+tree. It is out of the engineering context and this plan must not depend on it; see the
+AGENTS.md rule "Do not read the plot".
+
 ---
 
 ## The one idea: a boss is an objective, not a strength check **[INVARIANT]**
@@ -159,12 +164,15 @@ supports. A variant that cannot express a boss objective is simply not on the la
   validation is the mitigation, and it is mandatory.
 - **Scope.** The campaign is the **on-ramp, not the product**; retention is skirmish and
   the Workshop. Keep the ladder to a handful of legs; do not grow it into a level factory.
-- **Non-goals:** no narrative engine, no cutscenes beyond static cards, no new variants
-  invented just for the campaign (use what exists or none), no engine changes.
+- **Non-goals:** no narrative engine, no cutscenes beyond static cards (the single voiced
+  cold open and the possible end cutscene are **bookends owned by M14/onboarding**, not
+  campaign cutscenes — their scripts and art live in the private `ChessBox_Steam/` repo), no
+  new variants invented just for the campaign (use what exists or none), no engine changes.
 
 ## Status
 
-Planned, not started. Depends on M10 (the opponent and the puzzle solver) and M14 (the
-on-ramp it extends); it is in Release Wave 3 (the roadmap), after the AI, because a boss
-needs something to play against. It reuses M11 (the camera that shows the wrap) and the
-existing variants throughout; the only new content is the scenario file.
+Planned, not started. Depends on the search and baseline opponent (M10.2-M10.3, which land
+in Wave 2) and M14 (the on-ramp it extends); it is in Release Wave 3 (the roadmap), after
+the baseline opponent but before the learned AI (M10.4-M10.5), because every boss has
+something to play against the moment M10.2-M10.3 ships. It reuses M11 (the camera that shows
+the wrap) and the existing variants throughout; the only new content is the scenario file.

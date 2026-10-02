@@ -51,8 +51,11 @@ release belongs after the game wave.
 ### M16.3 Demo and Next Fest
 
 - A separate **demo app** attached to the base game (per the Demos docs), built from the
-  M14 demo scope: curated variants, the tutorial, the read-only library, no editor, no
-  online.
+  M14 demo scope: curated variants, the tutorial, the read-only library, the baseline
+  opponent (M10.2-M10.3), no editor, no online. A demo where the player can only move
+  pieces against nobody reads as a tech demo, so the opponent is part of the demo scope,
+  not the full game - and it depends on the M10.2-M10.3 slice landing in Wave 2, not on the
+  learned AI (M10.4-M10.5) that stays in Wave 3.
 - **Next Fest participation** — three editions a year (February, June, October); a title
   may join **only one ever**. Registration is from the base game. Workback: demo and store
   page submitted for review **~3–5 weeks** before the Fest; the demo must be live before
@@ -99,6 +102,11 @@ than unit tests:
   Ready For Review".
 - **Demo scope:** the demo build exposes the curated set and tutorial and no editor or
   online — asserted by the same feature-gating test M14 defines.
+- **The demo has an opponent:** every curated demo variant has a legal-playing baseline
+  opponent (M10.2-M10.3), asserted headlessly by extending M10's "search returns a legal
+  move for every shipped variant" test to the demo set. A geometry or rule change that
+  breaks the opponent on a demo board fails a test rather than shipping a broken Next Fest
+  build.
 - **Next Fest readiness:** demo build submitted by the edition's deadline and live before
   the Fest starts.
 
@@ -108,8 +116,8 @@ than unit tests:
    completed content survey (AI disclosure included).
 2. A scripted, repeatable upload ships a self-contained build that passes a clean-machine
    smoke test.
-3. A demo app is published and passes build review, and the game participates in exactly
-   one Next Fest.
+3. A demo app is published and passes build review, plays a legal baseline opponent on
+   every curated variant, and the game participates in exactly one Next Fest.
 4. The release build is approved and the game launches, with a working hotfix path.
 5. M16 and M9 do not duplicate each other: M16 ships the game, M9 moves authored content.
 

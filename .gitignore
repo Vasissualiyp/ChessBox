@@ -13,3 +13,9 @@ perf.data*
 .vscode/
 .claude/settings.local.json
 tags
+
+# Narrative / story content is a paid asset kept in the private ChessBox_Steam
+# repo, never here. These patterns are guards against an accidental in-tree commit.
+/docs/narrative.md
+/docs/story/
+/story/
