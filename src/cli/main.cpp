@@ -4,14 +4,17 @@
 // behaviour a test reports.
 #include <algorithm>
 #include <chrono>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
 
+#include "game/game.hpp"
 #include "io/ascii_board.hpp"
 #include "io/fen.hpp"
+#include "io/game_file.hpp"
 #include "io/notation.hpp"
 #include "io/variant_toml.hpp"
 #include "movegen/movegen.hpp"
@@ -30,11 +33,15 @@ using namespace cb;
 /// from under the two objects referring to it.
 struct Session {
   VariantSpec variant;
+  Position start;
   Position position;
   MoveGen gen;
 
   explicit Session(VariantSpec v)
-      : variant(std::move(v)), position(Position::startPosition(variant)), gen(variant) {}
+      : variant(std::move(v)),
+        start(Position::startPosition(variant)),
+        position(start),
+        gen(variant) {}
 
   Session(const Session&) = delete;
   Session& operator=(const Session&) = delete;
@@ -50,6 +57,8 @@ void printHelp() {
                "  moves                list legal moves\n"
                "  move <text>          play a move, e.g. e2e4 or e7e8q\n"
                "  undo                 take back the last move\n"
+               "  save <file>          write the game (variant, start, moves)\n"
+               "  open <file>          load a game file, replacing the current game\n"
                "  perft <depth>        count leaf nodes\n"
                "  divide <depth>       perft split by first move\n"
                "  info                 variant summary\n"
@@ -129,8 +138,104 @@ int main(int argc, char** argv) {
           if (batch) break;
           continue;
         }
-        s->position = std::move(*p);
+        // The position a game is set to is where it *begins*, so a save records it.
+        s->start = *p;
+        s->position = *p;
         history.clear();
+      }
+    } else if (cmd == "save") {
+      std::string file;
+      in >> file;
+      if (file.empty()) {
+        reportError("usage: save <file>");
+        if (batch) break;
+        continue;
+      }
+      GameFile gf;
+      gf.variant = s->variant.name;
+      gf.variantId = s->variant.variantId();
+      gf.startFen = toFen(s->start);
+      for (const auto& [m, u] : history) {
+        (void)u;
+        gf.moves.push_back(moveText(s->variant, m));
+      }
+      std::ofstream out(file, std::ios::trunc);
+      if (!out) {
+        reportError("cannot write '" + file + "'");
+        if (batch) break;
+        continue;
+      }
+      out << gameFileText(gf);
+      if (!out) {
+        reportError("writing '" + file + "' failed");
+        if (batch) break;
+        continue;
+      }
+      std::cout << "saved " << file << " (" << history.size() << " moves)\n";
+    } else if (cmd == "open") {
+      std::string file;
+      in >> file;
+      std::ifstream inFile(file);
+      if (!inFile) {
+        reportError("cannot read '" + file + "'");
+        if (batch) break;
+        continue;
+      }
+      std::ostringstream ss;
+      ss << inFile.rdbuf();
+      auto gf = parseGameFile(ss.str());
+      if (!gf.has_value()) {
+        reportError(gf.error().format());
+        if (batch) break;
+        continue;
+      }
+      // A game file names its variant; load it if it is not already the current one.
+      if (gf->variant != s->variant.name) {
+        auto v =
+            loadVariantFile(std::filesystem::path("variants") / (gf->variant + ".toml"));
+        if (!v.has_value()) {
+          reportError(v.error().format());
+          if (batch) break;
+          continue;
+        }
+        s = std::make_unique<Session>(std::move(*v));
+      }
+      if (gf->variantId != 0 && gf->variantId != s->variant.variantId()) {
+        reportError("game was played on a different build of '" + gf->variant + "'");
+        if (batch) break;
+        continue;
+      }
+      auto start = fromFen(s->variant, gf->startFen);
+      if (!start.has_value()) {
+        reportError(start.error().format());
+        if (batch) break;
+        continue;
+      }
+      s->start = *start;
+      s->position = *start;
+      history.clear();
+      bool ok = true;
+      for (const std::string& text : gf->moves) {
+        MoveList legal(s->variant.moveUpperBound());
+        s->gen.generateLegal(s->position, legal);
+        const Move* found = nullptr;
+        for (const Move& m : legal) {
+          if (moveText(s->variant, m) == text) {
+            found = &m;
+            break;
+          }
+        }
+        if (found == nullptr) {
+          reportError("move '" + text + "' is not legal in the loaded game");
+          ok = false;
+          break;
+        }
+        Undo u;
+        s->position.make(*found, u);
+        history.emplace_back(*found, u);
+      }
+      if (ok) {
+        std::cout << "opened " << file << " (" << history.size() << " moves)\n";
       }
     } else if (cmd == "moves") {
       MoveList legal(s->variant.moveUpperBound());

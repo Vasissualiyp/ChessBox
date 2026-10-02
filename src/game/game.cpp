@@ -2,6 +2,7 @@
 #include "game/game.hpp"
 
 #include <algorithm>
+#include <utility>
 
 namespace cb {
 
@@ -53,7 +54,11 @@ rules::RuleSet ruleSetOf(const VariantSpec& v) {
 }  // namespace
 
 Game::Game(const VariantSpec& v)
-    : v_(&v), pos_(Position::startPosition(v)), gen_(v), engine_(ruleSetOf(v)) {
+    : v_(&v),
+      pos_(Position::startPosition(v)),
+      startPos_(pos_),
+      gen_(v),
+      engine_(ruleSetOf(v)) {
   initTemporal();
   hashes_.push_back(pos_.hash());
   // Whether this variant has royal pieces at all is a property of the variant, not of
@@ -386,7 +391,7 @@ void Game::agreeDraw() {
 void Game::reset() {
   resigned_ = false;
   agreed_ = false;
-  pos_ = Position::startPosition(*v_);
+  pos_ = startPos_;
   if (temporal_) {
     initTemporal();
     temporalHistory_.clear();
@@ -398,6 +403,11 @@ void Game::reset() {
   hashes_.clear();
   hashes_.push_back(pos_.hash());
   invalidate();
+}
+
+void Game::setStartPosition(Position p) {
+  startPos_ = std::move(p);
+  reset();
 }
 
 bool Game::inCheck() const {

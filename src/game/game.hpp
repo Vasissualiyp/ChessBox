@@ -66,6 +66,13 @@ class Game {
   [[nodiscard]] std::size_t plyCount() const noexcept { return played_.size(); }
   [[nodiscard]] const std::vector<Move>& moveHistory() const noexcept { return played_; }
 
+  /// The position the game began from: the variant's own start, or a FEN it was set to.
+  /// A saved game writes this so a game loaded from a set-up replays from the same place.
+  [[nodiscard]] const Position& startPosition() const noexcept { return startPos_; }
+  /// Begin the game from `p` instead of the variant's start, clearing the history. Used
+  /// to load a FEN or a saved game.
+  void setStartPosition(Position p);
+
   [[nodiscard]] GameResult result() const;
   [[nodiscard]] EndReason endReason() const;
   [[nodiscard]] bool inCheck() const;
@@ -116,6 +123,7 @@ class Game {
 
   const VariantSpec* v_;
   Position pos_;
+  Position startPos_;
   MoveGen gen_;
   rules::RuleEngine engine_;
   /// Per ply: did a rule keep the turn with the mover?

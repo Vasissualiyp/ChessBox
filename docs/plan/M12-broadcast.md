@@ -260,3 +260,22 @@ insert a pre-defined game as a notation file and have it play itself — every m
 through the move camera and the M17.19 shape choreography — so a clip is the whole game and a
 trailer is a file plus a command. It shares the deterministic contract with cinema and clip
 export, so `--play FILE --clip DIR` reproduces byte-for-byte.
+
+### As built (2026-10-01): M12.7, the game file
+
+The save/load half of the runner's file format is in.
+
+- `io/game_file.hpp/.cpp` — `GameFile` (variant name + `VariantId` + start FEN-N + moves as
+  long-algebraic text), `toGameFile`/`gameFileText`/`parseGameFile`/`applyGameFile`. The
+  moves are the engine's own `moveText`, so no second notation exists; `applyGameFile`
+  replays them against `Game::legalMoves()`, refuses a file whose `VariantId` no longer
+  matches, and names the first illegal move. Presentation is not in the file.
+- `Game` remembers its **start position** (`startPosition()` / `setStartPosition()`), so a
+  game begun from a FEN saves that start and replays from it.
+- The CLI gains **`save <file>`** and **`open <file>`**; `open` loads the variant the file
+  names when it is not the current one. Tests in `tests/unit/io/test_game_file.cpp`:
+  round-trip (hash and move count), replay-from-its-own-start, illegal-move naming,
+  `VariantId` mismatch, malformed headers, and a glued variant.
+
+**Still to do:** the runner (`--play FILE --clip DIR`, M12.6) and the in-game Save/Load
+menu entries.
