@@ -1257,6 +1257,16 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       // lit while it is inverted. It sets a target; the front end eases the pose to it,
       // so a pose stays a pure function of its number.
       if (on) {
+        // Follow the pieces while a move plays (M17.19): the align / approach / travel /
+        // return choreography. A quick on/off beside SHAPE - the same switch the settings
+        // screen's "Move camera" sets, so a player can turn the shot on for a capture
+        // without leaving the board. Lit while it follows.
+        ImGui::SameLine();
+        const bool follow = shell.settings().cameraMode != "off";
+        if (button("CAMERA", t, px(100), follow, true, true, display)) {
+          shell.settings().cameraMode = follow ? "off" : "route";
+          request.settingsChanged = true;
+        }
         ImGui::SameLine();
         const bool inverted = shell.settings().geometryInvert;
         if (button("INVERT", t, px(92), inverted, true, true, display)) {

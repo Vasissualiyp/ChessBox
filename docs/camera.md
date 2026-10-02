@@ -101,7 +101,9 @@ definition):
 `render::shapeBeat(elapsed, align, approach, travel, return)` is the pure timeline
 (`docs/plan/M17-geometry-view.md`); the front end owns the clock
 (`ShapeMoveSequence` in `src/gui/main.cpp`) and drives the move animation's own progress from
-it, so the piece is pinned through the lead-in and the return.
+it, so the piece is pinned through the lead-in and the return. A **CAMERA** toggle in the game
+rail (shown while the shape is on) turns the follow on and off without leaving the board - the
+same switch as the settings screen's "Move camera".
 
 ### The camera move is a quaternion slerp
 
