@@ -161,6 +161,12 @@ struct SurfacePatch {
 /// it opens a hole and squeezes it where it closes one.
 struct SurfaceSeat {
   CellId cell{kInvalidCell};
+  /// The seat's lattice coordinate, in cells - needed to find the *surface* point on the
+  /// boundary between two seats (the edge of an orthogonal step, the corner of a diagonal
+  /// one), rather than the chord midpoint of their centres, which on a fast-curving board
+  /// (a torus's inner ring) sits well inside the surface (M17.19).
+  int file{0};
+  int rank{0};
   view::Vec3 centre{};
   view::Vec3 normal{};
   std::array<float, 4> quat{{0.0f, 0.0f, 0.0f, 1.0f}};
@@ -211,6 +217,20 @@ class PlaySurface {
   /// else entirely, which is why the board first arrived off in a corner.
   [[nodiscard]] view::Bounds bounds() const noexcept { return bounds_; }
 
+  /// The surface point at a lattice coordinate, in *cells* (fractional allowed), in the
+  /// pose the board was built with. On a parametrised two-dimensional shape this is the
+  /// genuine surface point - so the boundary between two squares can be found on the
+  /// surface rather than as the chord midpoint of their centres (M17.19). A stacked
+  /// (`D >= 3`) shape has no such parametrisation and returns `false`.
+  [[nodiscard]] bool pointAt(float file, float rank, view::Vec3& out) const;
+
+  /// The surface point on the boundary between two seats - the shared edge of an
+  /// orthogonal step or the shared corner of a diagonal one - wrapping a glued axis the
+  /// short way so a seam's edge is on the correct side. `false` for a stacked shape (no
+  /// parametrisation).
+  [[nodiscard]] bool nearestBoundary(const SurfaceSeat& a, const SurfaceSeat& b,
+                                     view::Vec3& out) const;
+
   /// The cell under a screen pixel, or `kInvalidCell`. Ray-tests the surface itself -
   /// the same points the squares were cut from, with no gaps between them - so a click
   /// resolves to the cell the cursor is over and never falls between two squares.
@@ -241,6 +261,12 @@ class PlaySurface {
   std::vector<CellId> quadCells_;
   int nx_{0};
   int nz_{0};
+  /// What `pointAt` needs to sample the parametrised surface: the warp, the folded pose
+  /// (stretch applied, slide zeroed), and the slide itself in normalised units.
+  app::SurfaceKind kind_{};
+  SurfacePose surfacePose_{};
+  float su_{0.0f};
+  float sv_{0.0f};
   view::Bounds bounds_{};
 };
 

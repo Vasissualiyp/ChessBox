@@ -651,8 +651,20 @@ TEST_CASE("a move on the shape is sampled along the surface", "[render]") {
                WithinAbs(0.0f, 1e-4f));
     CHECK_THAT(dist(surfaceMoveSample(path, surf, 1.0f).position, z->centre),
                WithinAbs(0.0f, 1e-4f));
-    CHECK_THAT(dist(surfaceMoveSample(path, surf, 0.5f).position, mid->centre),
-               WithinAbs(0.0f, 1e-3f));
+    // It passes over the middle square (laterally, at some t) and hovers there
+    // (vertically): the surface boundary waypoints make the arc-length midpoint a touch
+    // off the exact centre, so scan rather than pin t = 0.5.
+    float bestLateral = 1e9f;
+    float bestLift = 0.0f;
+    for (float tt = 0.0f; tt <= 1.0001f; tt += 0.002f) {
+      const SurfaceMoveSample s = surfaceMoveSample(path, surf, tt);
+      const view::Vec3 off = s.position - mid->centre;
+      bestLateral =
+          std::min(bestLateral, view::length(off - s.normal * view::dot(off, s.normal)));
+      bestLift = std::max(bestLift, view::dot(off, s.normal));
+    }
+    CHECK(bestLateral < 0.01f);
+    CHECK(bestLift > 0.05f);
     for (float t = 0.0f; t <= 1.0001f; t += 0.1f) {
       CHECK(view::length(surfaceMoveSample(path, surf, t).normal) > 0.9f);
     }
@@ -685,6 +697,29 @@ TEST_CASE("a move on the shape is sampled along the surface", "[render]") {
       CHECK_THAT(dist(surfaceMoveSample(path, surf, 1.0f).position, b->centre),
                  WithinAbs(0.0f, 1e-4f));
     }
+  }
+
+  // `pointAt` samples the surface: a cell centre comes back exactly, and a boundary is a
+  // point *on* the surface, not the chord midpoint of the two seats - the two differ on a
+  // curving board, which is exactly why the chord midpoint clipped (M17.19).
+  {
+    view::Vec3 centre{};
+    REQUIRE(surf.pointAt(0.5f, 0.5f, centre));
+    const SurfaceSeat& s00 = *seatOf(cell(0, 0));
+    CHECK_THAT(dist(centre, s00.centre), WithinAbs(0.0f, 1e-4f));
+    float worst = 0.0f;
+    const int nx = static_cast<int>(v.dims.extent(0));
+    const int nz = static_cast<int>(v.dims.extent(1));
+    for (int f = 0; f + 1 < nx; ++f) {
+      for (int r = 0; r < nz; ++r) {
+        const SurfaceSeat& p = *seatOf(cell(f, r));
+        const SurfaceSeat& q = *seatOf(cell(f + 1, r));
+        view::Vec3 edge{};
+        REQUIRE(surf.nearestBoundary(p, q, edge));
+        worst = std::max(worst, dist(edge, (p.centre + q.centre) * 0.5f));
+      }
+    }
+    CHECK(worst > 0.01f);  // the surface boundary is genuinely not the chord midpoint
   }
 
   // A glide across the glued file edge is not cut: on the surface the seam is one

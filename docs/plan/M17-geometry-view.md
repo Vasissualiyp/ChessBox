@@ -1374,11 +1374,15 @@ camera moves are quaternion blends:
 **Piece motion (same day).** A gliding piece no longer travels a straight chord from one
 seat centre to the next. `render::surfaceMoveSample` inserts a **boundary waypoint** between
 each pair of squares - the shared edge for an orthogonal move, the shared corner for a
-diagonal one (both are the midpoint of the two seats) - so the piece goes centre → boundary →
-centre. The waypoint is lifted along the blended normal (`kSurfaceGlideLift`, about a fifth
-of a cell), so the piece **hovers** over the grid line rather than cutting through it: on a
-curved board the chord between two seats dips *below* the surface, and that lift is exactly
-what keeps the base off the squares. Orientation still snaps to the nearer route *cell* (the
-waypoint is not a cell).
+diagonal one - so the piece goes centre → boundary → centre. The waypoint is the *genuine
+surface point* at the boundary lattice coordinate, via `PlaySurface::pointAt` /
+`nearestBoundary` (which carry the warp, the folded pose and the slide, and wrap a glued
+axis the short way), **not** the chord midpoint of the two seat centres: on a fast-curving
+board - a torus's inner ring - the chord point sits well inside the surface, which is what
+clipped no matter how small the lift. The moving piece is also **hovered a full cell**
+(`kSurfaceHoverCells`) off the surface, eased in and out over the move, so the base clears
+the squares everywhere. A `D >= 3` stacked shape has no parametrisation and falls back to
+the chord midpoint. Orientation still snaps to the nearer route *cell* (the waypoint is not
+a cell).
 
 **Still open:** the M17.5 surface coordinates and seam rails; M17.12's larger limits.

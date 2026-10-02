@@ -85,11 +85,17 @@ float wrapSlide(float s, float period) {
   return std::fmod(s, period);
 }
 
-/// How far a gliding piece rises over the boundary between two squares, in world units:
-/// the arc that keeps its base off the board on the chord between two seats (M17.19).
-/// About a fifth of an ordinary cell - visible as a hover, small enough not to read as a
-/// hop.
-constexpr float kSurfaceGlideLift = 0.2f;
+/// How high a gliding piece hovers, in cells, while it travels: one cell, enough that the
+/// base clears the squares everywhere including a torus's inner ring, where the chord
+/// between two seats dips furthest below the surface (M17.19).
+constexpr float kSurfaceHoverCells = 1.0f;
+
+/// The hover's own envelope over the move: 0 on the square at either end, 1 through the
+/// body, with a smooth ramp at each end so the piece does not pop.
+float hoverEnvelope(float t) {
+  const float r = std::clamp(std::min(t, 1.0f - t) / 0.22f, 0.0f, 1.0f);
+  return r * r * (3.0f - 2.0f * r);
+}
 
 }  // namespace
 
@@ -123,6 +129,29 @@ ShapeBeat shapeBeat(float elapsed, float alignSeconds, float approachSeconds,
 bool PlaySurface::slidesAlongRanks(const VariantSpec& v) noexcept {
   const app::SurfaceKind kind = app::overtureSignature(v).surface;
   return kind == app::SurfaceKind::Torus || kind == app::SurfaceKind::Klein;
+}
+
+bool PlaySurface::pointAt(float file, float rank, view::Vec3& out) const {
+  if (stacked_ || nx_ <= 0 || nz_ <= 0) return false;
+  out = sample(kind_, surfacePose_, file / static_cast<float>(nx_) + su_,
+               rank / static_cast<float>(nz_) + sv_);
+  return true;
+}
+
+bool PlaySurface::nearestBoundary(const SurfaceSeat& a, const SurfaceSeat& b,
+                                  view::Vec3& out) const {
+  if (stacked_ || nx_ <= 0 || nz_ <= 0) return false;
+  const auto shortStep = [](float d, int extent) {
+    const float e = static_cast<float>(extent);
+    if (d > e * 0.5f) d -= e;
+    if (d < -e * 0.5f) d += e;
+    return d;
+  };
+  const float bf = static_cast<float>(a.file) +
+                   shortStep(static_cast<float>(b.file - a.file), nx_) * 0.5f;
+  const float br = static_cast<float>(a.rank) +
+                   shortStep(static_cast<float>(b.rank - a.rank), nz_) * 0.5f;
+  return pointAt(bf, br, out);
 }
 
 PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
@@ -165,6 +194,10 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
   const float sv = slidesAlongRanks(v) ? wrapSlide(pose.slideV, 2.0f * fnz) / fnz : 0.0f;
   pose.slideU = 0.0f;
   pose.slideV = 0.0f;
+  s.kind_ = kind;
+  s.surfacePose_ = pose;
+  s.su_ = su;
+  s.sv_ = sv;
   const auto at = [&](float u, float vv) { return sample(kind, pose, u + su, vv + sv); };
 
   // The gapless grid first: every patch and seat is cut from it, the pick ray is tested
@@ -282,6 +315,8 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
 
       SurfaceSeat seat;
       seat.cell = cell;
+      seat.file = f;
+      seat.rank = r;
       seat.centre = at(u, vv);
       seat.normal = nrm(u, vv);
       // A piece is sized to the square it stands on, so the step is the distance to the
@@ -391,19 +426,23 @@ SurfaceMoveSample surfaceMoveSample(const view::MovePath& path, const PlaySurfac
 
   // The travel polyline reaches the *boundary* between two squares, not a straight chord
   // from centre to centre: a waypoint on the shared edge (orthogonal move) or shared
-  // corner (diagonal move) is inserted between each pair. It is the midpoint of the two
-  // seats - exactly the edge/corner on a flat board - lifted along their blended normal,
-  // so the piece arcs up over the grid line. On a curved board that lift is what keeps
-  // the piece's base from passing *through* the squares: the chord between two seats dips
-  // below the surface, and the arc clears it.
+  // corner (diagonal move) is inserted between each pair. It is sampled from the surface
+  // at the *lattice* boundary coordinate - the genuine point on the surface - not the
+  // chord midpoint of the two seats, which on a fast-curving board (a torus's inner ring)
+  // sits well inside the surface (that was the clipping this replaces). A D >= 3 stacked
+  // shape has no parametrisation, so it falls back to the midpoint.
   std::vector<view::Vec3> points;
   points.reserve(seats.size() * 2 - 1);
   points.push_back(centres.front());
   for (std::size_t i = 1; i < centres.size(); ++i) {
-    view::Vec3 n = seats[i - 1]->normal + seats[i]->normal;
-    n = view::length(n) > 1e-6f ? view::normalize(n) : seats[i]->normal;
-    points.push_back((centres[i - 1] + centres[i]) * 0.5f + n * kSurfaceGlideLift);
-    points.push_back(centres[i]);
+    const SurfaceSeat& prev = *seats[i - 1];
+    const SurfaceSeat& cur = *seats[i];
+    view::Vec3 boundary{};
+    if (!surf.nearestBoundary(prev, cur, boundary)) {
+      boundary = (prev.centre + cur.centre) * 0.5f;  // stacked: no surface to sample
+    }
+    points.push_back(boundary);
+    points.push_back(cur.centre);
   }
   out.position = view::pointAlong(points, t);
 
@@ -427,6 +466,15 @@ SurfaceMoveSample surfaceMoveSample(const view::MovePath& path, const PlaySurfac
   out.normal = view::length(n) > 1e-6f ? view::normalize(n) : sa.normal;
   out.quat = local < 0.5f ? sa.quat : sb.quat;
   out.fit = fitOf(sa) + (fitOf(sb) - fitOf(sa)) * local;
+
+  // Hover the moving piece off the surface, so its base does not scrape through the
+  // squares where the path bends over them - most on a fast-curving shape's inner side.
+  // Zero at each end (the piece sets off and lands sitting on its square), one cell
+  // through the body of the move.
+  const float cellSize =
+      0.5f * (std::min(sa.stepU, sa.stepV) + std::min(sb.stepU, sb.stepV));
+  out.position =
+      out.position + out.normal * (kSurfaceHoverCells * cellSize * hoverEnvelope(t));
   return out;
 }
 
@@ -773,6 +821,8 @@ void PlaySurface::buildStacked(const VariantSpec& v) {
 
     SurfaceSeat seat;
     seat.cell = cell;
+    seat.file = c[0];
+    seat.rank = c[1];
     seat.centre = centre;
     seat.normal = normal;
     seat.stepU = cellU;
