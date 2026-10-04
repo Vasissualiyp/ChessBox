@@ -201,7 +201,13 @@ struct SurfacePose {
 /// two dimensions is *authored*, not read off the gluing - `hyper4` is a plain 4-D box
 /// with no identifications at all, and its shape is the projection a tesseract is always
 /// drawn with. `PlaySurface` turns these positions into a tile per cell.
-[[nodiscard]] bool playShapePosition(const VariantSpec& v, CellId cell, OvVec3& out);
+///
+/// `pose.slideU`/`pose.slideV` are in lattice cells and shift the periodic axes before
+/// the surface is sampled, exactly as the 2-D pose does - one cell along the files puts
+/// a1 where b1 was. A shape with no periodic axis (`hyper4`) ignores them, honestly: it
+/// has nowhere to slide (M17.22).
+[[nodiscard]] bool playShapePosition(const VariantSpec& v, CellId cell, OvVec3& out,
+                                     SurfacePose pose = {});
 
 /// Draw one, sorted far to near, into the rectangle it has been given.
 ///

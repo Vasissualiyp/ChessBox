@@ -167,6 +167,13 @@ inline constexpr float kDefaultFollowLift = 0.57735027f;
 inline constexpr int kSurfaceSubdiv = 4;
 inline constexpr int kSurfaceCorners = (kSurfaceSubdiv + 1) * (kSurfaceSubdiv + 1);
 
+/// The opacity at which a ghosted stacked board reads as a surface rather than a veil.
+/// Above it the nearest tile is picked; below it the pick falls through to the tile at
+/// which the accumulated opacity of the sheets in front reaches this value, so a click
+/// through a translucent outer shell reaches the sheet the eye settles on behind it
+/// (M17.22).
+inline constexpr float kGhostPickVisibility = 0.5f;
+
 /// One square, as the piece of surface it actually is.
 ///
 /// Not a rectangle turned to face the right way - a grid of corners lying *on* the
@@ -295,8 +302,17 @@ class PlaySurface {
   /// The cell under a screen pixel, or `kInvalidCell`. Ray-tests the surface itself -
   /// the same points the squares were cut from, with no gaps between them - so a click
   /// resolves to the cell the cursor is over and never falls between two squares.
+  ///
+  /// On a stacked (`D >= 3`) shape, `ghost` is the board mesh's alpha (`geometryGhost`).
+  /// At full opacity the nearest tile wins, as always. Below `kGhostPickVisibility` the
+  /// board is see-through, so the pick walks every intersection along the ray in order,
+  /// accumulates the ghost's opacity toward the eye, and returns the first tile at which
+  /// the stacked sheets read as more opaque than transparent - which is the tile the eye
+  /// actually settles on behind a ghosted outer shell. A lone translucent tile is still
+  /// picked when nothing crosses the threshold. The parametrised 2-D surfaces keep the
+  /// ordinary nearest hit: a single sheet has no hidden cell to reach (M17.22).
   [[nodiscard]] CellId pick(const view::OrbitCamera& camera, float width, float height,
-                            float px, float py) const;
+                            float px, float py, float ghost = 1.0f) const;
 
   /// True when any drawn tile lies between `eye` and `target` (nearer than it by more
   /// than `eps`) - the anti-clip test that keeps the shape from coming between a followed
@@ -307,8 +323,9 @@ class PlaySurface {
  private:
   /// The three- and four-dimensional shapes (M17.12): one flat tile per cell from
   /// `playShapePosition`, since above two dimensions the "surface" is a stack of sheets
-  /// rather than one parametrised sheet.
-  void buildStacked(const VariantSpec& v);
+  /// rather than one parametrised sheet. The pose's slide offsets the periodic axes and
+  /// its `evert` swaps the outward side, exactly as the 2-D path's does (M17.22).
+  void buildStacked(const VariantSpec& v, SurfacePose pose);
 
   std::vector<SurfaceSeat> seats_;
   std::vector<SurfacePatch> patches_;

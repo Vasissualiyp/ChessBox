@@ -1567,4 +1567,257 @@ TEST_CASE("the shape's coordinate rings are the two the rails mark", "[render]")
   }
 }
 
+namespace {
+/// The seat of a multi-axis cell, by its full coordinate. Returned by value: the callers
+/// bind a `const&` to it, and a reference returned from here would trip the compiler's
+/// dangling-reference warning for the `Coord` temporary.
+SurfaceSeat seatAtCoord(const PlaySurface& s, const VariantSpec& v, const Coord& c) {
+  const CellId want = v.dims.toCell(c);
+  for (const SurfaceSeat& t : s.seats()) {
+    if (t.cell == want) return t;
+  }
+  throw std::runtime_error("no such cell on the stacked surface");
+}
+
+const SurfaceSeat* seatOfCell(const PlaySurface& s, CellId c) {
+  for (const SurfaceSeat& t : s.seats()) {
+    if (t.cell == c) return &t;
+  }
+  return nullptr;
+}
+}  // namespace
+
+TEST_CASE("a stacked shape slides along its own cells", "[render]") {
+  // M17.22. `buildStacked` used to ignore the pose entirely. Sliding is the same
+  // sampling one cell further along the surface: the shape is unchanged, differently
+  // parked, so a1 lands exactly where b1 was. `torus3d` glues both its file and rank
+  // axes, so both slides mean something; `hyper4` is a plain bounded 4-cube with no
+  // periodic axis at all, so its slide is honestly a no-op - asserted, not faked.
+  {
+    const VariantSpec& v = *new VariantSpec(test::loadVariant("torus3d"));
+    const int nx = static_cast<int>(v.dims.extent(0));
+    const int nz = static_cast<int>(v.dims.extent(1));
+    const int nl = static_cast<int>(v.dims.extent(2));
+    const PlaySurface rest = PlaySurface::build(v);
+    for (int k = 1; k < nx; ++k) {
+      SurfacePose pose;
+      pose.slideU = static_cast<float>(k);
+      const PlaySurface slid = PlaySurface::build(v, pose);
+      REQUIRE(slid.seats().size() == rest.seats().size());
+      for (int f = 0; f < nx; ++f) {
+        for (int r = 0; r < nz; ++r) {
+          for (int L = 0; L < nl; ++L) {
+            const SurfaceSeat& a = seatAtCoord(slid, v, Coord::of({f, r, L}));
+            const SurfaceSeat& b = seatAtCoord(rest, v, Coord::of({(f + k) % nx, r, L}));
+            CAPTURE(k, f, r, L);
+            CHECK_THAT(dist(a.centre, b.centre), WithinAbs(0.0f, 1e-4f));
+            CHECK(view::dot(a.normal, b.normal) > 0.999f);
+          }
+        }
+      }
+    }
+    // A full two-lap period brings the board home exactly, the same window the 2-D wrap
+    // uses (M17.9).
+    SurfacePose period;
+    period.slideU = static_cast<float>(2 * nx);
+    const PlaySurface home = PlaySurface::build(v, period);
+    for (std::size_t i = 0; i < rest.seats().size(); ++i) {
+      CHECK_THAT(dist(home.seats()[i].centre, rest.seats()[i].centre),
+                 WithinAbs(0.0f, 1e-3f));
+    }
+    // The rank axis slides the same way.
+    SurfacePose pv;
+    pv.slideV = 1.0f;
+    const PlaySurface slidV = PlaySurface::build(v, pv);
+    for (int f = 0; f < nx; ++f) {
+      for (int r = 0; r < nz; ++r) {
+        for (int L = 0; L < nl; ++L) {
+          const SurfaceSeat& a = seatAtCoord(slidV, v, Coord::of({f, r, L}));
+          const SurfaceSeat& b = seatAtCoord(rest, v, Coord::of({f, (r + 1) % nz, L}));
+          CHECK_THAT(dist(a.centre, b.centre), WithinAbs(0.0f, 1e-4f));
+        }
+      }
+    }
+  }
+  {
+    const VariantSpec& v = *new VariantSpec(test::loadVariant("hyper4"));
+    const PlaySurface rest = PlaySurface::build(v);
+    SurfacePose pose;
+    pose.slideU = 2.0f;
+    pose.slideV = 1.0f;
+    const PlaySurface slid = PlaySurface::build(v, pose);
+    REQUIRE(slid.seats().size() == rest.seats().size());
+    for (std::size_t i = 0; i < rest.seats().size(); ++i) {
+      CHECK_THAT(dist(slid.seats()[i].centre, rest.seats()[i].centre),
+                 WithinAbs(0.0f, 1e-6f));
+    }
+  }
+}
+
+TEST_CASE("invert swaps the side on a stacked shape without moving it", "[render]") {
+  // M17.22. The same revised invert the 2-D board uses (M17.7): the geometry is
+  // identical and the outward normal is reversed, so a piece stands on the other face
+  // while the squares stay exactly where they were. It is pure in `evert`, so a capture
+  // reproduces.
+  for (const char* name : {"torus3d", "hyper4"}) {
+    CAPTURE(name);
+    const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
+    const PlaySurface rest = PlaySurface::build(v);
+    for (int i = 0; i <= 10; ++i) {
+      SurfacePose p;
+      p.evert = static_cast<float>(i) / 10.0f;
+      const PlaySurface a = PlaySurface::build(v, p);
+      const PlaySurface b = PlaySurface::build(v, p);
+      REQUIRE(a.seats().size() == rest.seats().size());
+      for (std::size_t c = 0; c < a.seats().size(); ++c) {
+        // Pure in the parameter...
+        CHECK_THAT(dist(a.seats()[c].centre, b.seats()[c].centre),
+                   WithinAbs(0.0f, 1e-6f));
+        CHECK_THAT(view::dot(a.seats()[c].normal, b.seats()[c].normal),
+                   WithinAbs(1.0f, 1e-6f));
+        // ...and the squares never move, at any point of the turn.
+        CHECK_THAT(dist(a.seats()[c].centre, rest.seats()[c].centre),
+                   WithinAbs(0.0f, 1e-6f));
+      }
+    }
+    SurfacePose full;
+    full.evert = 1.0f;
+    const PlaySurface turned = PlaySurface::build(v, full);
+    REQUIRE(turned.seats().size() == rest.seats().size());
+    for (std::size_t c = 0; c < rest.seats().size(); ++c) {
+      // Opposite sides of the same local tangent plane: the seats coincide and the
+      // normals are exactly reversed.
+      CHECK_THAT(dist(turned.seats()[c].centre, rest.seats()[c].centre),
+                 WithinAbs(0.0f, 1e-6f));
+      CHECK_THAT(view::dot(turned.seats()[c].normal, rest.seats()[c].normal),
+                 WithinAbs(-1.0f, 1e-4f));
+    }
+  }
+}
+
+TEST_CASE("ghosted picking reaches a hidden tile on a stacked shape", "[render]") {
+  // M17.22. A `D >= 3` shape is self-intersecting, so an outer sheet hides the cell
+  // behind it and nearest-hit picking can never reach it. With the board ghosted
+  // (`geometryGhost` below the visibility threshold) the pick walks *all* the
+  // intersections, accumulates opacity toward the eye and returns the first tile at which
+  // the stacked board reads as more opaque than transparent - so a click through a
+  // ghosted outer shell reaches the one inside it. At full opacity the same ray still
+  // picks the nearest tile, exactly as before.
+  for (const char* name : {"torus3d", "hyper4"}) {
+    CAPTURE(name);
+    const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
+    const PlaySurface s = PlaySurface::build(v);
+    const float w = 1000.0f;
+    const float h = 760.0f;
+    const view::OrbitCamera cam = view::OrbitCamera::frame(s.bounds(), w / h, 0.0f);
+    const view::Vec3 eye = cam.eye();
+    int reachedDeeper = 0;
+    for (const SurfaceSeat& t : s.seats()) {
+      const view::OrbitCamera::ScreenPoint sp = cam.project(t.centre, w / h, w, h);
+      if (!sp.visible) continue;
+      const CellId near = s.pick(cam, w, h, sp.x, sp.y, 1.0f);
+      const CellId deep = s.pick(cam, w, h, sp.x, sp.y, 0.35f);
+      if (near == kInvalidCell || deep == kInvalidCell || near == deep) continue;
+      const SurfaceSeat* np = seatOfCell(s, near);
+      const SurfaceSeat* dp = seatOfCell(s, deep);
+      REQUIRE(np != nullptr);
+      REQUIRE(dp != nullptr);
+      CAPTURE(t.cell, near, deep);
+      // The ghosted answer is genuinely behind the opaque one along the ray.
+      if (dist(dp->centre, eye) > dist(np->centre, eye) + 0.05f) ++reachedDeeper;
+    }
+    CHECK(reachedDeeper > 0);
+    // The default pick is the opaque one, so existing callers are unchanged.
+    for (const SurfaceSeat& t : s.seats()) {
+      const view::OrbitCamera::ScreenPoint sp = cam.project(t.centre, w / h, w, h);
+      if (!sp.visible) continue;
+      CHECK(s.pick(cam, w, h, sp.x, sp.y) == s.pick(cam, w, h, sp.x, sp.y, 1.0f));
+    }
+  }
+}
+
+TEST_CASE("the stacked shape's adjacency is pinned, not asserted in prose", "[render]") {
+  // M17.22. `torus3d`'s level axis and `hyper4`'s aeon axis are not Euclidean nearness:
+  // a level-adjacent pair sits on *different nested shells at the same angular position*
+  // around the core circle. Pinning it means a later change cannot silently "fix" it or
+  // break it further without the suite noticing.
+  {
+    const VariantSpec& v = *new VariantSpec(test::loadVariant("torus3d"));
+    const PlaySurface s = PlaySurface::build(v);
+    const int nx = static_cast<int>(v.dims.extent(0));
+    const int nz = static_cast<int>(v.dims.extent(1));
+    const int nl = static_cast<int>(v.dims.extent(2));
+    // `shellTube` at the fully-rolled point puts the big loop (the rank revolve) in the
+    // board's X-Y plane with its core circle on the Z axis, so a cell's angular position
+    // around that loop is `atan2(y, x)` and its shell radius is `hypot(x, y)` - the
+    // distance out to the nested tube the level axis chose.
+    const auto angle = [](const view::Vec3& c) { return std::atan2(c.y, c.x); };
+    const auto radius = [](const view::Vec3& c) { return std::hypot(c.x, c.y); };
+    for (int f = 0; f < nx; ++f) {
+      for (int r = 0; r < nz; ++r) {
+        const SurfaceSeat& here = seatAtCoord(s, v, Coord::of({f, r, 0}));
+        const float step = std::max(here.stepU, here.stepV);
+        // File/rank neighbours are ordinary cell steps on the same shell.
+        if (f + 1 < nx) {
+          const SurfaceSeat& n = seatAtCoord(s, v, Coord::of({f + 1, r, 0}));
+          CHECK(dist(here.centre, n.centre) < 2.0f * step);
+        }
+        if (r + 1 < nz) {
+          const SurfaceSeat& n = seatAtCoord(s, v, Coord::of({f, r + 1, 0}));
+          CHECK(dist(here.centre, n.centre) < 2.0f * step);
+          // A rank step rotates about the core, so the shell radius is unchanged.
+          CHECK_THAT(radius(n.centre), WithinAbs(radius(here.centre), 1e-4f));
+        }
+        // Level neighbours sit on index-adjacent nested shells, at the same angular
+        // position around the core - a radial move, not a step along the surface.
+        for (int L = 0; L + 1 < nl; ++L) {
+          const SurfaceSeat& a = seatAtCoord(s, v, Coord::of({f, r, L}));
+          const SurfaceSeat& b = seatAtCoord(s, v, Coord::of({f, r, L + 1}));
+          CAPTURE(f, r, L, angle(a.centre), angle(b.centre), radius(a.centre),
+                  radius(b.centre));
+          CHECK(std::abs(angle(a.centre) - angle(b.centre)) < 0.02f);
+          CHECK(std::abs(radius(a.centre) - radius(b.centre)) > 0.05f);
+          CHECK(dist(a.centre, b.centre) > 0.05f);
+        }
+      }
+    }
+  }
+  {
+    const VariantSpec& v = *new VariantSpec(test::loadVariant("hyper4"));
+    const PlaySurface s = PlaySurface::build(v);
+    const int nx = static_cast<int>(v.dims.extent(0));
+    const int nz = static_cast<int>(v.dims.extent(1));
+    const int nl = static_cast<int>(v.dims.extent(2));
+    const int na = static_cast<int>(v.dims.extent(3));
+    for (int f = 0; f + 1 < nx; ++f) {
+      for (int r = 0; r < nz; ++r) {
+        const SurfaceSeat& here = seatAtCoord(s, v, Coord::of({f, r, 0, 0}));
+        const SurfaceSeat& n = seatAtCoord(s, v, Coord::of({f + 1, r, 0, 0}));
+        CHECK(dist(here.centre, n.centre) < 2.0f * std::max(here.stepU, here.stepV));
+      }
+    }
+    for (int r = 0; r + 1 < nz; ++r) {
+      const SurfaceSeat& here = seatAtCoord(s, v, Coord::of({0, r, 0, 0}));
+      const SurfaceSeat& n = seatAtCoord(s, v, Coord::of({0, r + 1, 0, 0}));
+      CHECK(dist(here.centre, n.centre) < 2.0f * std::max(here.stepU, here.stepV));
+    }
+    // The aeon axis is the nesting: adjacent aeons are distinct tiles on different nested
+    // cubes, not a step along the spatial surface. The projection's spin means their
+    // drawn offset is not a fixed cell step, so the claim is only that each is a real,
+    // separate tile and the four aeons project to four distinct places.
+    for (int f = 0; f < nx; ++f) {
+      for (int r = 0; r < nz; ++r) {
+        for (int L = 0; L < nl; ++L) {
+          for (int A = 0; A + 1 < na; ++A) {
+            const SurfaceSeat& a = seatAtCoord(s, v, Coord::of({f, r, L, A}));
+            const SurfaceSeat& b = seatAtCoord(s, v, Coord::of({f, r, L, A + 1}));
+            CAPTURE(f, r, L, A, dist(a.centre, b.centre));
+            CHECK(dist(a.centre, b.centre) > 1e-3f);
+          }
+        }
+      }
+    }
+  }
+}
+
 #endif  // CB_HAVE_IMGUI

@@ -29,9 +29,10 @@ std::string readFile(const std::filesystem::path& path) {
 
 TEST_CASE("a variant survives a parse and rewrite with its identity intact",
           "[unit][io]") {
-  for (const char* name : {"standard", "cylinder", "torus", "mobius", "klein",
-                           "mirrorbox", "cube5", "hyper4", "torus3d", "t6", "atomic",
-                           "atomic_torus", "mustcapture", "charged", "5d"}) {
+  for (const char* name :
+       {"standard", "cylinder", "torus", "mobius", "klein", "mirrorbox", "cube5",
+        "hyper4", "torus3d", "torus3d_twist", "t6", "atomic", "atomic_torus",
+        "mustcapture", "charged", "5d"}) {
     CAPTURE(name);
     const std::string source = readFile(test::variantPath(name));
 

@@ -1180,10 +1180,11 @@ int main(int argc, char** argv) {
                     session->variant(), poseFrom(settings, session->variant()));
                 app::Action a;
                 a.kind = app::ActionKind::ClickCell;
-                a.cell = surf.pick(session->cameraOver(surfacePlacements(surf),
-                                                       surf.bounds(), view::ViewConfig{}),
-                                   boardRect.width, boardRect.height,
-                                   e.button.x - boardRect.x, e.button.y - boardRect.y);
+                a.cell =
+                    surf.pick(session->cameraOver(surfacePlacements(surf), surf.bounds(),
+                                                  view::ViewConfig{}),
+                              boardRect.width, boardRect.height, e.button.x - boardRect.x,
+                              e.button.y - boardRect.y, settings.geometryGhost);
                 (void)shell->session()->apply(a);
               }
             }
@@ -1227,6 +1228,7 @@ int main(int argc, char** argv) {
             app::Settings& st = shell->settings();
             const VariantSpec& variant = shell->session()->variant();
             const bool ring = render::PlaySurface::slidesAlongRanks(variant);
+            const bool stacked = variant.dims.dims() >= 3;
             if (ring && !variant.geom.isOrientable()) {
               // On a non-orientable board the V axis is the only slide measured to keep
               // the tile corners abutting across the seam (the U slide's gap grew to
@@ -1236,6 +1238,10 @@ int main(int argc, char** argv) {
             } else {
               if (ring) st.geometrySlideV += e.motion.xrel * 0.014f;
               st.geometrySlideU += e.motion.yrel * 0.014f;
+              // A stacked `D >= 3` shape whose ranks the 2-D test does not call a ring
+              // still rotates about the same horizontal drag. `hyper4` has no periodic
+              // axis, so this is a no-op there rather than a lie (M17.22).
+              if (stacked && !ring) st.geometrySlideV += e.motion.xrel * 0.014f;
             }
           } else if (panning && shell->hasGame()) {
             // Drag the board with the middle button: slide the look-at point in the

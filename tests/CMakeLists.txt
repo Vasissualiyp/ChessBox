@@ -115,4 +115,25 @@ if(TARGET chessbox_gui)
     set_tests_properties(gui-geometry-${shape} PROPERTIES LABELS "render;gui"
       TIMEOUT 120 ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
   endforeach()
+  # M17.22: slide, invert and ghost now reach the D >= 3 stacked shapes too. Each is a
+  # validation-clean frame of the documented behaviour stated through the ordinary flags.
+  foreach(case torus3d-slide torus3d-invert torus3d-ghost hyper4-invert hyper4-ghost)
+    string(REPLACE "-" ";" parts "${case}")
+    list(GET parts 0 shape)
+    list(GET parts 1 pose)
+    if(pose STREQUAL "slide")
+      set(poseFlags --slide 1 --slide-v 2)
+    elseif(pose STREQUAL "invert")
+      set(poseFlags --evert 1)
+    else()  # ghost
+      set(poseFlags --ghost 0.4)
+    endif()
+    add_test(NAME gui-geometry-${case}
+      COMMAND chessbox_gui ${shape}
+              --shot ${CMAKE_BINARY_DIR}/render-captures/gui-geometry-${case}.ppm
+              --geometry ${poseFlags}
+      WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(gui-geometry-${case} PROPERTIES LABELS "render;gui"
+      TIMEOUT 120 ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  endforeach()
 endif()

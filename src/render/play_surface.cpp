@@ -179,7 +179,7 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
   // Above two dimensions the shape is authored, not a parametrised surface (M17.12).
   OvVec3 probe;
   if (v.dims.dims() >= 3 && playShapePosition(v, 0, probe)) {
-    s.buildStacked(v);
+    s.buildStacked(v, pose);
     return s;
   }
   if (!hasPlaySurface(v)) return s;
@@ -876,13 +876,22 @@ SlideOffset alignSlideToFace(const VariantSpec& v, CellId target,
       });
 }
 
-void PlaySurface::buildStacked(const VariantSpec& v) {
+void PlaySurface::buildStacked(const VariantSpec& v, SurfacePose pose) {
   stacked_ = true;
   const DimSpec& d = v.dims;
   const int nx = static_cast<int>(d.extent(0));
   const int nz = static_cast<int>(d.extent(1));
   nx_ = nx;
   nz_ = nz;
+  // INVERT swaps which side is out, exactly as on the parametrised 2-D surfaces: the
+  // tiles do not move, the outward normal is reversed and the piece's frame follows it,
+  // so the pieces stand on the other face (M17.22, matching M17.7 revised).
+  const bool inverted = pose.evert > 0.5f;
+  pose.evert = 0.0f;
+  // The slide, in cells, wrapped into the same two-lap window the 2-D path uses before it
+  // reaches the shape function. `hyper4` has no periodic axis and ignores it (M17.22).
+  pose.slideU = wrapSlide(pose.slideU, 2.0f * static_cast<float>(nx));
+  pose.slideV = wrapSlide(pose.slideV, 2.0f * static_cast<float>(nz));
   // A neighbour's position, wrapping a periodic axis and clamping a bounded one. The
   // difference matters: on `torus3d` the file and rank axes are periodic, so file 0's
   // "previous" is file 3, not file 0 again - clamping returns the cell's own position, so
@@ -900,7 +909,7 @@ void PlaySurface::buildStacked(const VariantSpec& v) {
     Coord c = base;
     c.c[a] = static_cast<std::int16_t>(idx);
     OvVec3 p;
-    if (!playShapePosition(v, d.toCell(c), p)) return false;
+    if (!playShapePosition(v, d.toCell(c), p, pose)) return false;
     out = {p.x, -p.z, p.y};  // into the board's Z-up world, as the 2-D shapes are
     return true;
   };
@@ -956,7 +965,7 @@ void PlaySurface::buildStacked(const VariantSpec& v) {
   for (int id = 0; id < total; ++id) {
     const CellId cell = static_cast<CellId>(id);
     OvVec3 raw;
-    if (!playShapePosition(v, cell, raw)) continue;
+    if (!playShapePosition(v, cell, raw, pose)) continue;
     const Coord c = d.toCoord(cell);
     const view::Vec3 centre{raw.x, -raw.z, raw.y};
     view::Vec3 tangentU{}, tangentV{}, ex{}, vDir{};
@@ -967,6 +976,9 @@ void PlaySurface::buildStacked(const VariantSpec& v) {
     view::Vec3 normal = view::cross(tangentV, tangentU);
     normal = view::length(normal) > 1e-6f ? view::normalize(normal)
                                           : view::Vec3{0.0f, 0.0f, 1.0f};
+    // The inverse swaps the outward side; `ey` is derived from the flipped normal, so the
+    // piece's frame stays right-handed and its +Z is the new normal.
+    if (inverted) normal = normal * -1.0f;
     const view::Vec3 ey = view::cross(normal, ex);
 
     SurfaceSeat seat;
@@ -1012,7 +1024,7 @@ void PlaySurface::buildStacked(const VariantSpec& v) {
 }
 
 CellId PlaySurface::pick(const view::OrbitCamera& camera, float width, float height,
-                         float px, float py) const {
+                         float px, float py, float ghost) const {
   const view::OrbitCamera::Ray ray = camera.pickRay(px, py, width, height);
   // Moeller-Trumbore, nearest hit wins: a cell round the back of the shape is behind the
   // one in front of it, and the one in front is the answer.
@@ -1035,19 +1047,37 @@ CellId PlaySurface::pick(const view::OrbitCamera& camera, float width, float hei
   };
 
   // A D >= 3 shape is a set of tiles rather than one gapless sheet: test each cell's own
-  // quad, nearest first (M17.12).
+  // quad (M17.12). A ray can cross several sheets, so every intersection is collected
+  // rather than stopping at the first.
   if (stacked_) {
-    CellId best = kInvalidCell;
-    float bestT = 1e30f;
+    struct Hit {
+      float t;
+      CellId cell;
+    };
+    std::vector<Hit> hits;
     for (std::size_t i = 0; i < quads_.size(); ++i) {
       const std::array<view::Vec3, 4>& q = quads_[i];
       float t = 0.0f;
-      if ((hit(q[0], q[1], q[2], t) || hit(q[0], q[2], q[3], t)) && t < bestT) {
-        bestT = t;
-        best = quadCells_[i];
+      if (hit(q[0], q[1], q[2], t) || hit(q[0], q[2], q[3], t)) {
+        hits.push_back({t, quadCells_[i]});
       }
     }
-    return best;
+    if (hits.empty()) return kInvalidCell;
+    std::sort(hits.begin(), hits.end(),
+              [](const Hit& a, const Hit& b) { return a.t < b.t; });
+    const float alpha = std::clamp(ghost, 0.0f, 1.0f);
+    // Fully opaque: the nearest sheet is the answer, exactly as before. Ghosted: the
+    // sheets in front are see-through, so the tile the eye settles on is the first at
+    // which the accumulated opacity toward the eye reaches the visibility threshold - a
+    // click through a ghosted outer shell reaches the one inside it. Falling all the way
+    // through (a lone translucent tile) still returns the nearest (M17.22).
+    if (alpha >= kGhostPickVisibility) return hits.front().cell;
+    float transmitted = 1.0f;
+    for (const Hit& h : hits) {
+      transmitted *= (1.0f - alpha);
+      if (1.0f - transmitted >= kGhostPickVisibility) return h.cell;
+    }
+    return hits.front().cell;
   }
 
   if (corners_.empty()) return kInvalidCell;

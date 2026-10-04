@@ -2670,14 +2670,18 @@ bool hasPlaySurface(const VariantSpec& v) noexcept {
   return playShapePosition(v, 0, ignored);
 }
 
-bool playShapePosition(const VariantSpec& v, CellId cell, OvVec3& out) {
+bool playShapePosition(const VariantSpec& v, CellId cell, OvVec3& out, SurfacePose pose) {
   const DimSpec& d = v.dims;
   if (d.dims() == 3 && v.name == "torus3d") {
     // The nested shells, at the point the library screen has fully rolled: two of the
     // three gluings close T^2 as the shell's surface, the level axis becomes the shell's
-    // radius, and four levels come out as four shells about one core circle.
+    // radius, and four levels come out as four shells about one core circle. The file and
+    // rank axes are periodic, so a slide is just sampling one cell further along - the
+    // same shape, differently parked (M17.22).
+    constexpr float kE = 4.0f;
     const Coord c = d.toCoord(cell);
-    out = shellTube((fi(c.c[0]) + 0.5f) / 4.0f, (fi(c.c[1]) + 0.5f) / 4.0f, kTau, kTau,
+    out = shellTube((fi(c.c[0]) + 0.5f + pose.slideU) / kE,
+                    (fi(c.c[1]) + 0.5f + pose.slideV) / kE, kTau, kTau,
                     0.62f + fi(c.c[2]) * 0.82f, 10.5f);
     return true;
   }

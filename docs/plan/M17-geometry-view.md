@@ -1872,3 +1872,62 @@ declarable today as plain data (a `flip` on one `torus3d` axis, exactly as `klei
 already does in 2-D) with the shape view extended to show the twist as a third D>=3
 showcase alongside `cube5`/`hyper4`. Third of the three Wave 1 completion pieces, after
 M17.21.
+
+### Status: M17.22 built (2026-10-04, opencode)
+
+Parts 1-3 and the new variant's flat-lattice data are in; part 4's twisted **shell** is
+deferred, with the reason recorded in
+[`M17.12-shapes-above-two-dimensions.md`](M17.12-shapes-above-two-dimensions.md).
+
+- **Slide (part 1).** `playShapePosition` takes an optional `SurfacePose`, and `torus3d`'s
+  file/rank fractions are shifted by `slideU`/`slideV` (in cells) before `shellTube`.
+  `PlaySurface::buildStacked` now takes the pose, wraps the slide into the same two-lap
+  window the 2-D path uses (`wrapSlide`), and forwards it into every sample (the per-cell
+  loop and `positionAt`). `hyper4` is a bounded 4-cube with no periodic axis, so its slide
+  is a verified no-op, not a fake control. The GUI's middle-drag adds the horizontal slide
+  for a stacked shape whose ranks the 2-D `slidesAlongRanks` does not already call a ring
+  (`hyper4`), without double-counting `torus3d`.
+- **Invert (part 2).** `buildStacked` applies the same revised invert the 2-D board does:
+  `evert > 0.5` reverses the outward normal and derives the piece frame from it, leaving
+  every tile exactly where it was. **Deviation from the spec's own sketch:** it suggests
+  parameterising `shellTube`'s radius as an eversion. The play board's invert is a *side
+  swap*, not a geometric eversion (M17.7 revised), and the 2-D path the spec says to match
+  does exactly this; a geometric `shellTube` eversion would move every cell and contradict
+  the pinned "never moves the board" assertion the 2-D invert test already holds.
+- **Ghost picking (part 3).** The renderer already ghosted the stacked mesh - it writes the
+  same vertex-colour alpha channel the 2-D path does and uses the same blend pipeline
+  (M17.10) - so no renderer change was needed. `PlaySurface::pick` takes the board's alpha
+  (`geometryGhost`); on a stacked surface it collects every ray intersection, sorts them
+  near to far, and - when ghosted below `kGhostPickVisibility` - accumulates opacity toward
+  the eye and returns the first tile where the stacked sheets read as more opaque than
+  transparent. At full opacity (the default) it is the nearest hit, bit for bit the old
+  behaviour, so every existing caller is unchanged. The GUI passes
+  `settings.geometryGhost`.
+- **The variant (part 4, data half).** `variants/torus3d_twist.toml` copies `torus3d` and
+  gives the rank identification `flip = ["file"]`, exactly as `klein.toml` does in 2-D.
+  **Confirmed first, before any shape work**, that it loads and plays on the flat lattice:
+  non-orientable, a legal opening (42 moves, no side in check), perft 42/1616 and
+  oracle-agreeing, FEN-N round-trip, and the full shipped-variant golden suite green. A new
+  golden section proves the twist's consequence: a bishop's diagonals are colour-bound on
+  `torus3d` (32 of 64 cells) and reach all 64 on `torus3d_twist` - the 3-D analogue of
+  Klein's own test.
+- **Adjacency, pinned.** New `[render]` test. `torus3d`: file/rank-adjacent seats are
+  ordinary cell steps on one shell; level-adjacent seats share their angular position about
+  the core circle and differ in shell radius (a radial nesting move, not Euclidean
+  nearness). `hyper4`: file/rank-adjacent are cell steps; the aeon axis is the nesting and
+  adjacent aeons are distinct tiles, not a surface step.
+- **Deferred: part 4's twisted shell.** Wiring a lemniscate-pinched `twistedShellTube` into
+  `buildStacked` needs the normal/frame-continuity walk M17.18 had to add twice for the 2-D
+  Klein bottle, adapted to this path - the item the spec itself flags as research-grade.
+  Rather than ship a visibly broken shell, `torus3d_twist` ships **flat-lattice-only**:
+  `playShapePosition` does not recognise it, so `hasPlaySurface` is false and no geometry
+  toggle is offered for it. The spec's own acceptance criterion 2 names this as the
+  non-failing outcome; the gluing-language claim the variant exists to make is carried by
+  the data (the engine derives the transport and the bishop escapes its colour).
+- **Verification.** Four new `[render]` cases (slide, invert, ghost picking, adjacency);
+  `tools/test.sh render` green (94 cases, 6.46M assertions); `ctest --preset dev -R gui`
+  green (22 tests) with five new validation-clean captures
+  (`gui-geometry-torus3d-{slide,invert,ghost}`, `gui-geometry-hyper4-{invert,ghost}`); the
+  `torus3d_twist` goldens green; `tools/precommit.sh` green (format, arch, unit, property).
+  `nix flake check` was not run (the spec's acceptance asks for it, but AGENTS.md marks it
+  the release gate and the task budget allowed skipping it).

@@ -1,0 +1,107 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# torus3d_twist - a 4x4x4 three-dimensional torus whose rank seam is twisted.
+#
+# `torus3d` glues all three axes straight. This one glues the rank axis with a flip of
+# the file coordinate, exactly as `klein.toml` does in two dimensions, while the file and
+# level axes stay straight. In two dimensions that flip is a Klein bottle and it makes a
+# bishop escape its colour; carried into three dimensions it is the same statement - the
+# gluing language has no dimension-specific case, so a three-axis variant declares a flip
+# the same way a two-axis one does. The engine derives the direction transport from the
+# declaration, so there is no code to change to get here.
+#
+# The armies are separated along the level axis for the same reason as `torus3d`: every
+# axis is glued, so opposite ends of a 4-cell axis are two steps apart.
+
+name = "torus3d_twist"
+description = "A four-by-four-by-four cube glued on every axis, with the rank seam twisted - a non-orientable 3-D torus."
+difficulty = "hard"
+side_to_move = "white"
+stalemate = "draw"
+halfmove_draw_limit = 100
+
+[[axis]]
+name = "file"
+extent = 4
+
+[[axis]]
+name = "rank"
+extent = 4
+
+[[axis]]
+name = "level"
+extent = 4
+
+[[geometry.identify]]
+axis = "file"
+kind = "periodic"
+
+[[geometry.identify]]
+axis = "rank"
+kind = "periodic"
+flip = ["file"]
+
+[[geometry.identify]]
+axis = "level"
+kind = "periodic"
+
+[[piece]]
+name = "knight"
+symbol = "N"
+
+  [[piece.move]]
+  vector = [1, 2]
+  max = 1
+  mode = "leap"
+
+[[piece]]
+name = "bishop"
+symbol = "B"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "rook"
+symbol = "R"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "queen"
+symbol = "Q"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "king"
+symbol = "K"
+royal = true
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+
+# The same opening array as `torus3d`: the twist is on the rank coordinate of the seam
+# between level slices, and the armies are separated along the level axis.
+[start]
+board = "4/4/4/RNKR|4/4/4/4|4/4/rnkr/4|4/4/4/4"

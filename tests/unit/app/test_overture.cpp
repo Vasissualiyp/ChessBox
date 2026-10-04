@@ -72,13 +72,13 @@ TEST_CASE("every shipped variant derives the surface its geometry implies", "[un
     SurfaceKind surface;
   };
   const Row rows[] = {
-      {"standard", SurfaceKind::FlatGrid},  {"cylinder", SurfaceKind::Tube},
-      {"torus", SurfaceKind::Torus},        {"mobius", SurfaceKind::Band},
-      {"klein", SurfaceKind::Klein},        {"mirrorbox", SurfaceKind::MirrorBox},
-      {"cube5", SurfaceKind::FlatGrid},     {"torus3d", SurfaceKind::Torus},
-      {"t6", SurfaceKind::Torus},           {"5d", SurfaceKind::FlatGrid},
-      {"atomic", SurfaceKind::FlatGrid},    {"charged", SurfaceKind::FlatGrid},
-      {"atomic_torus", SurfaceKind::Torus},
+      {"standard", SurfaceKind::FlatGrid},   {"cylinder", SurfaceKind::Tube},
+      {"torus", SurfaceKind::Torus},         {"mobius", SurfaceKind::Band},
+      {"klein", SurfaceKind::Klein},         {"mirrorbox", SurfaceKind::MirrorBox},
+      {"cube5", SurfaceKind::FlatGrid},      {"torus3d", SurfaceKind::Torus},
+      {"torus3d_twist", SurfaceKind::Klein}, {"t6", SurfaceKind::Torus},
+      {"5d", SurfaceKind::FlatGrid},         {"atomic", SurfaceKind::FlatGrid},
+      {"charged", SurfaceKind::FlatGrid},    {"atomic_torus", SurfaceKind::Torus},
   };
   for (const Row& r : rows) {
     CAPTURE(r.name);

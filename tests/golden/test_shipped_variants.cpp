@@ -90,10 +90,10 @@ TEST_CASE("shipped variant node counts", "[golden][variants]") {
     std::uint64_t depth2;
   };
   const Expect cases[] = {
-      {"standard", 20, 400},  {"cylinder", 20, 392}, {"torus", 54, 2535},
-      {"mobius", 69, 4003},   {"klein", 48, 1977},   {"torus3d", 34, 1028},
-      {"mirrorbox", 20, 396}, {"cube5", 52, 2665},   {"hyper4", 39, 1380},
-      {"t6", 41, 2216},
+      {"standard", 20, 400},       {"cylinder", 20, 392},  {"torus", 54, 2535},
+      {"mobius", 69, 4003},        {"klein", 48, 1977},    {"torus3d", 34, 1028},
+      {"torus3d_twist", 42, 1616}, {"mirrorbox", 20, 396}, {"cube5", 52, 2665},
+      {"hyper4", 39, 1380},        {"t6", 41, 2216},
   };
   for (const Expect& c : cases) {
     CAPTURE(c.name);
@@ -242,5 +242,36 @@ TEST_CASE("the geometry of each shipped board is what its file claims",
         REQUIRE(v.geom.step(w));
       }
     }
+  }
+
+  SECTION("torus3d_twist's rank flip frees the bishop's colour") {
+    // M17.22. The flip is declared on the *rank* identification with `flip = ["file"]`,
+    // exactly as `klein` does in two dimensions. The direction transport is derived, not
+    // authored per axis count, so the same statement must carry into three dimensions:
+    // a bishop's diagonals preserve the parity of the coordinate sum, so on the untwisted
+    // `torus3d` it is confined to one colour class (half of the 64 cells); the twist
+    // flips the file sign across the rank seam, parity is no longer preserved, and the
+    // bishop reaches every cell - the three-dimensional analogue of Klein's own test.
+    const VariantSpec v = test::loadVariant("torus3d_twist");
+    REQUIRE(v.dims.dims() == 3);
+    REQUIRE_FALSE(v.geom.isOrientable());  // the flip makes the 3-torus non-orientable
+    const VariantSpec straight = test::loadVariant("torus3d");
+    REQUIRE(straight.geom.isOrientable());
+
+    // The bishop's own atoms: every diagonal of every coordinate plane.
+    const std::vector<Direction> diagonals{
+        test::dir(v.dims, {1, 1, 0}),  test::dir(v.dims, {1, -1, 0}),
+        test::dir(v.dims, {-1, 1, 0}), test::dir(v.dims, {-1, -1, 0}),
+        test::dir(v.dims, {1, 0, 1}),  test::dir(v.dims, {1, 0, -1}),
+        test::dir(v.dims, {-1, 0, 1}), test::dir(v.dims, {-1, 0, -1}),
+        test::dir(v.dims, {0, 1, 1}),  test::dir(v.dims, {0, 1, -1}),
+        test::dir(v.dims, {0, -1, 1}), test::dir(v.dims, {0, -1, -1})};
+    const CellId start = v.dims.toCell(Coord::of({0, 0, 0}));
+    const auto reach = test::reachable(v.geom, start, diagonals);
+    const auto confined = test::reachable(
+        straight.geom, straight.dims.toCell(Coord::of({0, 0, 0})), diagonals);
+    CHECK(reach.size() == v.dims.cellCount());
+    CHECK(confined.size() == straight.dims.cellCount() / 2);
+    CHECK(confined.size() < reach.size());
   }
 }
