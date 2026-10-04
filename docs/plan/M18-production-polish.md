@@ -283,6 +283,43 @@ system - one fixed look, tuned once, for the one purpose (marketing capture) cin
 exists for. If it fights `--ghost`'s own alpha blending or M17.21's rails anywhere, that is a
 compositing-order bug to fix, not a reason to change either feature.
 
+### Status: M18.3 built (2026-10-04, opencode)
+
+Cinema captures now carry a soft neutral vignette and a low-alpha grade; every other frame -
+captures and interactive play - is byte-for-byte unchanged.
+
+- **Route: a 2-D draw-list overlay, not a post pass.** The board renderer's overlay slot
+  already draws the interface after the board (and after any blur), so the look is two
+  full-frame rectangles plus the vignette's rings in `ImGui::GetBackgroundDrawList()` - no
+  second render target, no fullscreen shader. The spec's cheap option, and it reads, so the
+  real colour-curve pass was not needed.
+- **Where it hooks.** Cinema used to pass `noUi`, so the interface was never recorded. It now
+  records the pass (`main.cpp`) and a new `Ui::setCinema` reaches `Ui::build`, which in cinema
+  returns before building any screen and draws only `drawCinemaLook()`. That is what keeps the
+  furniture out while still compositing the look over the board; the non-cinema path is
+  otherwise untouched, and `setCinema` defaults off.
+- **Vignette.** `drawCheckEdges`'s nested-outline technique, neutral instead of red. Not its
+  seven fat rings, though: at cinema scale those read as a picture frame, so it is 80 thin
+  rings (1.5 px) reaching ~120 px in with a quadratic falloff - soft at 1080p and at capture
+  size.
+- **Grade.** A 6% crush plus a 4% wash of `theme.ember` - the one accent, so the wash is cool
+  on manifold and warm on console with no cinema-only colour.
+- **Deviations.** (1) `theme.shadow` (its RGB, alpha forced to 1) rather than the spec's
+  `theme.ink`/`theme.soot`, which are *page* colours and would lighten the light theme - the
+  same trap M18.2 recorded. (2) Ring count and band tuned away from `drawCheckEdges`'s values
+  for softness, which the spec allowed ("a fine starting point").
+- **Tests.** `gui-cinema-grade` (new `tests/check_cinema_grade.cmake`) renders `torus
+  --geometry` with and without `--cinema` at 640x360 and reads the PPM: the ring leaves the
+  frame centre as page, so the cinema corners must be measurably darker than its centre, while
+  the ungraded frame stays flat (corner vs centre within 6/1000). `gui-cinema-standard` and
+  `gui-cinema-torus` are validation-clean `--shot --cinema` captures.
+- **Verification.** `tools/test.sh --build render` green (100 cases, 4.6M assertions);
+  `ctest --preset dev -L render` 30/30; `tools/precommit.sh` green (format, build, arch, unit,
+  property). Pixel-identity was checked with `cmp`, not argued: `standard --script "click e2"
+  --shot` and `torus --geometry --shot` are byte-identical before and after
+  (`build/m183_check/`), while the same frames with `--cinema` differ. Visually confirmed at
+  640x360 and 1920x1080: cinema reads framed and graded, the ungraded frame is the old picture.
+
 ## M18.4 The ambient background, redone
 
 **Want.** The existing menu background (`render::DepthField`, `src/render/deco.cpp`) is 120
