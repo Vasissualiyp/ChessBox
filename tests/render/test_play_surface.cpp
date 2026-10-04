@@ -1483,4 +1483,88 @@ TEST_CASE("the look-ahead morph sees the camera about to cross the board", "[ren
   CHECK_FALSE(followClips(path, turned, 1.0f, 0.0f, eye));
 }
 
+TEST_CASE("the shape's seam rails sit on the flat view's seams", "[render]") {
+  // M17.21. A closed two-dimensional shape has no near edge to hang a rim on the way the
+  // flat board does, so it draws the seam as a rail along the wrap ring instead - the row
+  // of cells where the lattice coordinate wraps from last back to first. The rail has to
+  // land on the *same* cells the flat view's `SeamMap` colours and take the same colour,
+  // or the two views disagree about where the seam is.
+  const view::Theme theme = BoardRenderer{}.theme();
+  for (const char* name : {"cylinder", "torus", "mobius", "klein"}) {
+    CAPTURE(name);
+    const VariantSpec v = test::loadVariant(name);
+    const view::ViewConfig cfg = view::ViewConfig::forBoard(v.dims);
+    // A glued 2-D board draws the files then the ranks, so a lattice axis and its screen
+    // index are the same number - the assumption the rail's axis argument rests on.
+    REQUIRE(cfg.screenAxes.size() >= 2);
+    REQUIRE(cfg.screenAxes[0] == 0);
+    REQUIRE(cfg.screenAxes[1] == 1);
+    const view::SeamMap seams = view::SeamMap::build(v, cfg, theme);
+    const PlaySurface surf = PlaySurface::build(v);
+    REQUIRE_FALSE(surf.empty());
+
+    for (const SurfaceSeat& seat : surf.seats()) {
+      const Coord co = v.dims.toCoord(seat.cell);
+      for (int axis = 0; axis < 2; ++axis) {
+        // What the flat view says here: a glued seam on this axis at its *Min* end, which
+        // is the wrap edge (the Max end is the same physical seam one cell round).
+        bool gluedMin = false;
+        view::Rgba want{};
+        for (const view::SeamFace& f : seams.at(seat.cell)) {
+          if (f.screenAxis == static_cast<std::uint8_t>(axis) && f.side == Side::Min &&
+              f.kind == view::SeamKind::Glued) {
+            gluedMin = true;
+            want = f.color;
+          }
+        }
+        // The wrap ring is the coordinate-0 row, and a rail exists only where that row is
+        // really a glued seam. A mirror leads nowhere and gets nothing.
+        const int coord = axis == 0 ? co[0] : co[1];
+        const bool onRing = gluedMin && coord == 0;
+        for (int i = 0; i < kSurfaceSubdiv + 1; ++i) {
+          for (int j = 0; j < kSurfaceSubdiv + 1; ++j) {
+            const SurfaceRail r = surfaceRail(seams, seat.cell, axis, i, j);
+            const bool edge = (axis == 0 ? i : j) == 0;
+            CAPTURE(seat.file, seat.rank, axis, i, j, onRing, edge);
+            if (onRing && edge) {
+              CHECK(r.weight == 1.0f);
+              CHECK(r.color.r == want.r);
+              CHECK(r.color.g == want.g);
+              CHECK(r.color.b == want.b);
+            } else {
+              CHECK(r.weight == 0.0f);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("the shape's coordinate rings are the two the rails mark", "[render]") {
+  // M17.21. With no edge to label, the shape labels the same two reference rings the
+  // rails colour: the file letters along the rank-0 ring, the rank numbers along the
+  // file-0 ring. Eight labels each on an ordinary 8x8 glued board, matching the flat
+  // view's count.
+  for (const char* name : {"cylinder", "torus", "mobius", "klein"}) {
+    CAPTURE(name);
+    const VariantSpec v = test::loadVariant(name);
+    const PlaySurface surf = PlaySurface::build(v);
+    REQUIRE_FALSE(surf.empty());
+    const int nx = static_cast<int>(v.dims.extent(0));
+    const int nz = static_cast<int>(v.dims.extent(1));
+    int fileLabels = 0;
+    int rankLabels = 0;
+    for (const SurfaceSeat& seat : surf.seats()) {
+      if (seat.rank == 0) ++fileLabels;
+      if (seat.file == 0) ++rankLabels;
+      // Every seat a label can land on has a real surface point and a normal to push the
+      // text out along.
+      CHECK(view::length(seat.normal) > 0.9f);
+    }
+    CHECK(fileLabels == nx);
+    CHECK(rankLabels == nz);
+  }
+}
+
 #endif  // CB_HAVE_IMGUI

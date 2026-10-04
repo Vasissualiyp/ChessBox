@@ -132,6 +132,25 @@ bool PlaySurface::slidesAlongRanks(const VariantSpec& v) noexcept {
   return kind == app::SurfaceKind::Torus || kind == app::SurfaceKind::Klein;
 }
 
+SurfaceRail surfaceRail(const view::SeamMap& seams, CellId cell, int axis, int i, int j) {
+  SurfaceRail out;
+  if (axis != 0 && axis != 1) return out;
+  // The rail runs along the wrap edge, which is the low end of the coordinate-0 row on
+  // the shape's parametrisation: file 0's Min edge, rank 0's Min edge.
+  if ((axis == 0 ? i : j) != 0) return out;
+  for (const view::SeamFace& f : seams.at(cell)) {
+    if (static_cast<int>(f.screenAxis) != axis) continue;
+    // The Min end is the wrap ring; the Max end is the same physical ring one cell round,
+    // so tinting both would double the rail rather than move it.
+    if (f.side != Side::Min) continue;
+    if (f.kind != view::SeamKind::Glued) continue;  // a mirror leads nowhere; no hue
+    out.color = f.color;
+    out.weight = 1.0f;
+    return out;
+  }
+  return out;
+}
+
 bool PlaySurface::pointAt(float file, float rank, view::Vec3& out) const {
   if (stacked_ || nx_ <= 0 || nz_ <= 0) return false;
   out = sample(kind_, surfacePose_, file / static_cast<float>(nx_) + su_,

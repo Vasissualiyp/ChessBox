@@ -716,6 +716,55 @@ TEST_CASE("a move in flight on the shape renders cleanly", "[render][gpu]") {
   const auto px = target->readPixels();
   REQUIRE(px.has_value());
 }
+
+TEST_CASE("the shape tints its seam rails into the board mesh", "[render]") {
+  // M17.21. The rail is not a pipeline or an edge: it is the seam's own colour written
+  // into the patch's vertex colours at the wrap edge, the same one mesh the ghost rides.
+  // No device needed - `buildInstances` is pure data in, pure data out.
+  BoardRenderer renderer;
+  const view::Theme theme = renderer.theme();
+  const VariantSpec v = test::loadVariant("torus");
+  const Position p = Position::startPosition(v);
+  const view::ViewConfig cfg = view::ViewConfig::forBoard(v.dims);
+  const view::SeamMap seams = view::SeamMap::build(v, cfg, theme);
+
+  BoardOptions options = renderer.options();
+  options.surface = true;
+  renderer.setOptions(options);
+  const view::PositionView snap = view::PositionView::capture(p);
+  const InstanceSet set = renderer.buildInstances(snap, cfg, &seams);
+
+  // The flat view's own colour for the file seam at (0,3); the shape must carry it.
+  const CellId railCell = v.dims.toCell(Coord::of({0, 3}));
+  view::Rgba want{};
+  bool foundFace = false;
+  for (const view::SeamFace& f : seams.at(railCell)) {
+    if (f.screenAxis == 0 && f.side == Side::Min) {
+      want = f.color;
+      foundFace = true;
+    }
+  }
+  REQUIRE(foundFace);
+  const auto carriesRail = [&](const InstanceSet& s) {
+    int n = 0;
+    for (const MeshVertex& mv : s.surfaceVertices) {
+      if (std::abs(mv.color[0] - want.r) < 1e-4f &&
+          std::abs(mv.color[1] - want.g) < 1e-4f &&
+          std::abs(mv.color[2] - want.b) < 1e-4f) {
+        ++n;
+      }
+    }
+    return n;
+  };
+  CHECK(carriesRail(set) > 0);
+
+  // Turning the seam marks off leaves no rail colour in the mesh - the same toggle the
+  // flat view's rim answers to.
+  options.showSeams = false;
+  renderer.setOptions(options);
+  const InstanceSet bare = renderer.buildInstances(snap, cfg, &seams);
+  CHECK(carriesRail(bare) == 0);
+}
 #endif  // CB_HAVE_IMGUI
 
 #endif  // CB_HAVE_VULKAN

@@ -12,6 +12,7 @@
 #include "view/layout.hpp"
 #include "view/move_anim.hpp"
 #include "view/move_camera.hpp"
+#include "view/seams.hpp"
 
 namespace cb::render {
 
@@ -206,6 +207,30 @@ struct SurfaceSeat {
   float stepV{1.0f};
 };
 
+/// A seam rail on the shape: the tint to write into a patch's vertex colours at the wrap
+/// edge, and how strongly to blend it there. The flat view draws a coloured rim where a
+/// board is glued to itself, but a torus has no edge to draw it on - the wrap locus is
+/// the ring of cells where the lattice coordinate goes from its last value back to its
+/// first, and the shape tints that ring instead. Empty `weight` means the corner is not
+/// on a rail (M17.21).
+struct SurfaceRail {
+  view::Rgba color{};
+  /// 1 on the wrap edge, 0 on every other corner. The blend across the one subdivision
+  /// step between them is the rasteriser's linear interpolation, so the rail fades to the
+  /// board rather than ending on a hard line.
+  float weight{0.0f};
+};
+
+/// The rail on one patch corner of `cell` for one lattice axis: `axis` is 0 for the
+/// files, 1 for the ranks, and `i`/`j` are the corner's subdivision indices, `i == 0` the
+/// low-file edge and `j == 0` the low-rank edge. A rail exists only where the cell is on
+/// that axis's wrap ring *and* the flat view's `SeamMap` finds a glued seam there, and it
+/// takes that seam's own colour - so the two views can never disagree about where the
+/// seam is, or what colour it is. A mirror, or a cell not on the ring, gets nothing
+/// (M17.21).
+[[nodiscard]] SurfaceRail surfaceRail(const view::SeamMap& seams, CellId cell, int axis,
+                                      int i, int j);
+
 /// The play board as the shape its geometry describes (M17).
 ///
 /// One object answers the three questions the geometry view asks: what shape is each
@@ -238,6 +263,10 @@ class PlaySurface {
   [[nodiscard]] static bool slidesAlongRanks(const VariantSpec& v) noexcept;
 
   [[nodiscard]] bool empty() const noexcept { return seats_.empty(); }
+  /// True for the authored D >= 3 shapes (`torus3d`, `hyper4`): a stack of flat tiles
+  /// with no continuous parametrisation to key a wrap ring off, so the seam rails and the
+  /// ring labels are offered for the parametrised 2-D surfaces only (M17.21).
+  [[nodiscard]] bool stacked() const noexcept { return stacked_; }
   /// One per cell: where a piece stands and which way it stands.
   [[nodiscard]] const std::vector<SurfaceSeat>& seats() const noexcept { return seats_; }
   /// One per cell: the patch of surface the square is.

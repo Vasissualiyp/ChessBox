@@ -973,25 +973,22 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   request.boardRect[2] = vp->Size.x;
   request.boardRect[3] = vp->Size.y;
 
-  // File and rank labels, on the board's near edges rather than on its cells: a label
-  // *inside* the edge cell is covered by whatever stands there and reads as graffiti on
-  // the board. Projected through the same camera the board is drawn with, extrapolated
-  // one cell outward from the edge, in the machine face so a coordinate reads as a
-  // measurement. The geometry view is skipped: it has its own shape and offers no flat
-  // edge to label.
+  // File and rank labels. On the flat board they sit on the near edges rather than on its
+  // cells: a label *inside* the edge cell is covered by whatever stands there and reads
+  // as graffiti. A closed shape has no near edge, so the surface view labels the same two
+  // reference rings the seam rails colour - the file letters along the rank-0 ring, the
+  // rank numbers along the file-0 ring - each pushed out along its seat's own normal
+  // (M17.21). Both views share the one `showCoordinates` toggle and the machine face, so
+  // a coordinate reads as a measurement either way.
   const bool surfaceView =
       shell.settings().geometryView && hasPlaySurface(session.variant());
-  if (shell.settings().showCoordinates && v.dims.dims() == 2 && !surfaceView) {
+  if (shell.settings().showCoordinates && v.dims.dims() == 2) {
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
     const view::OrbitCamera cam = session.camera();
     const float w = vp->Size.x;
     const float h = vp->Size.y;
     auto* mono = static_cast<ImFont*>(fontMono_ != nullptr ? fontMono_ : fontBody_);
     const float size = mono != nullptr ? mono->FontSize * 0.92f : ImGui::GetFontSize();
-    std::vector<view::OrbitCamera::ScreenPoint> screenOf(session.snapshot().cellCount());
-    for (const view::Placement& pl : session.placements()) {
-      screenOf[pl.cell] = cam.project(view::Vec3{pl.x, pl.y, pl.z}, w / h, w, h);
-    }
     const auto drawLabel = [&](const std::string& text,
                                const view::OrbitCamera::ScreenPoint& at,
                                const view::OrbitCamera::ScreenPoint& inward) {
@@ -1009,17 +1006,54 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
         dl->AddText(pos, u32(t.boneDim), text.c_str());
       }
     };
-    const int nx = static_cast<int>(v.dims.extent(0));
-    const int nz = static_cast<int>(v.dims.extent(1));
-    for (int f = 0; f < nx && nz > 1; ++f) {
-      const CellId edge = v.dims.toCell(Coord::of({f, 0}));
-      const CellId in = v.dims.toCell(Coord::of({f, 1}));
-      drawLabel(std::string(1, static_cast<char>('a' + f)), screenOf[edge], screenOf[in]);
-    }
-    for (int r = 0; r < nz && nx > 1; ++r) {
-      const CellId edge = v.dims.toCell(Coord::of({0, r}));
-      const CellId in = v.dims.toCell(Coord::of({1, r}));
-      drawLabel(std::to_string(r + 1), screenOf[edge], screenOf[in]);
+    if (!surfaceView) {
+      std::vector<view::OrbitCamera::ScreenPoint> screenOf(
+          session.snapshot().cellCount());
+      for (const view::Placement& pl : session.placements()) {
+        screenOf[pl.cell] = cam.project(view::Vec3{pl.x, pl.y, pl.z}, w / h, w, h);
+      }
+      const int nx = static_cast<int>(v.dims.extent(0));
+      const int nz = static_cast<int>(v.dims.extent(1));
+      for (int f = 0; f < nx && nz > 1; ++f) {
+        const CellId edge = v.dims.toCell(Coord::of({f, 0}));
+        const CellId in = v.dims.toCell(Coord::of({f, 1}));
+        drawLabel(std::string(1, static_cast<char>('a' + f)), screenOf[edge],
+                  screenOf[in]);
+      }
+      for (int r = 0; r < nz && nx > 1; ++r) {
+        const CellId edge = v.dims.toCell(Coord::of({0, r}));
+        const CellId in = v.dims.toCell(Coord::of({1, r}));
+        drawLabel(std::to_string(r + 1), screenOf[edge], screenOf[in]);
+      }
+    } else {
+      const app::Settings& st = shell.settings();
+      SurfacePose pose;
+      pose.slideU = st.geometrySlideU + st.geometryAlignOffset;
+      pose.slideV = st.geometrySlideV + st.geometryAlignOffsetV;
+      pose.evert = st.geometryEvert;
+      pose.twist = st.kleinTwist;
+      pose.openness = st.geometryWidth;
+      const PlaySurface surf = PlaySurface::build(v, pose);
+      const view::Vec3 eye = cam.eye();
+      for (const SurfaceSeat& seat : surf.seats()) {
+        // A label on the far side of the shape would float in front of the near side, so
+        // draw one only where its own seat faces the eye.
+        if (view::dot(seat.normal, eye - seat.centre) <= 0.0f) continue;
+        const float step = seat.rank == 0 ? seat.stepV : seat.stepU;
+        const view::Vec3 outward = seat.centre + seat.normal * step;
+        // The flat code moves the label away from an inward point; here the inward point
+        // is the seat reflected across the outward one, so the label lands just off the
+        // surface along the seat's own normal.
+        const view::OrbitCamera::ScreenPoint at = cam.project(seat.centre, w / h, w, h);
+        const view::OrbitCamera::ScreenPoint inward =
+            cam.project(seat.centre * 2.0f - outward, w / h, w, h);
+        if (seat.rank == 0) {
+          drawLabel(std::string(1, static_cast<char>('a' + seat.file)), at, inward);
+        }
+        if (seat.file == 0) {
+          drawLabel(std::to_string(seat.rank + 1), at, inward);
+        }
+      }
     }
   }
 

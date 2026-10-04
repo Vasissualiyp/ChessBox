@@ -1817,6 +1817,48 @@ same mechanism `GHOST` extends with alpha. Tint, do not add a pipeline:
   into M17.22, since `buildStacked` is a different code path with no continuous
   parametrisation to key a "ring" off in the same way - decide there, not here.
 
+### Status: M17.21 built (2026-10-04, opencode)
+
+Both halves of the M17.5 remainder are in.
+
+- **Seam rails.** New `render::surfaceRail(seams, cell, axis, i, j)` (`play_surface.cpp`)
+  returns the flat view's `SeamMap` colour at the cell for a patch corner, weight 1 on the
+  wrap edge and 0 elsewhere. `BoardRenderer::buildInstances` blends it into the board
+  mesh's own vertex colours - the same per-vertex channel GHOST already uses - on the patch's
+  face, underside and the rim band on the wrap edge, so no pipeline was added. It reads the
+  cell's own `SeamMap` face (Min end, glued only), so the shape and the flat view cannot
+  disagree about where the seam is or what colour it is; a mirror and a non-ring cell get
+  nothing. `showSeams` gates it, exactly as the flat rim. The tint is colour only: it never
+  touches the picker or `blocked`, and `VariantId` is untouched.
+- **Coordinate labels.** `Ui::buildGameHud` no longer early-outs the surface view: the flat
+  block is unchanged, and the surface branch labels the two reference rings the rails colour
+  - file letters along `rank == 0`, rank numbers along `file == 0` - reusing the same
+  `drawLabel` lambda, camera, machine face and `showCoordinates` toggle. Each label sits on
+  its seat and is pushed out along the seat's own normal (the flat code's `at`/`inward`
+  offset, with `inward` the seat reflected across the outward point). A seat whose normal
+  faces away from the eye is skipped, so no label floats in front of the far side.
+- **Tests.** New differential test ("the shape's seam rails sit on the flat view's seams")
+  checks, per `cylinder`/`torus`/`mobius`/`klein` and per corner, that a rail exists exactly
+  where the cell is on the coordinate-0 row *and* `SeamMap` has a glued Min face there, and
+  that its colour is that face's. A companion test pins the two label rings at `nx` + `nz`
+  seats. An integration test ("the shape tints its seam rails into the board mesh") checks
+  `buildInstances` carries the seam colour in the torus surface vertices, for the file ring
+  at `(0,3)`, and that `showSeams = false` removes it.
+- **Deviations.** (1) The spec placed the rail tint in `PlaySurface::build`, but the vertex
+  colours are assigned in `BoardRenderer::buildInstances`; the tint lives there and only the
+  reusable ring/colour lookup is in `play_surface`. (2) The spec's "reuse the session's own
+  surface" has nothing to reuse - no `PlaySurface` is cached on the session or the renderer -
+  so the UI builds one per frame in the surface branch only (gated on `showCoordinates`).
+  Recording it in case the cost ever matters; the draw already builds its own.
+- **D>=3.** Skipped via a new `PlaySurface::stacked()` accessor, per the non-goal. The
+  `torus3d`/`hyper4` GUI captures are unchanged and validation-clean.
+- **Verification.** `tools/test.sh render` green (90 cases, including the three new ones and
+  the `gui-*` captures run separately); `ctest --preset dev -R gui` green (17/17);
+  `tools/precommit.sh` green (format, build, arch, unit, property). Captures of `torus`,
+  `klein`, `cylinder` and `mobius` with `--geometry` are validation-clean and show the two
+  hue-ramped rings (matching the legend's file/rank colours) plus the reference-ring labels;
+  `standard --geometry` remains a strict no-op (`hasPlaySurface` is the gate).
+
 ---
 
 ## M17.22 The 3-D stacked shapes finished, and a twisted-torus variant

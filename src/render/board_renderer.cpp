@@ -705,19 +705,38 @@ InstanceSet BoardRenderer::buildInstances(
 
     for (const SurfacePatch& patch : surf.patches()) {
       const view::Rgba fill = fillFor(patch.cell);
-      float rgba[4]{};
-      toFloat4(fill, rgba);
+      // The seam rails (M17.21): a closed shape has no edge to draw a rim on the way the
+      // flat board does, so the wrap ring is tinted into the patch's own vertices
+      // instead. The colour is the flat view's own seam colour at the same cell, so the
+      // two views cannot disagree about where the seam is or what it looks like. This is
+      // colour, not shape: it never touches the picker or `blocked`, and it rides the
+      // same vertex colour array the ghost's alpha does. A stacked D >= 3 shape has no
+      // continuous ring to key off, so it gets none (M17.22).
+      const bool rails = seams != nullptr && options_.showSeams && !surf.stacked();
+      const auto tinted = [&](view::Rgba base, int i, int j) {
+        if (rails) {
+          const SurfaceRail ru = surfaceRail(*seams, patch.cell, 0, i, j);
+          const SurfaceRail rv = surfaceRail(*seams, patch.cell, 1, i, j);
+          if (ru.weight > 0.0f && rv.weight > 0.0f) {
+            // The one corner where both rings cross: average them so neither wins.
+            base = mix(base, mix(ru.color, rv.color, 0.5f), 1.0f);
+          } else if (ru.weight > 0.0f) {
+            base = mix(base, ru.color, ru.weight);
+          } else if (rv.weight > 0.0f) {
+            base = mix(base, rv.color, rv.weight);
+          }
+        }
+        // The ghost alpha rides in the vertex colour (M17.10); the pieces are separate
+        // instances and stay opaque.
+        base.a *= options_.surfaceGhost;
+        return base;
+      };
       // The square's *sides* take the board's rim colour: that is what keeps the gap
       // between two squares a line rather than a seamless smear of chequerboard. The
       // underside is the square's own colour, the same as its face, so a board turned
       // over - or a shape seen from inside, as on a Klein bottle - still reads as the
       // same board rather than a uniform grey shell.
-      float groove[4]{};
-      toFloat4(mix(fill, theme_.boardRim, 0.62f), groove);
-      // The ghost alpha rides in the vertex colour (M17.10); the pieces are separate
-      // instances and stay opaque.
-      rgba[3] *= options_.surfaceGhost;
-      groove[3] *= options_.surfaceGhost;
+      const view::Rgba grooveBase = mix(fill, theme_.boardRim, 0.62f);
       const std::uint32_t base = static_cast<std::uint32_t>(out.surfaceVertices.size());
       // The face a player looks at, then the same grid pushed in along its own normals.
       // A square has thickness for the same reason the flat board's cells do: an edge you
@@ -725,12 +744,16 @@ InstanceSet BoardRenderer::buildInstances(
       for (int i = 0; i < kSide; ++i) {
         for (int j = 0; j < kSide; ++j) {
           const std::size_t k = static_cast<std::size_t>(i * kSide + j);
+          float rgba[4]{};
+          toFloat4(tinted(fill, i, j), rgba);
           push(patch.pos[k] + patch.normal[k] * kHalf, patch.normal[k], 1.0f, rgba);
         }
       }
       for (int i = 0; i < kSide; ++i) {
         for (int j = 0; j < kSide; ++j) {
           const std::size_t k = static_cast<std::size_t>(i * kSide + j);
+          float rgba[4]{};
+          toFloat4(tinted(fill, i, j), rgba);
           push(patch.pos[k] - patch.normal[k] * kHalf,
                view::Vec3{-patch.normal[k].x, -patch.normal[k].y, -patch.normal[k].z},
                0.80f, rgba);
@@ -750,7 +773,9 @@ InstanceSet BoardRenderer::buildInstances(
         }
       }
       // The rim, one band of quads round the patch's border. Its own vertices, so the
-      // edge stays a crease instead of smearing the face's shading round the corner.
+      // edge stays a crease instead of smearing the face's shading round the corner. On a
+      // wrap edge the rim carries the rail colour end to end, which is the line a player
+      // reads as the seam.
       const auto rim = [&](int i0, int j0, int i1, int j1) {
         const std::size_t k0 = static_cast<std::size_t>(i0 * kSide + j0);
         const std::size_t k1 = static_cast<std::size_t>(i1 * kSide + j1);
@@ -758,14 +783,18 @@ InstanceSet BoardRenderer::buildInstances(
         const view::Vec3 side = view::cross(edge, patch.normal[k0]);
         const view::Vec3 n =
             view::length(side) > 1e-6f ? view::normalize(side) : patch.normal[k0];
+        float c0[4]{};
+        float c1[4]{};
+        toFloat4(tinted(grooveBase, i0, j0), c0);
+        toFloat4(tinted(grooveBase, i1, j1), c1);
         const std::uint32_t a =
-            push(patch.pos[k0] + patch.normal[k0] * kHalf, n, 1.0f, groove);
+            push(patch.pos[k0] + patch.normal[k0] * kHalf, n, 1.0f, c0);
         const std::uint32_t b =
-            push(patch.pos[k1] + patch.normal[k1] * kHalf, n, 1.0f, groove);
+            push(patch.pos[k1] + patch.normal[k1] * kHalf, n, 1.0f, c1);
         const std::uint32_t c =
-            push(patch.pos[k1] - patch.normal[k1] * kHalf, n, 0.80f, groove);
+            push(patch.pos[k1] - patch.normal[k1] * kHalf, n, 0.80f, c1);
         const std::uint32_t d =
-            push(patch.pos[k0] - patch.normal[k0] * kHalf, n, 0.80f, groove);
+            push(patch.pos[k0] - patch.normal[k0] * kHalf, n, 0.80f, c0);
         quad(a, b, c, d);
       };
       for (int i = 0; i + 1 < kSide; ++i) {
