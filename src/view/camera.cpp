@@ -276,10 +276,12 @@ OrbitCamera slerpCamera(const OrbitCamera& a, const OrbitCamera& b, float t) {
   out.distance = std::max(0.5f, a.distance + (b.distance - a.distance) * t);
   out.pitch = std::asin(std::clamp(e.z, -0.999f, 0.999f));
   out.yaw = std::atan2(e.x, -e.y);
-  // The eye travels a straight line; the look-at is derived so the camera still sits on
-  // it and looks along the slerped direction.
-  const Vec3 eye = a.eye() + (b.eye() - a.eye()) * t;
-  out.target = eye - e * out.distance;
+  // `target` is the authored, primary state everywhere else, so interpolate *it* and let
+  // `eye()` derive from it along the slerped direction - matching `OrbitCamera`'s own
+  // representation instead of inverting it. Interpolating the eye and back-solving a
+  // target aimed the in-between camera away from both subjects whenever their targets
+  // differ, which is every real caller (M17.23).
+  out.target = a.target + (b.target - a.target) * t;
   // Roll so the constructed camera's up is the slerped up, via the same basis the
   // renderer will use (after the pitch clamp and with the camera's own up-hint).
   const Vec3 viewDir = e * -1.0f;

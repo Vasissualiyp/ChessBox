@@ -122,7 +122,7 @@ struct OrbitCamera {
 int pickBox(const OrbitCamera::Ray& ray, const std::vector<Placement>& boxes,
             const Vec3& halfExtent);
 
-/// Blend two orbit cameras: the eye travels in a straight line between them and the
+/// Blend two orbit cameras: the target travels in a straight line between them and the
 /// orientation is a quaternion slerp, so the view turns the shortest way and never swings
 /// the long way round (M17.19). Interpolating yaw/pitch/roll separately - or the eye
 /// *direction* by a plain lerp, which walks through the origin when the two views nearly

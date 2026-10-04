@@ -2055,3 +2055,38 @@ intermediate `t` - no test checked that it did).
   rough (e.g. the board grows/shrinks unevenly, or the pan reads as abrupt), that is a
   framing/pacing judgement call for a human to weigh in on, not a correctness bug - note it
   in the status section rather than attempting further tuning unprompted.
+
+### Status: M17.23 built (2026-10-04, opencode)
+
+The fix is exactly the spec's: `view::slerpCamera` now linear-interpolates `target`
+(`out.target = a.target + (b.target - a.target) * t`) and lets `OrbitCamera::eye()` derive
+the eye from it, instead of interpolating the eye and back-solving a target. The orientation
+slerp, the `distance` interpolation and the roll derivation are untouched; the stale
+"the eye travels in a straight line" comment in `src/view/camera.hpp` was corrected to say
+`target`.
+
+- **Tests, test-first.** Renamed `"slerpCamera's eye travels a straight line"` to
+  `"slerpCamera's target travels a straight line"` with genuinely different target
+  endpoints; it asserts the target against the lerp prediction and, since the eye is no
+  longer on a line, keeps a weak continuity check (no step jumps a camera's distance).
+  `"slerpCamera ends on its endpoints"` and `"slerpCamera turns the shortest way, never the
+  long way"` are unchanged and still pass. The new regression,
+  `"slerpCamera keeps both endpoints' subjects in frame"`, blends a far board-centred player
+  camera (`distance` 9) with a close piece-centred chase camera (`distance` 3.2, within the
+  spec's 2-4 range) and requires both subjects projectable for a dense `t` sweep (a small
+  per-subject sphere allows camera slack). A throwaway search under `build/` picked a chase
+  pose that is a real failure shape rather than a degenerate one.
+- **Before/after.** On the current code the regression test fails hard (107 of 202
+  assertions); on the fixed code all four `slerpCamera` tests pass (311 assertions) -
+  confirmed by stashing only `src/view/camera.cpp` and rebuilding. `tools/test.sh --build
+  view render` is green (155 cases, 4.66M assertions); `tools/precommit.sh` green (format,
+  arch, unit, property).
+- **End-to-end.** Re-captured the exact scenario that found the bug - `torus`, the `a1a5`
+  followed move, `--play --clip --follow route --shape-follow chase --cinema --geometry`
+  (113 frames). **Before:** five frames had pixel standard deviation below 0.02, three of
+  them (`frame_0077`-`0079`) exactly flat. **After:** minimum standard deviation 0.1139
+  (`frame_0004`), none below 0.02, so no empty frame remains. A second export is
+  byte-identical, so the determinism the clip relies on is unaffected.
+- **Deferred (not a correctness bug).** The blend now keeps the board framed throughout;
+  whether the Return pan *paces* as well as it could is a human framing judgement, left
+  alone as the spec instructs.
