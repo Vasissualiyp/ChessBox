@@ -30,9 +30,58 @@ current conversation beats everything here.
 - **If you are opencode:** you are the implementer. Your job is to turn Claude's
   specifications (the milestone plans in [`docs/plan/`](docs/plan/), the ADRs, and any
   spec written for you) into working, tested code, and to keep the suite green. Read the
-  spec, implement it, test it, and update the status sections the spec names.
+  spec, implement it, test it, and update the status sections the spec names. **If no spec
+  exists for what you've been asked to do, see "When there is no spec yet" below before
+  writing any production code.**
 
 If neither role matches what you are being asked to do right now, follow the user.
+
+## When there is no spec yet **[opencode, read this before a bare "fix X" / "add Y"]**
+
+Everything above assumes a spec already exists. Claude's `docs/plan/` entries are written
+the way they are *because* the investigation happened before a line of implementation was
+written — the root cause found by reading the real code and reproducing the real failure,
+the fix stated precisely enough that writing it is close to mechanical. A bare request
+aimed straight at opencode, with nothing in `docs/plan/` naming it, has not had that
+investigation. Asked to diagnose and implement in the same pass, under the pull to just
+produce a diff, a model reliably treats the symptom rather than the cause — this has
+happened here, repeatedly, which is why this section exists.
+
+**First, check whether a spec already covers the task** — a `docs/plan/` entry naming it,
+or one pasted into the prompt. If one does, implement from it directly; the rest of this
+section is already done and repeating it is wasted motion, not rigor.
+
+**If none exists, do the investigation as its own pass, written down before touching
+production code:**
+
+- **Reproduce the problem first.** A screenshot, a failing assertion, a measured number -
+  something that shows the broken behaviour exists, not a description of it. Do not
+  propose a fix before this exists.
+- **Read the actual code the bug or feature touches**, not just the surrounding area,
+  until the root cause (a bug) or the right integration point (a feature) is found in the
+  real implementation - not inferred from its name, its tests, or what it's plausibly
+  supposed to do.
+- **For a bug: say why the existing tests missed it.** This is the single most reliable
+  way to land on the real cause instead of the symptom, and it is usually one sentence once
+  the cause is actually found - a test built on a degenerate case, a property nothing
+  checked, an assumption nobody stated.
+- **For a feature: name the existing pattern to extend**, by file and function, rather than
+  inventing a parallel mechanism. Grep for the nearest already-solved version of the same
+  problem before writing a new one.
+- **Write the above down** - a short spec in the relevant `docs/plan/` file (continuing its
+  numbering if one is already open for the area, a new file if none fits), in the same
+  voice and the same level of detail the Claude-written specs in this directory already
+  use: what was found, the fix or feature stated precisely, the tests that will prove it,
+  and - for anything genuinely uncertain - an explicit, honest fallback. ("If X proves too
+  deep, ship Y and record why" is permission to have, not a failure to avoid; M17.22's
+  twisted-shape work used exactly this and shipped clean.)
+- **Only then implement**, test-first as every other rule here already requires.
+- **Verify against the real artifact, not the test run.** "Tests pass" is necessary and not
+  sufficient - take the screenshot, read the capture, check the number a human would check,
+  before calling it done.
+
+This is slower than answering in one pass. It is the actual, measured difference between a
+clean fix and a bug-infested one-shot on this codebase - not a style preference.
 
 **Status: M0-M6 complete.** A playable, perft-exact engine with N-dimensional boards,
 non-trivial boundary topology, a Vulkan interface, a rule VM, and 5D-chess-style time
