@@ -487,6 +487,88 @@ menu, and the board screen has a much quieter copy in its margins.
   mechanism is correct and restrained, and the numbers (24 bodies, 0.80 opacity, 34% hue
   mix) are the retuning knobs if it reads as too faint or too present in motion.
 
+### Revision: the quintic returns as a sixth shape, clutter pushed further out, real
+### per-shape rotation (2026-10-04)
+
+Three pieces of feedback from actually using the redone background, after M18.4 shipped.
+
+**1. The quintic is back - as clutter, not as the centrepiece it was.** The original
+direction ("having the quintic is too much") was about the *dedicated, dominant* object the
+old `Deco::Manifold` drew - a dense checkerboard quilt occupying its own stacked pane. That
+is still correct and stays retired. What's wanted now is narrower: fold the quintic in as a
+**sixth `WireShape`**, subject to the exact same treatment as the other five - one body
+among many, same size range, same faint alpha, same edge-biased placement (§3 below). A
+quintic cross-section drawn as a sparse wireframe grid, the size of a torus or a tesseract
+among the other clutter, is a different thing from the quintic as the screen's one big
+object; the first was "too much," there is no reason the second is. If this reading is
+wrong - if what's wanted is closer to the old centrepiece after all, just redrawn more
+quietly - say so and this gets rescoped; the spec below assumes the "sixth shape" reading.
+
+Build: add `WireShape::Quintic` to the enum in `deco.hpp`; `buildWireShape`'s new case
+draws a sparse grid of the quintic's own parametrisation (`render::quintic(k1, k2, x, y)`,
+already shared with the `t6` overture and the settings-screen decoration - reuse it,
+do not re-derive the surface) at a coarse enough resolution to read as a handful of line
+segments, not a dense mesh - this is a background body, not a second overture. Both
+`DepthField` populations (menu and the quiet board field) pick uniformly from all six
+shapes now, not five.
+
+**2. Push the clutter further from the centre, and keep it there through its own motion.**
+Today's placement (`DepthField::respawn`) draws a body's `radius` once, uniformly, from
+`0.62..1.77` on the menu field - that is the *average* distance from centre, but the
+`radiusV`-driven "breathe" (`std::sin(clock_ * b.radiusV + b.radiusPhase) * 0.10f`, added to
+`radius` every frame in `advance`) lets a body swing closer to centre than its own spawn
+radius for part of its cycle, and `0.62` is already not very far out. Two changes:
+
+- Raise the floor - the menu field's `radius` range moves outward (something in the
+  neighbourhood of the board field's own `1.30..2.30`, or wider; tune by eye, the mechanism
+  is what matters), so a body's *resting* position is already clear of the centre.
+- The breathing amplitude must not be able to carry a body back into the centre it was just
+  moved out of - either shrink `radiusV`'s amplitude so the swing is small relative to the
+  new floor, or clamp the breathed radius to never fall below some minimum distance from
+  centre regardless of phase. Pick whichever is the smaller change against today's code.
+
+The board (quiet) field's ring already starts further out (`1.30..2.30`) and already has to
+stay clear of the board itself (not just a vague "centre") - re-check it against the same
+breathing concern, since its margin for error is tighter (the board, not just empty page,
+sits behind the centre).
+
+**3. Real per-shape rotation, not one angle wearing two hats.** Every body's orientation
+today is `drawWireShape(..., b.spin, b.spin * 0.55f, ...)` - `yaw` and `pitch` are both
+*derived from the same single value*, so a body does not tumble through 3-D orientation
+space, it traces one fixed path through it (an ellipse, in effect) no matter how long it is
+watched. "4-D hypercube rotation, torus tumbling" wants each shape rotating with its own
+character, independently in more than one axis:
+
+- Give each `Body` independent yaw and pitch rates (two velocities instead of one `spinV`),
+  so a body's orientation genuinely wanders through 3-D rather than retracing one path -
+  this alone fixes the torus/Klein/Möbius/cube cases.
+- The tesseract is a special case worth keeping special: `drawTesseract` (the Settings
+  screen's own decoration) already turns a 4-cube in **two independent 4-D planes**
+  (`xw` and `yz`, at different rates) rather than a single 3-D spin, which is the thing that
+  makes a hypercube read as a hypercube and not just a cube. `buildWireShape`'s `Tesseract`
+  case currently likely borrows the same single-angle treatment as the other five (confirm
+  by reading it) - if so, give it the same two-independent-plane treatment `drawTesseract`
+  already has, rather than leaving it the odd one out doing less than its own reference
+  implementation.
+- Determinism is unaffected by any of this: more independent rates per body is still a pure
+  function of the field's own clock and seed, the same contract every other animation here
+  already holds.
+
+**Tests.** A test that two bodies of the same shape with different (seeded) yaw/pitch rates
+diverge in orientation over time (today's single-`spin` coupling would make this fail - it's
+the regression test for item 3). A test that a body's distance from centre, sampled across
+a full breathing cycle, never drops below the new floor (item 2). A smoke test that
+`WireShape::Quintic` draws a non-empty, non-degenerate set of segments (item 1), and that
+the differential test against `derivedSurfaceAt`/`quintic()` the overture system already
+uses still agrees - reuse that oracle rather than hand-deriving a second one.
+
+**Acceptance.** A fresh menu capture shows a quintic-shaped wireframe among the other five,
+sized and faded like the rest, not as a dominant object; bodies visibly keep clear of the
+exact centre through their whole motion, not just at spawn; a short clip (or a few captures
+a couple of seconds apart) of the menu shows the tesseract performing its own two-plane
+turn and at least one other shape tumbling on an independent axis rather than repeating a
+fixed loop.
+
 ## M18.5 Audio v1
 
 **Want.** The game is completely silent. `Settings` already carries `volumeMaster`/
@@ -794,6 +876,36 @@ recorded below.
   each greyed in the other's state, and `torus`, `klein`, `torus3d` and `hyper4`
   `--geometry --formed 1` match a HEAD build's board bit-for-bit (only the intended 18x10-px
   button box differs), while `torus --shot` is byte-identical.
+
+### Revision: a speed control for the morph (2026-10-04)
+
+The morph itself (above) was accepted; the one thing missing is a way to change how fast it
+runs. The rate is currently a bare constant - the interactive loop eases `Settings
+::geometryFormed` toward its target with "the same `dt * 2` ramp `geometryEvert` uses,"
+fixed, no setting behind it.
+
+**Build.** Add `Settings::geometryFormSpeed` (default `1.0`, same shape as the existing
+`Settings::shapeMorphSpeed` that already paces the M17.19 shape-follow choreography's own
+board-morph - read how that one is wired into its settings-screen slider and its `dt`
+multiply, and copy the pattern rather than inventing a second one). Multiply the `dt * 2`
+ramp rate by this value wherever `geometryFormed` is eased toward `geometryView`'s target.
+Expose it as a slider on the settings screen beside (or near) `shapeMorphSpeed`, since they
+are the same *kind* of control for two different morphs and a player should find them
+together, not in unrelated corners of the menu. Clamp to a sane range (`shapeMorphSpeed`'s
+own `0.25..4.0` clamp is a reasonable default to copy) so a value of 0 can't freeze the
+board mid-roll with no way back - or, if a near-zero value is wanted for dramatic slow
+transitions, make sure the eased value still reaches its target eventually rather than
+stalling asymptotically forever.
+
+**Tests.** A test that doubling `geometryFormSpeed` halves the number of frames needed for
+`geometryFormed` to reach a given value (or the equivalent property for whatever the actual
+easing shape is - linear ramp, exponential approach, etc.) - pin the *relationship*, not one
+magic number. A test that the default (`1.0`) reproduces today's pacing exactly, so this is
+additive and not a silent behaviour change for anyone who never touches the new slider.
+
+**Acceptance.** The settings screen has a working morph-speed slider; setting it away from
+`1.0` visibly changes how long the SHAPE toggle takes to settle, in both directions (faster
+and slower); the default is unchanged from M18.6's shipped pacing.
 
 ## Dependencies and ordering
 

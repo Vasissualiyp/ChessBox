@@ -2139,3 +2139,80 @@ slerp, the `distance` interpolation and the roll derivation are untouched; the s
 - **Deferred (not a correctness bug).** The blend now keeps the board framed throughout;
   whether the Return pan *paces* as well as it could is a human framing judgement, left
   alone as the spec instructs.
+
+---
+
+## M17.24 Bug fix: the flat/shape morph (M18.6) drifts off-centre
+
+Found 2026-10-04, playing with M18.6's new SHAPE morph: the fully-formed shape does not land
+centred in the frame. Reproduced and confirmed with captures at `--formed 0`, `0.3`, `0.6`
+and `1` on `torus` - the flat board starts centred, and the shape visibly drifts up and to
+the right as it rolls up, ending noticeably off-centre at `formed = 1`.
+
+### Root cause
+
+The camera is framed on the shape by `frameBoard`/`frameGeometryCamera`
+(`src/gui/main.cpp`/`src/render/play_surface.cpp`), which calls `Session::frameOn` with
+`PlaySurface::bounds()` - the current shape's own bounding box. The call site's own comment
+states the design precisely: *"The board has just become its own shape, or gone back to
+being a diagram... so the camera is put round it - **once, on the change, and never while
+the player is turning it**."* `frameBoard` fires exactly once, at the instant the SHAPE
+toggle flips (`nowSurface != wasSurface`) - the same instant `Settings::geometryFormed`
+*begins* easing from 0. At that instant the shape has barely started to roll up, so the
+bounds `frameOn` captures are close to the flat board's. Nothing re-frames the camera as
+`geometryFormed` continues easing to 1 over the following frames, so the final, fully-rolled
+shape's actual bounds - a different size, in a different place - are never the ones the
+camera was centred on. The one-shot design was correct when the toggle was instant (M17);
+M18.6 made the shape's bounds a continuous function of `geometryFormed` without revisiting
+the framing, which assumed they only ever changed at the toggle instant.
+
+### The fix
+
+Re-frame continuously while the morph is in flight, easing the camera's target (and
+distance) toward the shape's *current* bounds each frame, rather than committing to a single
+snapshot - this is also exactly what was asked for ("the center should be slowly shifting
+during transformation"), not a reason to prefer the simpler one-shot-at-completion
+alternative.
+
+- In the interactive loop, wherever `Settings::geometryFormed` is actively easing toward its
+  target (not yet settled - compare the live value to the target the way the existing
+  `geometryEvert`/`geometryAlignOffset` easing already checks), recompute
+  `frameGeometryCamera`'s ideal camera (target + distance from the *current* `formed`
+  shape's bounds) every frame, and **ease the live camera toward it** rather than snapping -
+  reuse whatever camera-blend helper is already in scope (`blendCamera`/`slerpCamera`-style)
+  rather than inventing a new interpolation. Once `geometryFormed` settles, stop - the
+  existing one-shot `frameBoard` calls (on a variant load, a save/load, SHAPE's own toggle
+  instant) are fine as the *initial* target and do not need to change.
+- Preserve the player's own yaw/pitch throughout, exactly as `Session::frameOn` already does
+  for the one-shot case - this is a target/distance correction, not a camera angle change.
+- `formed = 0` and `formed = 1` must still land exactly where they do today (the M18.6
+  byte-identity guarantee for `formed = 1` is untouched by this - only the *path* the camera
+  takes while `formed` is between 0 and 1 changes, never the endpoints).
+
+### Tests
+
+- A property test sweeping `formed` from 0 to 1 that the camera's target stays within the
+  convex region spanned by the flat board's bounds-centre and the fully-formed shape's
+  bounds-centre at every sampled point (the thing the current one-shot design fails) -
+  built the same way the M17.23 regression was: from the real easing code path, not a
+  synthetic camera pair.
+- A test that `formed = 0` and `formed = 1` captures are pixel-identical to before this fix
+  (the endpoints do not move, only the path between them).
+- A validation-clean `--clip` of a SHAPE toggle on `torus`/`klein` showing the shape staying
+  framed throughout, the same visual check the repro used.
+
+### Acceptance
+
+1. A `--formed` sweep from 0 to 1 on `torus` (or a live SHAPE toggle) keeps the shape
+   recognisably centred throughout, not just at the two ends.
+2. `formed = 0`/`formed = 1` captures are unchanged from before this fix.
+3. `tools/test.sh --build render` and `--build app` green.
+
+### Risks and non-goals
+
+- This is a framing-only fix - it does not touch `SurfacePose::formed`, the roll math, or
+  the M18.6 mirror-flip deferral already recorded; it only changes when and how often the
+  camera asks "where is the shape now."
+- Not a general "always track the subject" camera mode - scoped to the morph specifically,
+  while `geometryFormed` is actively easing. The settled shape (and ordinary orbiting) keep
+  today's behaviour.
