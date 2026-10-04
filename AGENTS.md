@@ -90,6 +90,9 @@ tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID 
 ./build/dev/src/gui/chessbox_gui torus --geometry --cinema --follow route \
                                  --shape-follow chase --script $'click a1\nclick a5' \
                                  --clip frames/            # shape follow: chase or turntable
+./build/dev/src/gui/chessbox_gui --play game.cbgame --geometry --cinema --follow route \
+                                 --shape-follow chase --clip frames/   # M12.6: play a saved game
+                                 # --dwell S, --fps N, --play-at S, --width W --height H
 ./build/dev/src/gui/chessbox_gui standard --shot o.ppm --screen body   # the designer tabs
 ./build/dev/src/gui/chessbox_gui standard --shot o.ppm --screen designer --dims 4
 ./build/dev/src/gui/chessbox_gui torus --shot o.ppm --geometry        # the board as its shape

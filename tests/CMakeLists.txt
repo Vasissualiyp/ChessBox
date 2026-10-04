@@ -136,4 +136,46 @@ if(TARGET chessbox_gui)
     set_tests_properties(gui-geometry-${case} PROPERTIES LABELS "render;gui"
       TIMEOUT 120 ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
   endforeach()
+  # M12.6: the notation runner. A flat game and a glued shape game both export a
+  # validation-clean numbered sequence; the shape one exercises the M17.19 choreography
+  # through the runner. Small resolution and a low frame rate keep the suite quick.
+  add_test(NAME gui-play-flat
+    COMMAND chessbox_gui --play ${PROJECT_SOURCE_DIR}/tests/data/games/standard.cbgame
+            --follow route --cinema --clip ${CMAKE_BINARY_DIR}/render-captures/play-flat
+            --fps 8 --width 400 --height 250
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(gui-play-flat PROPERTIES LABELS "render;gui" TIMEOUT 300
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  add_test(NAME gui-play-shape
+    COMMAND chessbox_gui --play ${PROJECT_SOURCE_DIR}/tests/data/games/torus.cbgame
+            --follow route --shape-follow chase --geometry --cinema
+            --clip ${CMAKE_BINARY_DIR}/render-captures/play-shape
+            --fps 6 --dwell 0.2 --width 400 --height 250
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(gui-play-shape PROPERTIES LABELS "render;gui" TIMEOUT 300
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  # The determinism contract, end to end: the same shape clip twice, compared frame by
+  # frame. `|` separates the common args because a CMake list splits on `;`.
+  add_test(NAME gui-play-deterministic
+    COMMAND ${CMAKE_COMMAND}
+            -DGUI=$<TARGET_FILE:chessbox_gui>
+            -DWORKDIR=${PROJECT_SOURCE_DIR}
+            -DCOMMON=--play|${PROJECT_SOURCE_DIR}/tests/data/games/torus.cbgame|--follow|route|--shape-follow|chase|--geometry|--cinema|--fps|6|--dwell|0.2|--width|400|--height|250
+            -DOUT_A=${CMAKE_BINARY_DIR}/render-captures/play-det-a
+            -DOUT_B=${CMAKE_BINARY_DIR}/render-captures/play-det-b
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_clip_deterministic.cmake
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(gui-play-deterministic PROPERTIES LABELS "render;gui" TIMEOUT 600
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  # The capture default resolution is 1920x1080 (M12.6); a regression to 1440x900 is
+  # caught by reading the PPM header.
+  add_test(NAME gui-default-resolution
+    COMMAND ${CMAKE_COMMAND}
+            -DGUI=$<TARGET_FILE:chessbox_gui>
+            -DWORKDIR=${PROJECT_SOURCE_DIR}
+            -DOUT=${CMAKE_BINARY_DIR}/render-captures/gui-default-resolution.ppm
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_default_resolution.cmake
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(gui-default-resolution PROPERTIES LABELS "render;gui" TIMEOUT 120
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
 endif()

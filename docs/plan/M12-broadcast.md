@@ -479,3 +479,66 @@ demo's (M16.3) "watch a game" option later - no new work there, just reuse.
   measure-first, not pre-optimised - do not add caching speculatively.
 - `--width`/`--height` are a capture-only concern; the interactive window already resizes
   freely and is unaffected beyond its own default size constant moving to match.
+
+### Status: M12.6 built (2026-10-04, opencode)
+
+The runner is in. A `GameFile` (M12.7) now plays move by move through the real M17.19
+choreography, and `--play FILE --clip DIR` exports the whole game byte-identically on a
+re-run.
+
+- **The choreography is a pure function of elapsed time.** `src/render/shape_sequence.{hpp,cpp}`
+  is the M17.19 four-beat code lifted out of `src/gui/main.cpp`: `stepShapeSequenceOnce` is
+  the exact per-frame body, `beginShapeSequence` the new-move setup, and
+  `simulateShapeSequence(shell, path, travelSeconds, elapsed)` the stateless evaluator -
+  a fresh sequence plus fixed 1/120 s steps to `elapsed`. No wall clock, no SDL timer.
+  `updateShapeSequence` is a wrapper that detects a new move and calls the same step. The
+  shift/pose/search helpers (`surfacePose`, `chaseEyeDistance`, `followLift`,
+  `currentFollowedCell`, `alignOffsetFor`) moved with it and are shared, not copied.
+- **The runner lives in `src/app`** (`game_runner.{hpp,cpp}`): `GameRunner` validates the
+  file, loads its start FEN, and steps one move at a time through the new
+  `Session::playMoveText`; `playbackCursor`/`playbackTotalSeconds` are the pure
+  global-time-to-(move, elapsed) map. `io/game_file` gained `verifyGameFileVariant` and
+  `gameFileIllegalMove`, used by both `applyGameFile` and the runner, so an illegal move
+  reports the loader's own wording.
+- **The flags.** `--play FILE`, `--dwell S` (0.6), `--fps N` (30), `--play-at S`, and
+  `--width W --height H` (default **1920x1080**), threaded into the hidden window, the
+  offscreen target and the interactive window. The single-move `--shot`/`--move-t`/`--clip`
+  path is untouched: it still calls `boardCamera(*shell, render::kNoShapeSequence)` and its
+  own align block. Verified against a worktree build of the pre-change HEAD: a 12-frame
+  chased torus clip, an 8-frame flat clip and a board shot are byte-for-byte identical at
+  `--width 1440 --height 900`.
+
+**Deviations, and why.**
+
+- **A move's body is its full settle time, not `align + approach + travel + return`.** The
+  spec's formula stops exactly when the `Done` morph begins, so a dwell would catch the
+  board mid-unwind and the next move would snap it home. `shapeSequenceSettleSeconds` runs
+  the fixed-step simulation until `seq.active` is false (align offset back to the player's
+  pose) and uses that; the dwell then holds a still picture and moves are continuous. This
+  is the only timing change; the stage lengths themselves are unchanged.
+- **`SurfaceCache` (the "known next step") is in.** Measured before adding it: a single
+  re-simulate-from-0 at 1/120 s is ~1 ms per `PlaySurface::build`, and frames of one move
+  replay the same prefix, so without a memo the cost would be quadratic in a move's length.
+  The cache is a per-pose memo of `PlaySurface::build`, cleared once per move (the dry
+  planning pass and the real pass both drop the previous move's samples), so a move costs
+  one build per distinct pose, not one per frame-step. It is presentation-only: it does not
+  change a bit of any frame (the export determinism test passes with it).
+- **`--play FILE` alone (the interactive "Watch a game" action) is deferred**, as the spec
+  allowed ("do first, ship second"). The capture path is the acceptance requirement and is
+  complete; a menu entry reusing `GameRunner` is the remaining, small piece.
+
+**Cost** (Debug `-O0`, this machine - the export is render-bound, not simulation-bound):
+two chased torus moves at 1920x1080/30 fps, 229 frames, ~48 s, i.e. ~0.21 s per frame; the
+planning that settles both moves is ~0.4 s for the first move. Without the pose memo the
+same clip resimulated the fixed-step prefix for every frame.
+
+**Tests.** `tests/render/test_shape_sequence.cpp` (two calls at one `elapsed` are
+bit-identical, out-of-order calls agree, the sequence is not constant, settle ≥ lead +
+travel); `tests/unit/app/test_game_runner.cpp` (move-for-move to `applyGameFile`'s position,
+illegal move stops with the loader's message and the legal prefix intact, variant mismatch
+refused, the timeline map, `hyper4` through the same file format); and four `ctest -R gui-`
+cases - `gui-play-flat`, `gui-play-shape` (torus a1-a5 wraps the rank seam, validation-clean),
+`gui-play-deterministic` (the shape clip run twice and compared frame by frame), and
+`gui-default-resolution` (reads the PPM header at 1920x1080 and at an explicit 640x480).
+`--play FILE --clip DIR` twice was also diffed by hand on 1- and 2-move torus games. Green:
+`tools/test.sh --build render app`, the 26 `gui-*` ctests, and `tools/precommit.sh`.

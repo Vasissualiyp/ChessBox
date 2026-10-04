@@ -631,6 +631,10 @@ Result<void> Session::loadFen(std::string_view fen) {
   game_ = std::make_unique<Game>(*variant_);
   game_->position() = std::move(*p);
   selected_ = kInvalidCell;
+  // A position entry replaces the game, so no move can still be in flight: a stale
+  // animation would otherwise let the move camera keep shooting the old route.
+  anim_.clear();
+  pathValid_ = false;
   message_ = "position set";
   refreshSnapshot();
   return {};
@@ -657,6 +661,14 @@ Result<void> Session::loadGame(const GameFile& file) {
   refreshSnapshot();
   refreshTemporalView();
   return {};
+}
+
+Result<void> Session::playMoveText(std::string_view text) {
+  for (const Move& m : game_->legalMoves()) {
+    if (moveText(*variant_, m) == text) return playChecked(m);
+  }
+  return fail(ErrorCode::ValidationError,
+              "'" + std::string(text) + "' is not legal in this position");
 }
 
 CellId Session::clickPixel(float px, float py, float width, float height) {

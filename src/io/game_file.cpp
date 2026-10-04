@@ -89,12 +89,22 @@ Result<GameFile> parseGameFile(std::string_view text) {
   return file;
 }
 
-Result<void> applyGameFile(const GameFile& file, Game& game) {
-  if (file.variantId != 0 && file.variantId != game.variant().variantId()) {
+Result<void> verifyGameFileVariant(const GameFile& file, const VariantSpec& variant) {
+  if (file.variantId != 0 && file.variantId != variant.variantId()) {
     return fail(ErrorCode::ValidationError,
                 "game was played on a different variant of '" + file.variant +
                     "' (its rules have changed since it was saved)");
   }
+  return {};
+}
+
+std::string gameFileIllegalMove(std::size_t ply, std::string_view text) {
+  return "move " + std::to_string(ply) + " ('" + std::string(text) +
+         "') is not legal in this position";
+}
+
+Result<void> applyGameFile(const GameFile& file, Game& game) {
+  if (auto ok = verifyGameFileVariant(file, game.variant()); !ok.has_value()) return ok;
   auto start = fromFen(game.variant(), file.startFen);
   if (!start.has_value()) return fail(start.error().code, start.error().message);
   game.setStartPosition(*start);
@@ -108,9 +118,7 @@ Result<void> applyGameFile(const GameFile& file, Game& game) {
       }
     }
     if (found == nullptr) {
-      return fail(ErrorCode::ValidationError, "move " + std::to_string(ply + 1) + " ('" +
-                                                  text +
-                                                  "') is not legal in this position");
+      return fail(ErrorCode::ValidationError, gameFileIllegalMove(ply + 1, text));
     }
     // Copy before playing: `play` invalidates the legal-move cache `found` points into.
     const Move chosen = *found;

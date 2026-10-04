@@ -21,13 +21,16 @@
 #include <string>
 #include <vector>
 
+#include "app/game_runner.hpp"
 #include "app/shell.hpp"
+#include "io/game_file.hpp"
 #include "io/variant_toml.hpp"
 #include "render/board_renderer.hpp"
 #include "render/image_io.hpp"
 #include "render/window.hpp"
 #ifdef CB_HAVE_IMGUI
 #include "render/play_surface.hpp"
+#include "render/shape_sequence.hpp"
 #include "render/ui.hpp"
 #endif
 
@@ -194,20 +197,11 @@ render::BoardOptions optionsFor(const app::Shell& shell) {
 }
 
 #ifdef CB_HAVE_IMGUI
-/// How the geometry view's surface is posed right now. The variant argument is kept so
-/// the call sites read the same as before; nothing in the pose depends on it now that the
-/// Klein twist is a plain half-turn count.
+/// How the geometry view's surface is posed right now. The variant argument is needed
+/// for the Klein collapse phase; the pose is otherwise the settings' own (M12.6 delegates
+/// to `render::surfacePose`, the one definition the runner shares).
 render::SurfacePose poseFrom(const app::Settings& s, const VariantSpec& v) {
-  render::SurfacePose pose;
-  pose.slideU = s.geometrySlideU + s.geometryAlignOffset;
-  pose.slideV = s.geometrySlideV + s.geometryAlignOffsetV;
-  pose.evert = s.geometryEvert;
-  pose.twist = s.kleinTwist;
-  pose.openness = s.geometryWidth;
-  pose.thickness = s.geometryThickness;
-  const float nx = static_cast<float>(v.dims.extent(0));
-  pose.collapsePhase = nx > 0.0f ? s.kleinShift / nx : 0.0f;
-  return pose;
+  return render::surfacePose(s, v);
 }
 
 namespace {
@@ -236,51 +230,7 @@ view::OrbitCamera blendCamera(const view::OrbitCamera& base,
   return out;
 }
 
-/// How far the chase camera sits from the followed piece: close enough to make the piece
-/// the subject, at a fraction of the shape's span. The anti-clip search tests occlusion
-/// at this same distance, so a seat it finds clear is clear for the camera that follows.
-float chaseEyeDistance(const render::PlaySurface& surf) {
-  const view::Bounds b = surf.bounds();
-  const float span = std::max({b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ});
-  return std::max(2.0f, 0.7f * span);
-}
-
-/// The chase camera's elevation as the tangent the shader/camera maths wants: the
-/// settings slider is in degrees because that is what a player reads.
-float followLift(const app::Settings& s) {
-  constexpr float kPi = 3.14159265358979f;
-  return std::tan(s.followElevationDeg * kPi / 180.0f);
-}
-
 }  // namespace
-
-/// The four-beat choreography for a followed move on a shape (M17.19). On a move the
-/// board
-/// **morphs** (its slide) until the player's own line to the start square is clear, the
-/// camera flies to the piece, the piece travels with the camera chasing it, and the
-/// camera flies home while the board morphs back. The piece is held still until the
-/// camera has reached it, so nothing moves before you are looking at it. Pure beats in
-/// `render::shapeBeat`; this holds only the clock and the values that must persist
-/// between frames. Inactive means "no choreography": the old follow behaviour (a
-/// capture's, too).
-struct ShapeMoveSequence {
-  bool active{false};
-  float elapsed{0.0f};
-  float travelSeconds{1.0f};
-  CellId tokenFrom{kInvalidCell};
-  CellId tokenTo{kInvalidCell};
-  view::OrbitCamera startCam{};  ///< the player's own camera when the move began
-  view::OrbitCamera camera{};    ///< the effective camera for the frame just computed
-  render::SlideOffset startOffset{};  ///< the transient offset when the move began
-  render::SlideOffset alignStart{};   ///< Align's target: clear from the start camera
-  render::SlideOffset travelTo{};     ///< Travel's target: clear along the route
-  render::SlideOffset offset{};       ///< the live transient offset, written to settings
-  CellId trackedCell{kInvalidCell};
-};
-
-/// The choreography to hand a path that must not run it: an inactive sequence falls back
-/// to the steady-state follow, which is what every capture wants.
-const ShapeMoveSequence kNoShapeSequence{};
 
 /// The seats as a placement list, so the move camera can be asked for its blend against
 /// the shape instead of the flat layout (M17.16).
@@ -301,7 +251,8 @@ std::vector<view::Placement> surfacePlacements(const render::PlaySurface& surf) 
 /// because it is already a blend of the player's own view and the follow (M17.19). The
 /// rest of this is the capture path's steady-state follow - a `--clip` of a move never
 /// runs the choreography, and its frames must stay byte-for-byte what they were.
-view::OrbitCamera boardCamera(const app::Shell& shell, const ShapeMoveSequence& seq) {
+view::OrbitCamera boardCamera(const app::Shell& shell,
+                              const render::ShapeMoveSequence& seq) {
   const app::Session* session = shell.session();
   if (session == nullptr) return {};
   const app::Settings& st = shell.settings();
@@ -320,8 +271,9 @@ view::OrbitCamera boardCamera(const app::Shell& shell, const ShapeMoveSequence& 
           // route and standing it upright on its normal (M17.16), close enough that the
           // piece is the subject. The anti-clip turns the board so this does not put the
           // camera inside the tube.
-          want = render::surfaceFollowCamera(path, surf, t, chaseEyeDistance(surf),
-                                             st.followUpright, followLift(st));
+          want =
+              render::surfaceFollowCamera(path, surf, t, render::chaseEyeDistance(surf),
+                                          st.followUpright, render::followLift(st));
         } else {
           // Turntable: the camera angle is the player's; only the look-at follows the
           // piece. The anti-clip turns the *board* so nothing comes between them
@@ -341,107 +293,17 @@ view::OrbitCamera boardCamera(const app::Shell& shell, const ShapeMoveSequence& 
 
 /// The seat the followed move is on right now, by nearest seat to the sampled position.
 /// Aligning for the *current* cell rather than the destination keeps a long move clear
-/// of the shape the whole way across, not only at the square it lands on.
-CellId currentFollowedCell(const app::Shell& shell, const render::PlaySurface& surf) {
-  const app::Session* session = shell.session();
-  if (session == nullptr || !session->shotInFlight()) return kInvalidCell;
-  const view::Vec3 here = render::surfaceMoveSample(session->animation().path(), surf,
-                                                    session->animation().progress())
-                              .position;
-  CellId best = kInvalidCell;
-  float bestDist = 1e30f;
-  for (const render::SurfaceSeat& s : surf.seats()) {
-    const float d = view::length(s.centre - here);
-    if (d < bestDist) {
-      bestDist = d;
-      best = s.cell;
-    }
-  }
-  return best;
-}
+/// of the shape the whole way across, not only at the square it lands on. (The full
+/// choreography lives in `render/shape_sequence`; this wrapper only detects a new move.)
 
-/// The slide offsets that keep the cell `followed` from clipping, for the current
-/// settings and camera. Pure and deterministic, so a capture gets the same value the
-/// interactive loop eases towards - without it a `--clip` of a followed move would show
-/// the camera looking through the shape (M17.17).
-render::SlideOffset alignOffsetFor(const app::Shell& shell, CellId followed) {
-  const app::Session* session = shell.session();
-  const app::Settings& st = shell.settings();
-  if (session == nullptr || followed == kInvalidCell || !st.geometryAlign ||
-      !session->shotInFlight()) {
-    return {};
-  }
-  if (st.shapeFollow == "chase") {
-    const render::PlaySurface surf =
-        render::PlaySurface::build(session->variant(), poseFrom(st, session->variant()));
-    const view::MovePath& path = session->animation().path();
-    const float t = session->animation().progress();
-    // Hysteresis: feed the offset drawn last frame back in, so the search keeps a
-    // still-clear rotation instead of jumping to whatever marginally wins this frame
-    // (M17.20).
-    const render::SlideOffset hint{st.geometryAlignOffset, st.geometryAlignOffsetV};
-    return render::alignSlideU(session->variant(), followed, path, t,
-                               chaseEyeDistance(surf), followLift(st), &hint);
-  }
-  const view::OrbitCamera base = session->playerCamera();
-  const view::Vec3 toCamera = view::normalize(base.eye() - base.target);
-  return render::alignSlideToFace(session->variant(), followed, toCamera, base.distance);
-}
-
-namespace {
-
-/// The base lengths of the choreography's three camera stages, in seconds, at morph speed
-/// 1.0; `Settings::shapeMorphSpeed` divides them, so the slider slows or hurries the
-/// whole lead-in and return without touching the move itself. The travel's own length is
-/// the move animation's.
-constexpr float kShapeAlignSeconds = 0.7f;
-constexpr float kShapeApproachSeconds = 0.9f;
-constexpr float kShapeReturnSeconds = 0.9f;
-/// How fast the board may morph while a move is followed, in lattice cells of slide per
-/// second at morph speed 1. A target half a period away is then a turn the eye can follow
-/// rather than a flip - which is why the morph is a bounded step and not an eased jump
-/// (M17.19).
-constexpr float kShapeMorphRate = 6.0f;
-/// How far ahead of the piece the morph looks for a camera that is about to cross the
-/// board, as a fraction of the move. A small window is enough: the camera moves a little
-/// each frame, and the board must already be turning by the time it gets there.
-constexpr float kShapeLookahead = 0.06f;
-
-/// Move one slide coordinate toward `goal` by at most `maxStep`, the short way round the
-/// `period` (0 when the axis does not wrap). The result is brought back into [0, period).
-float stepSlideCoord(float cur, float goal, float maxStep, float period) {
-  if (period <= 0.0f) {
-    const float d = goal - cur;
-    if (std::abs(d) <= maxStep) return goal;
-    return cur + (d > 0.0f ? maxStep : -maxStep);
-  }
-  float d = std::fmod(goal - cur, period);
-  if (d > period * 0.5f) d -= period;
-  if (d < -period * 0.5f) d += period;
-  if (std::abs(d) <= maxStep) return std::fmod(cur + d + period, period);
-  float out = std::fmod(cur + (d > 0.0f ? maxStep : -maxStep), period);
-  if (out < 0.0f) out += period;
-  return out;
-}
-
-render::SlideOffset stepSlide(const render::SlideOffset& cur,
-                              const render::SlideOffset& goal, float maxStepU,
-                              float maxStepV, float periodU, float periodV) {
-  return {stepSlideCoord(cur.u, goal.u, maxStepU, periodU),
-          stepSlideCoord(cur.v, goal.v, maxStepV, periodV)};
-}
-
-}  // namespace
-
-/// Advance the shape-follow choreography one frame (M17.19). It leaves the effective
-/// camera in `seq.camera` and the transient slide in the settings. The piece's own clock
-/// is driven here too: pinned at the start through the lead-in, running during Travel,
-/// pinned at the end through the return - so nothing moves before the camera has reached
-/// it, and nothing moves again once it has landed.
-void updateShapeSequence(app::Shell& shell, ShapeMoveSequence& seq, float dt) {
+/// Advance the shape-follow choreography one frame (M17.19), interactively. The
+/// per-frame body is `render::stepShapeSequenceOnce`; this wrapper detects a move
+/// beginning and starts the sequence for it, so the interactive loop and the M12.6
+/// runner share one implementation.
+void updateShapeSequence(app::Shell& shell, render::ShapeMoveSequence& seq, float dt) {
   app::Session* session = shell.session();
   app::Settings& st = shell.settings();
-  if (session == nullptr || !shell.showsBoard() || !optionsFor(shell).surface ||
+  if (session == nullptr || !shell.showsBoard() || !st.geometryView ||
       !render::hasPlaySurface(session->variant())) {
     seq.active = false;
     return;
@@ -452,184 +314,17 @@ void updateShapeSequence(app::Shell& shell, ShapeMoveSequence& seq, float dt) {
   }
 
   const view::MovePath& path = session->animation().path();
-  const bool animating = session->animation().active();
-
-  if (animating &&
+  if (session->animation().active() &&
       (!seq.active || seq.tokenFrom != path.from || seq.tokenTo != path.to)) {
     // A new move. The camera to start from is the last one actually drawn, so a move that
     // begins while an earlier return is still running has no cut.
     const view::OrbitCamera from = seq.active ? seq.camera : session->playerCamera();
-    ShapeMoveSequence fresh;
-    fresh.active = true;
-    fresh.travelSeconds = std::max(1e-3f, session->animation().duration());
-    fresh.tokenFrom = path.from;
-    fresh.tokenTo = path.to;
-    fresh.startCam = from;
-    fresh.camera = from;
-    fresh.startOffset = {st.geometryAlignOffset, st.geometryAlignOffsetV};
-    fresh.offset = fresh.startOffset;
-    // Morph at the start only if the player's own line to the piece is actually blocked
-    // by a square - the morph exists to clear a blocked view, not to turn a clear one.
-    {
-      const render::PlaySurface startSurf = render::PlaySurface::build(
-          session->variant(), poseFrom(st, session->variant()));
-      const view::Vec3 piece = render::surfaceMoveSample(path, startSurf, 0.0f).position;
-      const bool blocked =
-          st.geometryAlign && startSurf.blocked(from.eye(), piece, 0.02f);
-      if (blocked) {
-        const view::Vec3 toCam = view::normalize(from.eye() - from.target);
-        fresh.alignStart = render::alignSlideToFace(session->variant(), path.from, toCam,
-                                                    std::max(1.0f, from.distance));
-      } else {
-        fresh.alignStart = fresh.startOffset;
-      }
-    }
-    seq = fresh;
+    seq = render::beginShapeSequence(
+        shell, path, std::max(1e-3f, session->animation().duration()), from);
     session->setMoveProgress(0.0f);
   }
   if (!seq.active) return;
-
-  const float speed = std::clamp(st.shapeMorphSpeed, 0.25f, 4.0f);
-  const float alignSec = kShapeAlignSeconds / speed;
-  const float approachSec = kShapeApproachSeconds / speed;
-  const float returnSec = kShapeReturnSeconds / speed;
-
-  seq.elapsed += dt;
-  const render::ShapeBeat beat =
-      render::shapeBeat(seq.elapsed, alignSec, approachSec, seq.travelSeconds, returnSec);
-
-  // Pin the piece: still through the lead-in, travelling in the middle, landed through
-  // the return.
-  const float moveT = beat.stage == render::ShapeStage::Travel ? beat.local
-                      : (beat.stage == render::ShapeStage::Done ||
-                         beat.stage == render::ShapeStage::Return)
-                          ? 1.0f
-                          : 0.0f;
-  session->setMoveProgress(moveT);
-
-  // The surface at the pose drawn last frame (the offset is written below, so the camera
-  // leads the morph by a frame - invisible, and it keeps this to one surface build).
-  const render::PlaySurface surf =
-      render::PlaySurface::build(session->variant(), poseFrom(st, session->variant()));
-
-  // The morph is always the same bounded turn: move the slide toward whichever pose the
-  // stage wants, by at most a fixed rate. No stage can spin the board a half-period in a
-  // frame, which is what made the shape (and the camera with it) flip.
-  const float periodU = 2.0f * static_cast<float>(session->variant().dims.extent(0));
-  const float periodV = render::PlaySurface::slidesAlongRanks(session->variant())
-                            ? 2.0f * static_cast<float>(session->variant().dims.extent(1))
-                            : 0.0f;
-  const float step = kShapeMorphRate * speed * dt;
-  const auto morphTo = [&](const render::SlideOffset& goal) {
-    seq.offset = stepSlide(seq.offset, goal, step, step, periodU, periodV);
-  };
-  const auto sameSlide = [&](float a, float b, float period) {
-    if (period <= 0.0f) return std::abs(a - b) < 1e-3f;
-    float d = std::fmod(a - b, period);
-    if (d < 0.0f) d += period;
-    return d < 1e-3f || d > period - 1e-3f;
-  };
-  bool settled = false;
-
-  // The stages are strictly sequential, and morphing and camera motion do not overlap
-  // except inside Travel (where following and morphing go together by definition):
-  //   Align   - morph, camera still
-  //   Approach- camera to the piece, board still
-  //   Travel  - piece moves, camera follows, board morphs as needed
-  //   Return  - camera back, board still
-  //   Done    - board morphs home, camera still
-  switch (beat.stage) {
-    case render::ShapeStage::Align:
-      // Morph in place: the camera does not move, only the board turns under it.
-      morphTo(seq.alignStart);
-      break;
-    case render::ShapeStage::Approach:
-      // The camera flies to the piece and the board is held exactly as Align left it.
-      break;
-    case render::ShapeStage::Travel: {
-      // Re-aim only when the followed cell changes; the search is what says *which* way
-      // the board has to turn.
-      const CellId cell = currentFollowedCell(shell, surf);
-      if (cell != seq.trackedCell) {
-        seq.trackedCell = cell;
-        seq.travelTo = alignOffsetFor(shell, cell);
-      }
-      // Look ahead at where the camera is going. While its own path would cross a square,
-      // morph the board toward the clear pose; once the path is clear, hold the pose that
-      // cleared it.
-      const bool clip = render::followClips(path, surf, beat.local, kShapeLookahead,
-                                            chaseEyeDistance(surf), followLift(st));
-      if (st.geometryAlign && clip) morphTo(seq.travelTo);
-      break;
-    }
-    case render::ShapeStage::Return:
-      // The camera flies back and the board is held exactly as Travel left it - the shape
-      // is turned home only after the camera has arrived (Done).
-      break;
-    case render::ShapeStage::Done:
-      // Camera home and still: morph the board back to the player's own pose, at the same
-      // bounded rate. The stage is time-boxed, but a big offset needs longer: keep
-      // turning until it is actually home, so ending the sequence never snaps the shape.
-      if (sameSlide(seq.offset.u, seq.startOffset.u, periodU) &&
-          sameSlide(seq.offset.v, seq.startOffset.v, periodV)) {
-        seq.offset = seq.startOffset;
-        settled = true;
-      } else {
-        morphTo(seq.startOffset);
-      }
-      break;
-  }
-
-  // The followed pose, at the move's own progress: start of travel in Approach, the
-  // moving piece in Travel, the landed piece in Return.
-  const float followT = beat.stage == render::ShapeStage::Travel ? beat.local
-                        : (beat.stage == render::ShapeStage::Done ||
-                           beat.stage == render::ShapeStage::Return)
-                            ? 1.0f
-                            : 0.0f;
-  view::OrbitCamera want = session->playerCamera();
-  if (st.shapeFollow == "chase") {
-    want = render::surfaceFollowCamera(path, surf, followT, chaseEyeDistance(surf),
-                                       st.followUpright, followLift(st));
-  } else {
-    // Turntable: the player's own angle is kept - only the look-at follows the piece. The
-    // shape is what turns, in the offset below.
-    want.target = render::surfaceMoveSample(path, surf, followT).position;
-  }
-
-  // How much of the piece's own frame the camera takes, per beat. Align leaves the view
-  // entirely alone (only the board turns under it); the camera reaches the piece over
-  // Approach and holds that frame exactly through Travel - right is `a x b`, up the
-  // piece's upright - then gives the player's view back over Return. The ends of every
-  // stage are eased, so the camera never starts or stops with a jerk and nothing "jump
-  // cuts". `followStrength` is not folded in here: a half-applied intrinsic frame is a
-  // half-upright piece, which is the defect this replaces.
-  float amount = 1.0f;
-  switch (beat.stage) {
-    case render::ShapeStage::Align:
-      amount = 0.0f;
-      break;
-    case render::ShapeStage::Approach:
-      amount = render::shapeEase(beat.local);
-      break;
-    case render::ShapeStage::Return:
-      amount = 1.0f - render::shapeEase(beat.local);
-      break;
-    case render::ShapeStage::Done:
-      amount = 0.0f;
-      break;
-    case render::ShapeStage::Travel:
-      amount = 1.0f;
-      break;
-  }
-  // Blend against the player's *live* camera, not the frozen start: an orbit made during
-  // the shot is theirs and shows through, and the return has nothing to snap from when it
-  // ends (the old flat camera folded its shot in as an offset for the same reason).
-  seq.camera = view::slerpCamera(session->playerCamera(), want, amount);
-
-  st.geometryAlignOffset = seq.offset.u;
-  st.geometryAlignOffsetV = seq.offset.v;
-  if (settled) seq.active = false;
+  render::stepShapeSequenceOnce(shell, seq, dt);
 }
 
 /// Put the camera round whatever the board has just become.
@@ -676,18 +371,43 @@ int captureFrame(const std::string& variantName, const std::string& path,
                  int previewDims, bool clip, int clipFrames, float clipT0, float clipT1,
                  bool cinema, const std::string& followMode,
                  const std::string& shapeFollow, float moveT, int benchFrames,
-                 bool geometry, float evert, float slideU, float slideV, float ghost) {
+                 bool geometry, float evert, float slideU, float slideV, float ghost,
+                 const std::string& playFile, float dwell, int fps, float playAt,
+                 bool framesGiven, int width, int height) {
   // Captures use default settings, never the person's own. A screenshot that changes
   // because whoever ran it likes a larger interface is not a screenshot of the game -
   // and `ctest -R gui-` would then pass or fail by whose machine it ran on.
   auto shell = makeShell(std::filesystem::temp_directory_path() /
                          "chessbox-capture-defaults.conf");
-  if (auto ok = shell->startGame(variantName); !ok.has_value()) {
+  // M12.6: a game file names its own variant and start position, and its moves are then
+  // played one at a time below rather than through the bulk `applyGameFile`.
+  GameFile gameFile;
+  const bool playing = !playFile.empty();
+  if (playing) {
+    std::ifstream in(playFile);
+    if (!in) {
+      std::fprintf(stderr, "cannot open game file '%s'\n", playFile.c_str());
+      return 1;
+    }
+    std::ostringstream buffer;
+    buffer << in.rdbuf();
+    auto parsed = parseGameFile(buffer.str());
+    if (!parsed.has_value()) {
+      std::fprintf(stderr, "game file: %s\n", parsed.error().format().c_str());
+      return 1;
+    }
+    gameFile = std::move(*parsed);
+    if (auto ok = shell->startGame(gameFile.variant); !ok.has_value()) {
+      std::fprintf(stderr, "cannot load '%s': %s\n", gameFile.variant.c_str(),
+                   ok.error().format().c_str());
+      return 1;
+    }
+  } else if (auto ok = shell->startGame(variantName); !ok.has_value()) {
     std::fprintf(stderr, "cannot load '%s': %s\n", variantName.c_str(),
                  ok.error().format().c_str());
     return 1;
   }
-  if (!script.empty()) {
+  if (!playing && !script.empty()) {
     if (auto ok = shell->session()->applyScript(script); !ok.has_value()) {
       std::fprintf(stderr, "script: %s\n", ok.error().format().c_str());
       return 1;
@@ -753,7 +473,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
     std::fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
     return 1;
   }
-  SDL_Window* window = SDL_CreateWindow("ChessBox", 1440, 900, SDL_WINDOW_HIDDEN);
+  SDL_Window* window = SDL_CreateWindow("ChessBox", width, height, SDL_WINDOW_HIDDEN);
   if (window == nullptr) {
     std::fprintf(stderr, "cannot create a hidden window: %s\n", SDL_GetError());
     return 1;
@@ -765,7 +485,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
     return 1;
   }
   auto renderer = render::BoardRenderer::create(*ctx);
-  auto target = render::OffscreenTarget::create(*ctx, 1440, 900);
+  auto target = render::OffscreenTarget::create(*ctx, static_cast<std::uint32_t>(width),
+                                                static_cast<std::uint32_t>(height));
   if (!renderer.has_value() || !target.has_value()) {
     std::fprintf(stderr, "cannot set up the renderer\n");
     return 1;
@@ -800,7 +521,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
   // writing so `--clip` can call it once per frame. `dt` is the interface's own clock:
   // the warm-up gives it enough to settle a screen transition, and the real frames give
   // it none so the drifting field is the same in every frame of a clip.
-  const auto renderFrame = [&](float dt) -> std::optional<render::Image> {
+  const auto renderFrame = [&](float dt, const render::ShapeMoveSequence* playSeq =
+                                             nullptr) -> std::optional<render::Image> {
     // A fixed step rather than a real clock: the shell animates, and a capture has to be
     // the same picture every time it is taken.
     (*ui)->tick(dt);
@@ -829,15 +551,19 @@ int captureFrame(const std::string& variantName, const std::string& path,
       renderer->setBlur(away);
       if (frame.valid()) shell->session()->setBoardAspect(frame.width / frame.height);
       // The interactive loop eases this; a capture states it outright, so a followed
-      // move is anti-clipped in a clip too (M17.17).
+      // move is anti-clipped in a clip too (M17.17). The M12.6 runner has already stated
+      // the offsets through its simulated sequence, so it skips this and only refreshes
+      // the options.
       if (optionsFor(*shell).surface) {
-        const render::PlaySurface alignSurf = render::PlaySurface::build(
-            shell->session()->variant(),
-            poseFrom(shell->settings(), shell->session()->variant()));
-        const render::SlideOffset off =
-            alignOffsetFor(*shell, currentFollowedCell(*shell, alignSurf));
-        shell->settings().geometryAlignOffset = off.u;
-        shell->settings().geometryAlignOffsetV = off.v;
+        if (playSeq == nullptr) {
+          const render::PlaySurface alignSurf = render::PlaySurface::build(
+              shell->session()->variant(),
+              poseFrom(shell->settings(), shell->session()->variant()));
+          const render::SlideOffset off = render::alignOffsetFor(
+              *shell, render::currentFollowedCell(*shell, alignSurf));
+          shell->settings().geometryAlignOffset = off.u;
+          shell->settings().geometryAlignOffsetV = off.v;
+        }
         // The offsets just changed, so the renderer's options must be refreshed before
         // the board is built from them.
         renderer->setOptions(optionsFor(*shell));
@@ -851,7 +577,10 @@ int captureFrame(const std::string& variantName, const std::string& path,
           shell->session()->timelineLinks());
     }
     const view::OrbitCamera camera =
-        shell->showsBoard() ? boardCamera(*shell, kNoShapeSequence) : view::OrbitCamera{};
+        shell->showsBoard()
+            ? boardCamera(*shell,
+                          playSeq != nullptr ? *playSeq : render::kNoShapeSequence)
+            : view::OrbitCamera{};
     const std::function<void(VkCommandBuffer)> drawUi = [&](VkCommandBuffer cmd) {
       (*ui)->record(cmd);
     };
@@ -882,6 +611,75 @@ int captureFrame(const std::string& variantName, const std::string& path,
     return true;
   };
 
+  // M12.6: plan the whole game before rendering a frame. A move's body is its own
+  // animation on a flat board, or the follow choreography's full settle on a shape; a
+  // dwell is held after every move but the last. The dry pass validates the file move by
+  // move and measures those durations; the session is then reset and the real pass
+  // replays the same moves, one per requested frame time.
+  std::vector<float> bodies;
+  std::string playError;
+  std::unique_ptr<app::GameRunner> runner;
+  render::SurfaceCache surfaceCache;
+  std::size_t applied = 0;
+  if (playing) {
+    runner = std::make_unique<app::GameRunner>(gameFile, *shell->session());
+    if (auto ok = runner->reset(); !ok.has_value()) {
+      std::fprintf(stderr, "%s\n", ok.error().format().c_str());
+      return 1;
+    }
+    for (;;) {
+      if (runner->done()) break;
+      if (auto ok = runner->step(); !ok.has_value()) {
+        // Stop at the offending move, keeping the legal prefix.
+        playError = ok.error().format();
+        break;
+      }
+      const float travel = runner->lastTravelSeconds();
+      float body = travel;
+      if (travel > 0.0f && render::shapeFollowApplies(*shell)) {
+        body = render::shapeSequenceSettleSeconds(
+            *shell, shell->session()->animation().path(), travel, &surfaceCache);
+      }
+      bodies.push_back(body);
+      // One move's worth of pose samples at a time: the surface is rebuilt from a fresh
+      // prefix for every move, so keeping the whole game's poses would grow without
+      // bound.
+      surfaceCache.clear();
+    }
+    if (auto ok = runner->reset(); !ok.has_value()) {
+      std::fprintf(stderr, "%s\n", ok.error().format().c_str());
+      return 1;
+    }
+  }
+  const float playTotal = app::playbackTotalSeconds(bodies, dwell);
+
+  // One frame of the played-back game at a global time. The moves up to the cursor are
+  // applied in order; the shape choreography (or the flat move camera) is then stated at
+  // the cursor's own elapsed time, never integrated from a real frame.
+  const auto renderPlayFrame = [&](float globalSeconds) -> std::optional<render::Image> {
+    const app::PlaybackCursor cursor = app::playbackCursor(bodies, dwell, globalSeconds);
+    while (applied <= cursor.move && applied < bodies.size()) {
+      if (auto ok = runner->step(); !ok.has_value()) break;
+      ++applied;
+      // A new move: drop the previous move's pose samples before simulating this one.
+      surfaceCache.clear();
+    }
+    render::ShapeMoveSequence seq;
+    const render::ShapeMoveSequence* seqArg = nullptr;
+    if (shell->session() != nullptr && applied > 0 && !bodies.empty()) {
+      const view::MovePath& movePath = shell->session()->animation().path();
+      const float travel = shell->session()->animation().duration();
+      if (travel > 0.0f && render::shapeFollowApplies(*shell)) {
+        seq = render::simulateShapeSequence(*shell, movePath, travel, cursor.elapsed,
+                                            &surfaceCache);
+        seqArg = &seq;
+      } else if (travel > 0.0f) {
+        shell->session()->setMoveProgress(cursor.elapsed / travel);
+      }
+    }
+    return renderFrame(0.0f, seqArg);
+  };
+
   // Two thrown-away frames, in this order: the first lets a screen-change reset the pane
   // transition (which it does after the tick), the second advances that transition to
   // done - without both, the library draws at alpha zero. Then ImGui has a previous frame
@@ -906,7 +704,40 @@ int captureFrame(const std::string& variantName, const std::string& path,
     return 0;
   }
 
-  if (!clip) {
+  if (playing) {
+    // A played-back game states its own global time per frame: one `--shot` at
+    // `--play-at` (default: the end), or `ceil(total * fps)` frames at `i / fps`. No wall
+    // clock is read anywhere in this path.
+    if (!clip) {
+      const float at = playAt >= 0.0f ? playAt : playTotal;
+      const std::optional<render::Image> img = renderPlayFrame(at);
+      if (!img.has_value() || !writeFrame(*img, path)) return 1;
+    } else {
+      std::error_code ec;
+      std::filesystem::create_directories(path, ec);
+      const int frames =
+          framesGiven
+              ? std::max(1, clipFrames)
+              : std::max(1, static_cast<int>(std::ceil(
+                                playTotal * static_cast<float>(std::max(1, fps)))));
+      for (int i = 0; i < frames; ++i) {
+        const float g = static_cast<float>(i) / static_cast<float>(std::max(1, fps));
+        char name[32];
+        std::snprintf(name, sizeof(name), "frame_%04d.ppm", i);
+        const std::optional<render::Image> img = renderPlayFrame(g);
+        if (!img.has_value() ||
+            !writeFrame(*img, (std::filesystem::path(path) / name).string())) {
+          return 1;
+        }
+      }
+    }
+    if (!playError.empty()) {
+      // The whole legal prefix was still rendered; the bad move is the reason for the
+      // nonzero exit, exactly as the runner's own step reported it.
+      std::fprintf(stderr, "%s\n", playError.c_str());
+      return 1;
+    }
+  } else if (!clip) {
     const std::optional<render::Image> img = renderFrame(0.0f);
     if (!img.has_value() || !writeFrame(*img, path)) return 1;
   } else {
@@ -988,6 +819,13 @@ int main(int argc, char** argv) {
   float slideU = 0.0f;
   float slideV = 0.0f;
   float ghost = 1.0f;
+  std::string playFile;
+  float dwell = 0.6f;
+  int captureFps = 30;
+  float playAt = -1.0f;
+  bool framesGiven = false;
+  int width = 1920;
+  int height = 1080;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "-h" || arg == "--help") {
@@ -1016,6 +854,12 @@ int main(int argc, char** argv) {
           "and --evert 0..1 turns that shape through itself - a torus inside out,\n"
           "while --slide and --slide-v move the board round the shape, in cells, and\n"
           "--ghost 0.35..1 makes it translucent so the far side shows through.\n"
+          "--play FILE plays a saved game (M12.7) move by move: with --clip it exports\n"
+          "the whole game, with --shot it captures one instant. --dwell SECONDS is the\n"
+          "pause held after each move (default 0.6), --fps N the export frame rate\n"
+          "(default 30), --play-at SECONDS the instant a --shot captures (default: "
+          "end).\n"
+          "--width W --height H set the capture/window resolution (default 1920x1080).\n"
           "--dims 2..4 is how many dimensions the designer's move preview shows.\n");
       return 0;
     }
@@ -1033,9 +877,10 @@ int main(int argc, char** argv) {
       clipT0 = std::strtof(argv[++i], nullptr);
     else if (arg == "--t1" && i + 1 < argc)
       clipT1 = std::strtof(argv[++i], nullptr);
-    else if (arg == "--frames" && i + 1 < argc)
+    else if (arg == "--frames" && i + 1 < argc) {
       clipFrames = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
-    else if (arg == "--cinema")
+      framesGiven = true;
+    } else if (arg == "--cinema")
       cinema = true;
     else if (arg == "--geometry")
       geometry = true;
@@ -1047,6 +892,18 @@ int main(int argc, char** argv) {
       slideV = std::strtof(argv[++i], nullptr);
     else if (arg == "--ghost" && i + 1 < argc)
       ghost = std::strtof(argv[++i], nullptr);
+    else if (arg == "--play" && i + 1 < argc)
+      playFile = argv[++i];
+    else if (arg == "--dwell" && i + 1 < argc)
+      dwell = std::strtof(argv[++i], nullptr);
+    else if (arg == "--fps" && i + 1 < argc)
+      captureFps = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
+    else if (arg == "--play-at" && i + 1 < argc)
+      playAt = std::strtof(argv[++i], nullptr);
+    else if (arg == "--width" && i + 1 < argc)
+      width = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
+    else if (arg == "--height" && i + 1 < argc)
+      height = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
     else if (arg == "--follow" && i + 1 < argc)
       followMode = argv[++i];
     else if (arg == "--shape-follow" && i + 1 < argc)
@@ -1065,7 +922,8 @@ int main(int argc, char** argv) {
     return captureFrame(variantName.empty() ? "standard" : variantName, targetPath,
                         script, screen, overtureT, previewDims, !clipDir.empty(),
                         clipFrames, clipT0, clipT1, cinema, followMode, shapeFollow,
-                        moveT, benchFrames, geometry, evert, slideU, slideV, ghost);
+                        moveT, benchFrames, geometry, evert, slideU, slideV, ghost,
+                        playFile, dwell, captureFps, playAt, framesGiven, width, height);
   }
 
   auto shell = makeShell();
@@ -1079,7 +937,8 @@ int main(int argc, char** argv) {
     }
   }
 
-  auto window = render::Window::create("ChessBox", 1440, 900);
+  auto window = render::Window::create("ChessBox", static_cast<std::uint32_t>(width),
+                                       static_cast<std::uint32_t>(height));
   if (!window.has_value()) {
     std::fprintf(stderr, "cannot open a window: %s\n", window.error().format().c_str());
     return 1;
@@ -1128,7 +987,7 @@ int main(int argc, char** argv) {
   bool wasSurface = false;
   /// The camera choreography for a followed move on a shape (M17.19): hold, morph,
   /// approach, travel, morph home. Inactive on the flat board and in every capture.
-  ShapeMoveSequence shapeSeq;
+  render::ShapeMoveSequence shapeSeq;
   auto lastFrame = std::chrono::steady_clock::now();
   float fps = 0.0f;
 

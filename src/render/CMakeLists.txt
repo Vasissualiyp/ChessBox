@@ -54,7 +54,8 @@ if(SDL3_FOUND)
   list(APPEND CB_RENDER_SOURCES window.cpp)
   if(imgui_FOUND)
     list(APPEND CB_RENDER_SOURCES ui.cpp ui_menus.cpp ui_widgets.cpp deco.cpp
-                                 overture_scene.cpp play_surface.cpp ui_designer.cpp)
+                                 overture_scene.cpp play_surface.cpp ui_designer.cpp
+                                 shape_sequence.cpp)
   endif()
 endif()
 

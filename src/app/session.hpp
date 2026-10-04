@@ -113,6 +113,12 @@ class Session {
     followStrength_ = strength < 0.0f ? 0.0f : (strength > 1.0f ? 1.0f : strength);
   }
   [[nodiscard]] float followStrength() const noexcept { return followStrength_; }
+  /// Whether the move camera follows at all: a follow mode is set and the strength is not
+  /// zero. Independent of whether a move is in flight, which is what the shape-follow
+  /// scheduler needs to budget a move's choreography (M12.6).
+  [[nodiscard]] bool followsMove() const noexcept {
+    return cameraPolicy_.follow != view::FollowMode::Off && followStrength_ > 0.0f;
+  }
   /// True while a move's camera shot owns the view, which is exactly when the board is
   /// interaction-locked.
   [[nodiscard]] bool shotInFlight() const noexcept;
@@ -210,6 +216,12 @@ class Session {
   /// Replay a parsed game file into this session. Fails if the file names a different
   /// variant; a front end starts that variant first.
   Result<void> loadGame(const GameFile& file);
+
+  /// Play the legal move named in the engine's notation, starting its animation. The
+  /// M12.6 runner steps a saved game this way, one move at a time, so each can be
+  /// animated - unlike `loadGame`, which replays them all at once. Fails, naming the
+  /// move, when it is not legal in the current position.
+  Result<void> playMoveText(std::string_view text);
 
   /// Resolve a pixel to a cell and act on it. Returns kInvalidCell if the click missed
   /// the board, which is not an error - it deselects, like clicking off a board does.

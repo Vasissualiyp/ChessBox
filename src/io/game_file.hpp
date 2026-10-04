@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -39,6 +40,17 @@ struct GameFile {
 /// Parse game-file text. Resolves nothing and replays nothing; the caller owns the
 /// variant.
 [[nodiscard]] Result<GameFile> parseGameFile(std::string_view text);
+
+/// Check that the file's recorded `VariantId` (when it has one) still matches `variant`,
+/// so a rules change since the save is refused rather than silently misapplied. Shared by
+/// `applyGameFile` and the M12.6 runner so both report the same mismatch.
+[[nodiscard]] Result<void> verifyGameFileVariant(const GameFile& file,
+                                                 const VariantSpec& variant);
+
+/// The message `applyGameFile` and the M12.6 runner both report for a move the engine
+/// rejects: names the 1-based ply and the move text. One definition, so a runner can
+/// never drift from the loader's wording.
+[[nodiscard]] std::string gameFileIllegalMove(std::size_t ply, std::string_view text);
 
 /// Replay a parsed game into `game`, which must already be the resolved variant. Checks
 /// the recorded `variantId` (a rules change is an error, not a silent misreplay), sets
