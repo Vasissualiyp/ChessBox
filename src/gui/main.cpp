@@ -1291,13 +1291,14 @@ int main(int argc, char** argv) {
       // and this eases the live `geometryFormed` toward it. The surface path stays on
       // while it is not yet flat, so toggling SHAPE off morphs back to the ordinary board
       // instead of snapping - see `optionsFor`.
+      // The rate is the shared `kFormMorphRate` ramp times the player's own
+      // `geometryFormSpeed` (M18.6 revision); the pace is no longer a bare constant.
       const float formTarget = st.geometryView ? 1.0f : 0.0f;
       const bool wasMorphing = st.geometryFormed != formTarget;
-      if (st.geometryFormed < formTarget) {
-        st.geometryFormed = std::min(formTarget, st.geometryFormed + step);
-      } else if (st.geometryFormed > formTarget) {
-        st.geometryFormed = std::max(formTarget, st.geometryFormed - step);
-      }
+      st.geometryFormed = render::advanceFormMorph(st.geometryFormed, formTarget, dt,
+                                                   st.geometryFormSpeed);
+      // `wasMorphing`/`nowMorphing` bracket the actual step, whatever its size, so the
+      // settling frame the camera snaps on is the real one at any speed (M17.24).
       const bool nowMorphing = st.geometryFormed != formTarget;
       morphInFlight = wasMorphing || nowMorphing;
       morphSettling = wasMorphing && !nowMorphing;
@@ -1401,15 +1402,15 @@ int main(int argc, char** argv) {
 #ifdef CB_HAVE_IMGUI
       // The board's bounds are a continuous function of `geometryFormed` while the morph
       // is in flight, so the one-shot frame at the SHAPE instant is not enough: ease the
-      // camera's frame toward where the shape is *now*, every frame, and snap on the frame
-      // it settles so the endpoints land exactly (M17.24). This is a frame correction only
+      // camera's frame toward where the shape is *now*, every frame, and snap on the
+      // frame it settles so the endpoints land exactly (M17.24). This is a frame
+      // correction only
       // - the player's own angle is kept.
       if (morphInFlight) {
         const app::Settings& st = shell->settings();
-        render::easeMorphFraming(
-            *shell->session(), optionsFor(*shell),
-            poseFrom(st, shell->session()->variant()),
-            morphSettling ? 1.0f : render::morphFollowBlend(dt));
+        render::easeMorphFraming(*shell->session(), optionsFor(*shell),
+                                 poseFrom(st, shell->session()->variant()),
+                                 morphSettling ? 1.0f : render::morphFollowBlend(dt));
       }
 #endif
       syncMarks(*renderer, *shell->session());

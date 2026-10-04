@@ -907,6 +907,47 @@ additive and not a silent behaviour change for anyone who never touches the new 
 `1.0` visibly changes how long the SHAPE toggle takes to settle, in both directions (faster
 and slower); the default is unchanged from M18.6's shipped pacing.
 
+### Status: morph speed control built (2026-10-04, opencode)
+
+The SHAPE toggle's flat<->shape roll is now paced by `Settings::geometryFormSpeed`, exposed
+as a slider beside the shape-follow `shapeMorphSpeed` one; the default is bit-identical to
+M18.6's shipped pacing.
+
+- **The ramp is one pure function.** `render::advanceFormMorph(formed, target, dt, formSpeed)`
+  (`src/render/play_surface.{hpp,cpp}`) moves `geometryFormed` toward its 0/1 target by
+  `dt * kFormMorphRate * formSpeed`, snapping exactly on the target. `kFormMorphRate = 2.0`
+  is the old bare `dt * 2`; the interactive loop (`src/gui/main.cpp`) now calls it instead of
+  the inline `min`/`max` step. `geometryEvert` keeps its own unscaled `dt * 2`. Nothing on
+  the `--shot`/`--clip` path reads the speed, so captures are untouched.
+- **The M17.24 snap frame is preserved at every speed.** `wasMorphing`/`nowMorphing` bracket
+  the actual step - whatever its size - so `morphSettling` is still true on the real frame
+  the roll lands, and the camera snaps exactly there at any multiplier. The pure helper is
+  what the loop's own comparison sees, so there is no second definition of "settled".
+- **The setting mirrors `shapeMorphSpeed` end to end.** Default `1.0`, `geometry_form_speed`
+  in `settings.cpp`'s load/save, `std::clamp(..., 0.25f, 4.0f)` in `sanitize`, and a new
+  "SHAPE morph speed" slider in `ui_menus.cpp` added to the moved-detection list. The clamp
+  up from zero is the spec's own guard: the ramp is linear and snaps on the target, so it
+  cannot stall asymptotically even at the floor.
+- **Slider placement (a small deviation).** It sits immediately *after* the move-camera
+  `EndDisabled` block rather than inside it beside `Morph speed`, because that whole block is
+  greyed when `cameraMode == "off"` (the default) and the SHAPE toggle must be paced whether
+  or not a move camera is following. It is still adjacent, under the camera caption, with its
+  own caption so the two "morph speed" rows are not confused.
+- **Tests, against the pure step (live-loop-only caveat).** The spec's acceptance is about how
+  long the live toggle takes to settle, which `--shot`/`--clip` cannot observe (the same
+  caveat M17.24's verification recorded), so the tests pin the computation the live loop runs.
+  A `[render]` case drives `advanceFormMorph` at a clean fixed `dt`: doubling the speed halves
+  the frames to cross (2 -> 1, 0.5x -> 4), the per-frame step is exactly proportional to the
+  speed below the clamp, the way back paces identically, and at `1.0` it equals the old inline
+  `min(1, formed + dt * 2)` math frame for frame (bit-identical default). `[unit][app]` adds
+  `geometryFormSpeed` to the settings round-trip and to the clamp test (0 -> 0.25).
+- **Verification.** `build/dev/tests/chessbox_tests '[render]'` 111 cases / 4.82M assertions
+  green; `'[app]'` 59 cases green; `tools/precommit.sh` green (format, build, arch, unit,
+  property). The settings screen was captured at 1000x2400 (`build/m18_form_check/`) and the
+  new slider and caption render validation-clean next to `Morph speed`.
+- **Deviations.** Only the slider's position relative to the camera gate, above. No behaviour
+  change at the default; no capture-path change.
+
 ## Dependencies and ordering
 
 M18.1-M18.3 and M18.6 touch only `src/render`/`src/view`/`src/gui` and are independent of

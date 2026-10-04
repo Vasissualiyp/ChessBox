@@ -69,6 +69,12 @@ struct Settings {
   /// function of the number and `--shot --formed` reproduces. Transient like the align
   /// offset: not written to disk, reset from `geometryView` when the shell is built.
   float geometryFormed{1.0f};
+  /// How fast `geometryFormed` eases toward its target: the SHAPE toggle's flat<->shape
+  /// roll divides by this, so 1 is the designed half-second pace, smaller is slower and
+  /// more legible, larger a quicker cut. The same kind of control as `shapeMorphSpeed`,
+  /// for the board's own morph rather than the shape-follow choreography's. Clamped to
+  /// 0.25..4 so a zero cannot freeze the board mid-roll (M18.6).
+  float geometryFormSpeed{1.0f};
   /// How opaque the geometry view's board mesh is, 1 fully opaque down to `kGhostMin` as
   /// a ghost, so the far side of the shape and the pieces on it show through. The pieces
   /// stay opaque; the point is to see them (M17.10).

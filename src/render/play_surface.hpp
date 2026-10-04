@@ -34,17 +34,31 @@ void frameGeometryCamera(app::Session& session, const BoardOptions& options,
 inline constexpr float kMorphFollowRate = 30.0f;
 [[nodiscard]] float morphFollowBlend(float dt) noexcept;
 
+/// The base speed of the flat<->shape morph's own ramp (M18.6): at 1.0 the live
+/// `geometryFormed` crosses from flat to formed in half a second, and
+/// `Settings::geometryFormSpeed` multiplies that rate.
+inline constexpr float kFormMorphRate = 2.0f;
+/// One frame's advance of the live flat<->shape morph (M18.6): move `formed` toward
+/// `target` (0 or 1) by `dt * kFormMorphRate * formSpeed`, stopping exactly on the target
+/// rather than approaching it asymptotically, so the SHAPE toggle settles in a definite
+/// time and the camera's settle frame is exact (M17.24). `formSpeed` of 1 reproduces the
+/// shipped pacing; larger is faster, smaller slower. `Settings` clamps the speed to
+/// 0.25..4 so a zero cannot stall the roll. Pure, so the per-frame step is testable
+/// without a live window.
+[[nodiscard]] float advanceFormMorph(float formed, float target, float dt,
+                                     float formSpeed) noexcept;
+
 /// Ease the camera toward the geometry view's *current* frame while the flat/shape morph
 /// is in flight (M17.24).
 ///
-/// `frameGeometryCamera` commits the frame once, at the instant SHAPE flips - the flat end
-/// of the morph. The shape's own bounds move as it rolls up, so a camera left on that
+/// `frameGeometryCamera` commits the frame once, at the instant SHAPE flips - the flat
+/// end of the morph. The shape's own bounds move as it rolls up, so a camera left on that
 /// first snapshot lets the board drift off-centre. This rebuilds the surface at the
-/// current `pose` and eases the camera's target and distance toward it by `k`, keeping the
-/// player's own viewing angle (a frame correction, not an angle change - the same contract
-/// as `frameOn`). Returns true when there was a surface to frame.
-bool easeMorphFraming(app::Session& session, const BoardOptions& options, SurfacePose pose,
-                      float k);
+/// current `pose` and eases the camera's target and distance toward it by `k`, keeping
+/// the player's own viewing angle (a frame correction, not an angle change - the same
+/// contract as `frameOn`). Returns true when there was a surface to frame.
+bool easeMorphFraming(app::Session& session, const BoardOptions& options,
+                      SurfacePose pose, float k);
 
 /// Where the travelling piece sits on `surf` at progress `t`, and which way it stands. A
 /// leap arcs outward along the blended normal; a glide walks the seats the engine's own

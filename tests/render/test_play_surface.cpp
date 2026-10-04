@@ -1878,8 +1878,8 @@ TEST_CASE("the morph's flat end is the flat board, reflected in rank", "[render]
       const view::Vec3 got = t->centre - sc;
       CAPTURE(p.cell, want.x, want.y, want.z, got.x, got.y, got.z, sx, sy);
       // Files and ranks land on the same lattice points once the surface's own steps are
-      // divided out, and the board is flat. The rank sign above is what a continuous morph
-      // cannot reproduce against the ordinary board.
+      // divided out, and the board is flat. The rank sign above is what a continuous
+      // morph cannot reproduce against the ordinary board.
       CHECK_THAT(got.x / sx, WithinAbs(want.x, 1e-3f));
       CHECK_THAT(got.y / sy, WithinAbs(want.y, 1e-3f));
       CHECK_THAT(got.z, WithinAbs(want.z, 1e-3f));
@@ -1943,8 +1943,8 @@ TEST_CASE("the flat-to-shape morph is continuous and never degenerate", "[render
 TEST_CASE("the morph keeps the camera on the shape as its bounds move", "[render]") {
   // M17.24. `frameBoard` commits the camera's frame once, at the instant SHAPE flips -
   // which is the *flat* end of the morph. The shape's own bounds move as it rolls up, so
-  // without re-framing the board drifts off-centre. This drives the interactive loop's own
-  // path: `geometryFormed` climbs by `dt * 2` a frame and the camera eases toward the
+  // without re-framing the board drifts off-centre. This drives the interactive loop's
+  // own path: `geometryFormed` climbs by `dt * 2` a frame and the camera eases toward the
   // current surface's frame with the same blend the GUI uses.
   const VariantSpec& v = *new VariantSpec(test::loadVariant("torus"));
   auto created = app::Session::create(test::loadVariant("torus"));
@@ -2003,6 +2003,60 @@ TEST_CASE("the morph keeps the camera on the shape as its bounds move", "[render
   const view::Vec3 before = session.playerCamera().target;
   CHECK(easeMorphFraming(session, opts, one, 1.0f));
   CHECK(dist(session.playerCamera().target, before) < 1e-5f);
+}
+
+TEST_CASE("the morph speed scales the flat/shape roll, and 1.0 is the shipped pace",
+          "[render]") {
+  // M18.6 revision. The interactive loop eases `geometryFormed` toward its target on a
+  // linear `dt * 2` ramp; `Settings::geometryFormSpeed` multiplies that rate. This pins
+  // the *relationship* (double the speed, half the frames) rather than one magic number,
+  // and that the default 1.0 is exactly the pre-setting ramp, so a player who never
+  // touches the slider sees no change at all.
+  constexpr float kDt = 0.25f;
+
+  // Frames to cross from `from` to `to` one frame at a time, at a given speed. Clean
+  // quarter-second frames make the counts exact; the relationship is what matters, not
+  // the wall-clock value of dt.
+  const auto framesToForm = [](float speed, float from, float to) {
+    float formed = from;
+    int frames = 0;
+    while (formed != to) {
+      formed = advanceFormMorph(formed, to, kDt, speed);
+      ++frames;
+      REQUIRE(frames < 100000);
+    }
+    return frames;
+  };
+
+  const int base = framesToForm(1.0f, 0.0f, 1.0f);
+  CHECK(base == 2);
+  CHECK(framesToForm(2.0f, 0.0f, 1.0f) == 1);     // twice the speed, half the frames
+  CHECK(framesToForm(0.5f, 0.0f, 1.0f) == 4);     // half the speed, twice the frames
+  CHECK(framesToForm(4.0f, 0.0f, 1.0f) == 1);     // the ramp is clamped on the target
+  CHECK(framesToForm(1.0f, 1.0f, 0.0f) == base);  // the way back paces the same
+
+  // The per-frame step scales proportionally with the speed. A short frame keeps every
+  // step below the target so no clamp is in play, isolating the rate itself.
+  constexpr float kStepDt = 0.05f;
+  for (float speed : {0.25f, 0.5f, 1.0f, 2.0f, 4.0f}) {
+    CAPTURE(speed);
+    const float step = advanceFormMorph(0.0f, 1.0f, kStepDt, speed);
+    CHECK(step == kStepDt * kFormMorphRate * speed);
+  }
+
+  // At 1.0 it is the old inline math (`dt * 2`, snapped on the target) frame for frame.
+  constexpr float kRealDt = 1.0f / 60.0f;
+  float got = 0.0f;
+  float want = 0.0f;
+  for (int i = 0; i < 200; ++i) {
+    got = advanceFormMorph(got, 1.0f, kRealDt, 1.0f);
+    want = std::min(1.0f, want + kRealDt * 2.0f);
+    REQUIRE(got == want);
+  }
+
+  // Settled stays settled, in either direction.
+  CHECK(advanceFormMorph(1.0f, 1.0f, kRealDt, 1.0f) == 1.0f);
+  CHECK(advanceFormMorph(0.0f, 0.0f, kRealDt, 1.0f) == 0.0f);
 }
 
 #endif  // CB_HAVE_IMGUI

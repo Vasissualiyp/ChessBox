@@ -331,6 +331,7 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
     shell->settings().geometryWidth = 1.5f;
     shell->settings().geometryThickness = 1.25f;
     shell->settings().kleinShift = 3.0f;
+    shell->settings().geometryFormSpeed = 2.5f;
     shell->settings().frameCap = 60;
     REQUIRE(shell->startGame("klein").has_value());  // also records the last variant
     shell->applySettings();
@@ -354,6 +355,7 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
     REQUIRE(shell->settings().geometryWidth == 1.5f);
     REQUIRE(shell->settings().geometryThickness == 1.25f);
     REQUIRE(shell->settings().kleinShift == 3.0f);
+    REQUIRE(shell->settings().geometryFormSpeed == 2.5f);
     REQUIRE(shell->settings().frameCap == 60);
   }
 }
@@ -388,6 +390,7 @@ TEST_CASE("settings are clamped to usable values", "[unit][app]") {
   s.geometryWidth = 99.0f;
   s.geometryThickness = 99.0f;
   s.kleinShift = 99.0f;
+  s.geometryFormSpeed = 0.0f;
   s.animationSpeed = 0.001f;
   s.lastVariant.clear();
   s.sanitize();
@@ -399,6 +402,8 @@ TEST_CASE("settings are clamped to usable values", "[unit][app]") {
   REQUIRE(s.geometryWidth <= 4.0f);
   REQUIRE(s.geometryThickness <= 3.0f);
   REQUIRE(s.kleinShift <= 16.0f);
+  // A zero would freeze the morph mid-roll with no way back, so it clamps up (M18.6).
+  REQUIRE(s.geometryFormSpeed >= 0.25f);
   REQUIRE(s.animationSpeed >= 0.05f);
   REQUIRE(s.shapeFollow == "chase");
   REQUIRE_FALSE(s.lastVariant.empty());

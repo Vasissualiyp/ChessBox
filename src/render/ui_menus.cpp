@@ -1008,6 +1008,15 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::TextUnformatted("how far the camera leads your own orbit while a move plays");
   ImGui::PopStyleColor();
   ImGui::PopFont();
+  // The SHAPE button's own flat<->shape roll (M18.6 revision), the same kind of control
+  // as Morph speed above but for the board's morph rather than the follow choreography's.
+  // Outside the move-camera gate: SHAPE works whether or not a camera follows a move.
+  ImGui::SliderFloat("SHAPE morph speed", &s.geometryFormSpeed, 0.25f, 2.5f, "%.2fx");
+  ImGui::PushFont(small);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::TextUnformatted("how fast SHAPE rolls the board between flat and its shape");
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
   ImGui::Dummy(ImVec2(0, px(8)));
 
   heading("ANIMATION", t, small);
@@ -1138,6 +1147,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       before.followStrength != s.followStrength ||
       before.followElevationDeg != s.followElevationDeg ||
       before.shapeMorphSpeed != s.shapeMorphSpeed ||
+      before.geometryFormSpeed != s.geometryFormSpeed ||
       before.followUpright != s.followUpright ||
       before.geometryAlign != s.geometryAlign || before.shapeFollow != s.shapeFollow ||
       before.confirmMoves != s.confirmMoves || before.autoPromoteTo != s.autoPromoteTo ||

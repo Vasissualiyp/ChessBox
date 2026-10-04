@@ -386,8 +386,15 @@ float morphFollowBlend(float dt) noexcept {
   return std::clamp(dt * kMorphFollowRate, 0.0f, 1.0f);
 }
 
-bool easeMorphFraming(app::Session& session, const BoardOptions& options, SurfacePose pose,
-                      float k) {
+float advanceFormMorph(float formed, float target, float dt, float formSpeed) noexcept {
+  const float step = dt * kFormMorphRate * formSpeed;
+  if (formed < target) return std::min(target, formed + step);
+  if (formed > target) return std::max(target, formed - step);
+  return formed;
+}
+
+bool easeMorphFraming(app::Session& session, const BoardOptions& options,
+                      SurfacePose pose, float k) {
   if (!options.surface) return false;
   const PlaySurface surf = PlaySurface::build(session.variant(), pose);
   if (surf.empty()) return false;
