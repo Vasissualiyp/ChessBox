@@ -2216,3 +2216,43 @@ alternative.
 - Not a general "always track the subject" camera mode - scoped to the morph specifically,
   while `geometryFormed` is actively easing. The settled shape (and ordinary orbiting) keep
   today's behaviour.
+
+### Status: M17.24 built (2026-10-04, opencode + Claude)
+
+- **`Session::easeFrameOn(bounds, headroom, k)`** (new, `src/app/session.{hpp,cpp}`) blends
+  `camera_.target`/`camera_.distance` toward `OrbitCamera::frame(bounds, ...)` by `k` in
+  [0,1], touching nothing else - the same "angle stays the player's" contract `frameOn`
+  already promises, just eased instead of committed outright.
+- **`render::easeMorphFraming`/`morphFollowBlend`** (new, `src/render/play_surface.{hpp,
+  cpp}`) rebuild the `PlaySurface` at the *current* pose and call `easeFrameOn` with a
+  per-frame blend (`dt * kMorphFollowRate`, `kMorphFollowRate = 30`, capped at 1).
+- **The interactive loop** (`src/gui/main.cpp`) tracks whether the `geometryFormed` ramp is
+  in flight this frame and whether this is the frame it settles on; while in flight it calls
+  `easeMorphFraming` every frame, passing `1.0` (an exact snap) on the settling frame so the
+  endpoint lands precisely rather than asymptotically. The one-shot `frameBoard` calls
+  elsewhere (variant load, save/load, the toggle instant itself) are untouched - they still
+  set the *initial* target this now follows.
+- **Tests.** `tests/render/test_play_surface.cpp` adds "the morph keeps the camera on the
+  shape as its bounds move": sweeps a full flat-to-formed roll, asserts the eased camera
+  stays within 0.3 units of the ideal frame at every step and never jumps more than 0.35
+  units frame-to-frame (continuity), that the morph's own subject genuinely travels enough
+  to matter (`shapeExcursion > 0.5`, measured at 0.80 - a camera that ignored this would be
+  visibly off by the end), and that it lands exactly on the formed frame
+  (`dist(prev, formedCentre) < 1e-4f`) and is a no-op once settled. 96 assertions, green.
+  `tools/test.sh --build render`: 32/32 green.
+- **Verification gap, stated plainly.** The implementer's own planned red/green check (break
+  the fix, confirm the new test fails, restore it) was interrupted by a sandboxed `/tmp`
+  write it never retried inside the repo - the fix and its test were already complete and
+  green at that point, so nothing was lost, but that specific confirmation step did not
+  finish. Claude independently re-verified by rebuilding and re-running the full `render`
+  suite (32/32) and reading the diff directly against the spec (the design matches exactly:
+  continuous re-ease, snap on settle, angle preserved). **What could not be verified: the
+  live interactive morph itself.** `--shot`/`--clip --formed X` render through `captureFrame`,
+  a separate one-shot path this fix does not touch (confirmed empirically - a `--formed`
+  sweep via `--shot` shows the same drift before and after, because that path was never the
+  one framing the live toggle); there is no synthetic-input tool available in this
+  environment to script a live SHAPE click/`G`-press and capture the running window over
+  time, and `--script`/a pre-set `geometry_view` setting do not reach the interactive
+  per-frame loop's morph trigger either. The fix is believed correct on the strength of the
+  code review and the unit test's teeth, not on a watched recording - **please confirm it
+  looks right the next time you toggle SHAPE in play.**

@@ -382,6 +382,20 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
   return s;
 }
 
+float morphFollowBlend(float dt) noexcept {
+  return std::clamp(dt * kMorphFollowRate, 0.0f, 1.0f);
+}
+
+bool easeMorphFraming(app::Session& session, const BoardOptions& options, SurfacePose pose,
+                      float k) {
+  if (!options.surface) return false;
+  const PlaySurface surf = PlaySurface::build(session.variant(), pose);
+  if (surf.empty()) return false;
+  // `bounds()` already pads for the pieces, so headroom stays 0 (M17.11).
+  session.easeFrameOn(surf.bounds(), 0.0f, k);
+  return true;
+}
+
 void frameGeometryCamera(app::Session& session, const BoardOptions& options,
                          SurfacePose pose) {
   if (options.surface) {

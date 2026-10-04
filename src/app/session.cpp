@@ -337,6 +337,17 @@ void Session::frameOn(const view::Bounds& b, float headroom) {
   applyViewMode();
 }
 
+void Session::easeFrameOn(const view::Bounds& b, float headroom, float k) {
+  const view::OrbitCamera want = view::OrbitCamera::frame(b, boardAspect_, headroom);
+  const float t = std::clamp(k, 0.0f, 1.0f);
+  // Only the frame moves toward the box; the angle, roll and field of view stay the
+  // player's, exactly as `frameOn` promises.
+  camera_.target = camera_.target + (want.target - camera_.target) * t;
+  camera_.distance = camera_.distance + (want.distance - camera_.distance) * t;
+  framedOnce_ = true;
+  applyViewMode();
+}
+
 const Move* Session::findMove(CellId from, CellId to) const {
   const Move* best = nullptr;
   for (const Move& m : game_->legalMoves()) {

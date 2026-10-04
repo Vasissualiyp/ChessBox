@@ -1940,4 +1940,69 @@ TEST_CASE("the flat-to-shape morph is continuous and never degenerate", "[render
   }
 }
 
+TEST_CASE("the morph keeps the camera on the shape as its bounds move", "[render]") {
+  // M17.24. `frameBoard` commits the camera's frame once, at the instant SHAPE flips -
+  // which is the *flat* end of the morph. The shape's own bounds move as it rolls up, so
+  // without re-framing the board drifts off-centre. This drives the interactive loop's own
+  // path: `geometryFormed` climbs by `dt * 2` a frame and the camera eases toward the
+  // current surface's frame with the same blend the GUI uses.
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("torus"));
+  auto created = app::Session::create(test::loadVariant("torus"));
+  REQUIRE(created.has_value());
+  app::Session& session = **created;
+  BoardOptions opts;
+  opts.surface = true;
+
+  const auto centreOf = [](const view::Bounds& b) {
+    return view::Vec3{b.centerX(), b.centerY(), b.centerZ()};
+  };
+  SurfacePose flat;
+  flat.formed = 0.0f;
+  SurfacePose one;
+  one.formed = 1.0f;
+  const view::Vec3 flatCentre = centreOf(PlaySurface::build(v, flat).bounds());
+  const view::Vec3 formedCentre = centreOf(PlaySurface::build(v, one).bounds());
+
+  // The toggle instant: the one-shot frame, on the flat end of the morph.
+  frameGeometryCamera(session, opts, flat);
+
+  constexpr float kDt = 1.0f / 60.0f;
+  float formed = 0.0f;
+  float worstTrack = 0.0f;
+  float shapeExcursion = 0.0f;
+  view::Vec3 prev = session.playerCamera().target;
+  for (int i = 0; i < 400 && formed < 1.0f; ++i) {
+    formed = std::min(1.0f, formed + kDt * 2.0f);
+    SurfacePose pose;
+    pose.formed = formed;
+    const bool settling = formed >= 1.0f;
+    const bool moved =
+        easeMorphFraming(session, opts, pose, settling ? 1.0f : morphFollowBlend(kDt));
+    REQUIRE(moved);
+    const view::Vec3 want = centreOf(PlaySurface::build(v, pose).bounds());
+    const view::Vec3 got = session.playerCamera().target;
+    INFO("formed = " << formed);
+    // The camera's look-at is on the shape's own centre throughout, not stuck at the flat
+    // end's frame while the shape rolls away from it (the one-shot design's failure).
+    CHECK(dist(got, want) < 0.3f);
+    // And it is continuous: no frame teleports the aim.
+    CHECK(dist(got, prev) < 0.35f);
+    worstTrack = std::max(worstTrack, dist(got, want));
+    shapeExcursion = std::max(shapeExcursion, dist(want, flatCentre));
+    prev = got;
+  }
+  INFO("worstTrack = " << worstTrack << " shapeExcursion = " << shapeExcursion);
+  CHECK(formed >= 1.0f);
+  // The test has teeth: the shape's own centre really does wander, so a camera left on
+  // the flat frame would be visibly off by the end of the roll.
+  CHECK(shapeExcursion > 0.5f);
+  // The morph completes exactly on the fully-formed shape's frame.
+  CHECK(dist(prev, formedCentre) < 1e-4f);
+
+  // The endpoints do not move: re-running the follow at a settled pose is a no-op.
+  const view::Vec3 before = session.playerCamera().target;
+  CHECK(easeMorphFraming(session, opts, one, 1.0f));
+  CHECK(dist(session.playerCamera().target, before) < 1e-5f);
+}
+
 #endif  // CB_HAVE_IMGUI

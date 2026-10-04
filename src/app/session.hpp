@@ -153,6 +153,13 @@ class Session {
   /// centre instead of being lifted off it (M17.11).
   void frameOn(const view::Bounds& b, float headroom = 1.4f);
 
+  /// Ease the camera's target and distance toward the framing of `b` by `k` in [0,1],
+  /// keeping the player's own view angle. Unlike `frameOn`, which commits a new frame
+  /// outright, this follows a box that is still moving - the flat/shape morph's bounds
+  /// change every frame while it rolls, so a single snapshot lets the board drift
+  /// off-centre (M17.24).
+  void easeFrameOn(const view::Bounds& b, float headroom, float k);
+
   /// Look straight down with no perspective, for a machine that would rather not draw
   /// the scene in three dimensions - and for a player who simply prefers a diagram.
   void setFlatView(bool flat);

@@ -27,6 +27,25 @@ class PlaySurface;
 void frameGeometryCamera(app::Session& session, const BoardOptions& options,
                          SurfacePose pose);
 
+/// The per-frame blend the interactive loop uses to follow the shape as it morphs
+/// (M17.24): a linear ramp in `dt`, capped at 1 so a long frame snaps rather than
+/// overshooting. Fast enough that the camera stays on the shape's moving centre, slow
+/// enough that the follow is an ease and not a teleport.
+inline constexpr float kMorphFollowRate = 30.0f;
+[[nodiscard]] float morphFollowBlend(float dt) noexcept;
+
+/// Ease the camera toward the geometry view's *current* frame while the flat/shape morph
+/// is in flight (M17.24).
+///
+/// `frameGeometryCamera` commits the frame once, at the instant SHAPE flips - the flat end
+/// of the morph. The shape's own bounds move as it rolls up, so a camera left on that
+/// first snapshot lets the board drift off-centre. This rebuilds the surface at the
+/// current `pose` and eases the camera's target and distance toward it by `k`, keeping the
+/// player's own viewing angle (a frame correction, not an angle change - the same contract
+/// as `frameOn`). Returns true when there was a surface to frame.
+bool easeMorphFraming(app::Session& session, const BoardOptions& options, SurfacePose pose,
+                      float k);
+
 /// Where the travelling piece sits on `surf` at progress `t`, and which way it stands. A
 /// leap arcs outward along the blended normal; a glide walks the seats the engine's own
 /// route passes through, in order, with no seam special case - on the surface a glued

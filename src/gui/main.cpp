@@ -1271,6 +1271,10 @@ int main(int argc, char** argv) {
       renderer->setBlur(std::min(steppedBack, 1.0f));
     }
 
+    // Whether the flat<->shape morph is in flight this frame, and whether this is the
+    // frame it settles on. The camera follow below uses both (M17.24).
+    bool morphInFlight = false;
+    bool morphSettling = false;
     // Ease the eversion towards the INVERT button's target, over about half a second. The
     // ramp lives here and not in the pose, so the pose stays a pure function of its
     // number and a still stays reproducible (M17.7).
@@ -1288,11 +1292,15 @@ int main(int argc, char** argv) {
       // while it is not yet flat, so toggling SHAPE off morphs back to the ordinary board
       // instead of snapping - see `optionsFor`.
       const float formTarget = st.geometryView ? 1.0f : 0.0f;
+      const bool wasMorphing = st.geometryFormed != formTarget;
       if (st.geometryFormed < formTarget) {
         st.geometryFormed = std::min(formTarget, st.geometryFormed + step);
       } else if (st.geometryFormed > formTarget) {
         st.geometryFormed = std::max(formTarget, st.geometryFormed - step);
       }
+      const bool nowMorphing = st.geometryFormed != formTarget;
+      morphInFlight = wasMorphing || nowMorphing;
+      morphSettling = wasMorphing && !nowMorphing;
     }
 
     // The shape-follow choreography (M17.19): align, approach, travel, return. It drives
@@ -1390,6 +1398,20 @@ int main(int argc, char** argv) {
       if (boardRect.valid()) {
         shell->session()->setBoardAspect(boardRect.width / boardRect.height);
       }
+#ifdef CB_HAVE_IMGUI
+      // The board's bounds are a continuous function of `geometryFormed` while the morph
+      // is in flight, so the one-shot frame at the SHAPE instant is not enough: ease the
+      // camera's frame toward where the shape is *now*, every frame, and snap on the frame
+      // it settles so the endpoints land exactly (M17.24). This is a frame correction only
+      // - the player's own angle is kept.
+      if (morphInFlight) {
+        const app::Settings& st = shell->settings();
+        render::easeMorphFraming(
+            *shell->session(), optionsFor(*shell),
+            poseFrom(st, shell->session()->variant()),
+            morphSettling ? 1.0f : render::morphFollowBlend(dt));
+      }
+#endif
       syncMarks(*renderer, *shell->session());
       // The choreography drives the animation's own progress while it is running (the
       // piece is pinned through the lead-in and the return); advancing it here too would
