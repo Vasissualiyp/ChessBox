@@ -479,6 +479,80 @@ SurfaceMoveSample surfaceMoveSample(const view::MovePath& path, const PlaySurfac
   return out;
 }
 
+view::Vec3 chaseEyeDirection(const view::Vec3& normal, const view::Vec3& travel,
+                             float lift) {
+  // The same a/b/c construction `surfaceChaseCamera` draws with, and the one the antclip
+  // search scores against (M17.20): `a` the direction of motion, `b` the piece's upright
+  // (its surface normal) squared to `a`, and `c = -a cos(theta) + b sin(theta)` the
+  // back-and-up vector, i.e. the direction from the piece to the eye.
+  view::Vec3 a = travel;
+  if (view::length(a) < 1e-5f) a = view::Vec3{0.0f, -1.0f, 0.0f};  // any direction
+  a = view::normalize(a);
+  view::Vec3 b = normal - a * view::dot(normal, a);
+  if (view::length(b) < 1e-5f) b = view::Vec3{0.0f, 0.0f, 1.0f};  // degenerate fallback
+  b = view::normalize(b);
+  const float cosT = 1.0f / std::sqrt(1.0f + lift * lift);
+  const float sinT = lift * cosT;
+  return view::normalize(a * -cosT + b * sinT);
+}
+
+namespace {
+/// The direction (not normalised) the chase camera travels at progress `t` along `path`
+/// on `surf`: the windowed finite difference of `surfaceMoveSample`, or the chord for a
+/// leap. Pure in `t`, and the one place the camera's own travel comes from.
+view::Vec3 chaseTravel(const view::MovePath& path, const PlaySurface& surf, float t) {
+  t = std::clamp(t, 0.0f, 1.0f);
+  const SurfaceMoveSample here = surfaceMoveSample(path, surf, t);
+  view::Vec3 travel;
+  if (path.leap) {
+    // A leap's sampled position reverses at its apex, so its own difference turns the
+    // camera round mid-air; a leap has one honest direction - the chord it crosses.
+    const SurfaceSeat* a = seatOf(surf, path.from);
+    const SurfaceSeat* b = seatOf(surf, path.to);
+    travel = (a != nullptr && b != nullptr) ? b->centre - a->centre : here.normal;
+  } else {
+    // A window in `t`, not a single step: the vector between the samples either side is
+    // continuous through a cell corner, where `sample(t + eps) - sample(t)` swivels. The
+    // window shrinks smoothly at the ends because the samples clamp there, so the camera
+    // still settles rather than snapping.
+    constexpr float kWindow = 0.10f;
+    const SurfaceMoveSample behind =
+        surfaceMoveSample(path, surf, std::max(0.0f, t - kWindow));
+    const SurfaceMoveSample ahead =
+        surfaceMoveSample(path, surf, std::min(1.0f, t + kWindow));
+    travel = ahead.position - behind.position;
+  }
+  if (view::length(travel) < 1e-5f)
+    travel = here.normal;  // any tangent; the piece stands
+  return travel;
+}
+}  // namespace
+
+float clearEyeDistance(const PlaySurface& surf, const view::Vec3& target,
+                       const view::Vec3& direction, float maxDistance,
+                       float minDistance) {
+  constexpr float kEps = 0.02f;
+  view::Vec3 dir = direction;
+  if (view::length(dir) < 1e-6f) dir = view::Vec3{0.0f, 0.0f, 1.0f};
+  dir = view::normalize(dir);
+  const float far = std::max(minDistance, maxDistance);
+  if (!surf.blocked(target + dir * far, target, kEps)) return far;
+  // The nominal distance is blocked, so bisect for the largest still-unblocked one. Eight
+  // steps resolve a cell's worth of distance, and `lo` stays a known-clear distance.
+  float lo = minDistance;
+  float hi = far;
+  if (surf.blocked(target + dir * lo, target, kEps)) return lo;
+  for (int i = 0; i < 8; ++i) {
+    const float mid = 0.5f * (lo + hi);
+    if (surf.blocked(target + dir * mid, target, kEps)) {
+      hi = mid;
+    } else {
+      lo = mid;
+    }
+  }
+  return lo;
+}
+
 view::OrbitCamera surfaceChaseCamera(const SurfaceMoveSample& piece,
                                      const view::Vec3& travel, float distance,
                                      bool upright, float lift) {
@@ -504,9 +578,7 @@ view::OrbitCamera surfaceChaseCamera(const SurfaceMoveSample& piece,
   if (view::length(b) < 1e-5f) b = view::Vec3{0.0f, 0.0f, 1.0f};  // degenerate fallback
   b = view::normalize(b);
   const view::Vec3 n = view::normalize(view::cross(a, b));
-  const float cosT = 1.0f / std::sqrt(1.0f + lift * lift);
-  const float sinT = lift * cosT;
-  const view::Vec3 c = view::normalize(a * -cosT + b * sinT);
+  const view::Vec3 c = chaseEyeDirection(piece.normal, travel, lift);
 
   view::OrbitCamera cam;
   cam.target = piece.position;
@@ -540,28 +612,13 @@ view::OrbitCamera surfaceFollowCamera(const view::MovePath& path, const PlaySurf
                                       float t, float distance, bool upright, float lift) {
   t = std::clamp(t, 0.0f, 1.0f);
   const SurfaceMoveSample here = surfaceMoveSample(path, surf, t);
-  view::Vec3 travel;
-  if (path.leap) {
-    // A leap's sampled position reverses at its apex, so its own difference turns the
-    // camera round mid-air; a leap has one honest direction - the chord it crosses.
-    const SurfaceSeat* a = seatOf(surf, path.from);
-    const SurfaceSeat* b = seatOf(surf, path.to);
-    travel = (a != nullptr && b != nullptr) ? b->centre - a->centre : here.normal;
-  } else {
-    // A window in `t`, not a single step: the vector between the samples either side is
-    // continuous through a cell corner, where `sample(t + eps) - sample(t)` swivels. The
-    // window shrinks smoothly at the ends because the samples clamp there, so the camera
-    // still settles rather than snapping.
-    constexpr float kWindow = 0.10f;
-    const SurfaceMoveSample behind =
-        surfaceMoveSample(path, surf, std::max(0.0f, t - kWindow));
-    const SurfaceMoveSample ahead =
-        surfaceMoveSample(path, surf, std::min(1.0f, t + kWindow));
-    travel = ahead.position - behind.position;
-  }
-  if (view::length(travel) < 1e-5f)
-    travel = here.normal;  // any tangent; the piece stands
-  return surfaceChaseCamera(here, travel, distance, upright, lift);
+  const view::Vec3 travel = chaseTravel(path, surf, t);
+  // The eye the camera would actually sit at must not be behind the shape: clamp the
+  // requested distance to the largest one along the shared eye direction that is clear of
+  // `surf` (M17.20). `surfaceChaseCamera` itself stays mesh-free and unit-tested.
+  const view::Vec3 dir = chaseEyeDirection(here.normal, travel, lift);
+  const float clamped = clearEyeDistance(surf, here.position, dir, distance);
+  return surfaceChaseCamera(here, travel, clamped, upright, lift);
 }
 
 bool followClips(const view::MovePath& path, const PlaySurface& surf, float t,
@@ -602,22 +659,38 @@ const SurfaceSeat* seatFor(const PlaySurface& s, CellId target) {
   return nullptr;
 }
 
-/// Sweep slide offsets for the one that best presents `target` to a camera whose eye
-/// direction `toEyeFor` gives for the candidate's own outward normal. An occluded
-/// candidate is scored below every visible one, then the piece's `facing` (how squarely
-/// it looks at the camera) breaks the tie, so the shape turns the piece round rather than
-/// merely leaving it in front of a wall. Only a closed ring has an inner/outer side to
-/// turn, so an open tube or ribbon has nothing to search.
+/// One candidate's score: how far the eye can sit along that candidate's own chase
+/// direction before the shape blocks it, and how squarely the target faces that eye.
+/// `achieved` is the primary key, `facing` the tie-break (M17.20).
+struct SlideScore {
+  float achieved{-1.0f};
+  float facing{-1e9f};
+};
+
+/// True when `a` beats `b`: the least-clamped candidate wins, facing breaking a tie.
+[[nodiscard]] inline bool betterSlideScore(const SlideScore& a, const SlideScore& b) {
+  constexpr float kTie = 1e-4f;
+  return a.achieved > b.achieved + kTie ||
+         (std::abs(a.achieved - b.achieved) <= kTie && a.facing > b.facing);
+}
+
+/// Sweep slide offsets for the one whose score is best. `probeToEye` is a cheap ordering
+/// of the grid from a candidate's raw normal; `score` is the real per-candidate score, so
+/// a caller whose camera depends on the built pose (the chase) can score the very camera
+/// it would draw. Only a closed ring has an inner/outer side to turn, so an open tube or
+/// ribbon has nothing to search.
 ///
-/// On an orientable ring the candidates are first ranked by a single-cell probe and the
-/// full surface is built only until one comes back unoccluded. An unoccluded candidate
-/// always outscores an occluded one, so that first unoccluded candidate *is* the old
-/// argmax - the search is unchanged, at a couple of builds instead of `stepsU * stepsV`.
-/// A non-orientable shape keeps the exact per-candidate build, because a lone raw normal
-/// is not the walked field it draws with.
-template <typename ToEye>
+/// On an orientable ring the candidates are first ranked by a single-cell probe (whose
+/// normal is the walked field, since the walk only fixes a sign) and the full surface is
+/// built in facing order only until one is fully clear at the nominal distance - the
+/// first such candidate is the argmax, at a couple of builds instead of `stepsU *
+/// stepsV`. If none is clear, the whole grid is scored so the least-clamped rotation
+/// wins. A non-orientable shape keeps the exact per-candidate build, because a lone raw
+/// normal is not the walked field it draws with.
+template <typename Probe, typename ScoreFn>
 SlideOffset searchSlide(const VariantSpec& v, CellId target, float eyeDistance,
-                        ToEye toEyeFor) {
+                        Probe probeToEye, ScoreFn score,
+                        const SlideOffset* hint = nullptr) {
   if (!PlaySurface::slidesAlongRanks(v)) return {};
   const int nx = static_cast<int>(v.dims.extent(0));
   const int nz = static_cast<int>(v.dims.extent(1));
@@ -631,6 +704,18 @@ SlideOffset searchSlide(const VariantSpec& v, CellId target, float eyeDistance,
   // axis stayed near one, so only V is offered there.
   const bool orientable = v.geom.isOrientable();
   constexpr int kSteps = 12;
+  constexpr float kTie = 1e-4f;
+  // Hysteresis (M17.20): the previous frame's offset wins outright while it is still
+  // basically clear, so a piece's cell-to-cell motion does not re-target a different
+  // rotation purely because the global argmax ticked. Without this the search is a
+  // stateless argmax and the shape jitters.
+  if (hint != nullptr) {
+    SurfacePose hp;
+    hp.slideU = hint->u;
+    hp.slideV = hint->v;
+    const SlideScore got = score(PlaySurface::build(v, hp), *hint);
+    if (got.achieved >= eyeDistance * 0.9f) return *hint;
+  }
 
   if (orientable) {
     const app::SurfaceKind kind = app::overtureSignature(v).surface;
@@ -653,7 +738,7 @@ SlideOffset searchSlide(const VariantSpec& v, CellId target, float eyeDistance,
         const float su = wrapSlide(u, periodU) / static_cast<float>(nx);
         const float sv = wrapSlide(vv, periodV) / static_cast<float>(nz);
         const view::Vec3 n = seatNormalProbe(kind, base, nx, nz, su, sv, f, r);
-        view::Vec3 toEye = toEyeFor(n);
+        view::Vec3 toEye = probeToEye(n);
         toEye =
             view::length(toEye) > 1e-6f ? view::normalize(toEye) : view::Vec3{0, 0, 1};
         cands.push_back({view::dot(n, toEye), u, vv});
@@ -661,42 +746,40 @@ SlideOffset searchSlide(const VariantSpec& v, CellId target, float eyeDistance,
     }
     std::sort(cands.begin(), cands.end(),
               [](const Cand& a, const Cand& b) { return a.facing > b.facing; });
+    SlideOffset best{};
+    SlideScore bestScore;
+    bool have = false;
     for (const Cand& c : cands) {
       SurfacePose pose;
       pose.slideU = c.u;
       pose.slideV = c.v;
       const PlaySurface s = PlaySurface::build(v, pose);
-      const SurfaceSeat* seat = seatFor(s, target);
-      if (seat == nullptr) continue;
-      view::Vec3 toEye = toEyeFor(seat->normal);
-      toEye = view::length(toEye) > 1e-6f ? view::normalize(toEye) : view::Vec3{0, 0, 1};
-      const view::Vec3 eye = seat->centre + toEye * eyeDistance;
-      if (!s.blocked(eye, seat->centre, 0.02f)) return {c.u, c.v};
+      const SlideScore got = score(s, {c.u, c.v});
+      if (!have || betterSlideScore(got, bestScore)) {
+        bestScore = got;
+        best = {c.u, c.v};
+        have = true;
+      }
+      // Fully clear, reached in facing order: no later candidate can face better.
+      if (got.achieved >= eyeDistance - kTie) break;
     }
-    return {cands.front().u, cands.front().v};
+    return best;
   }
 
   SlideOffset best{};
-  float bestScore = -1e9f;
+  SlideScore bestScore;
+  bool have = false;
   for (int iu = 0; iu < 1; ++iu) {
     for (int iv = 0; iv < kSteps; ++iv) {
       SurfacePose pose;
       pose.slideU = periodU * static_cast<float>(iu) / static_cast<float>(kSteps);
       pose.slideV = periodV * static_cast<float>(iv) / static_cast<float>(kSteps);
       const PlaySurface s = PlaySurface::build(v, pose);
-      const SurfaceSeat* seat = seatFor(s, target);
-      if (seat == nullptr) continue;
-      view::Vec3 toEye = toEyeFor(seat->normal);
-      toEye = view::length(toEye) > 1e-6f ? view::normalize(toEye) : view::Vec3{0, 0, 1};
-      // The eye the camera would sit at for this candidate, and whether the shape comes
-      // between it and the piece.
-      const view::Vec3 eye = seat->centre + toEye * eyeDistance;
-      const bool occluded = s.blocked(eye, seat->centre, 0.02f);
-      const float facing = view::dot(seat->normal, toEye);
-      const float score = (occluded ? -10.0f : 0.0f) + facing;
-      if (score > bestScore) {
-        bestScore = score;
+      const SlideScore got = score(s, {pose.slideU, pose.slideV});
+      if (!have || betterSlideScore(got, bestScore)) {
+        bestScore = got;
         best = {pose.slideU, pose.slideV};
+        have = true;
       }
     }
   }
@@ -710,11 +793,49 @@ SlideOffset alignSlideU(const VariantSpec& v, CellId target, const view::Vec3& t
   view::Vec3 fwd = travel;
   if (view::length(fwd) < 1e-5f) fwd = view::Vec3{0.0f, -1.0f, 0.0f};
   fwd = view::normalize(fwd);
-  // Where the chase camera would sit for each candidate: behind the piece along the
-  // travel and above the surface by the same elevation the camera uses.
-  return searchSlide(v, target, eyeDistance, [&](const view::Vec3& normal) {
-    return fwd * -1.0f + normal * lift;
-  });
+  // Where the chase camera would sit for each candidate: the same shared eye direction
+  // the camera itself draws with (M17.20), so the search can never answer a different
+  // question.
+  const auto toEye = [&](const view::Vec3& normal) {
+    return chaseEyeDirection(normal, fwd, lift);
+  };
+  const auto score = [&](const PlaySurface& s, const SlideOffset&) {
+    SlideScore out;
+    const SurfaceSeat* seat = seatFor(s, target);
+    if (seat == nullptr) return out;
+    view::Vec3 dir = chaseEyeDirection(seat->normal, fwd, lift);
+    dir = view::length(dir) > 1e-6f ? view::normalize(dir) : view::Vec3{0, 0, 1};
+    out.achieved = clearEyeDistance(s, seat->centre, dir, eyeDistance);
+    out.facing = view::dot(seat->normal, dir);
+    return out;
+  };
+  return searchSlide(v, target, eyeDistance, toEye, score);
+}
+
+SlideOffset alignSlideU(const VariantSpec& v, CellId target, const view::MovePath& path,
+                        float t, float eyeDistance, float lift, const SlideOffset* hint) {
+  // The chase camera's own travel depends on the pose the board is turned to, so the
+  // search must score each candidate against *that candidate's* travel - not one vector
+  // read off the pose it started from. And the camera draws the moving *sample*, not the
+  // target's seat centre, so the score is taken at the sample too. Otherwise a rotation
+  // the search calls clear can still put the camera looking through the tube (M17.20).
+  // The cheap probe only orders the grid (from a representative travel); every
+  // candidate's real score is rebuilt.
+  const PlaySurface unposed = PlaySurface::build(v);
+  const view::Vec3 probeTravel = chaseTravel(path, unposed, t);
+  const auto probeToEye = [&](const view::Vec3& normal) {
+    return chaseEyeDirection(normal, probeTravel, lift);
+  };
+  const auto score = [&](const PlaySurface& s, const SlideOffset&) {
+    SlideScore out;
+    const SurfaceMoveSample sample = surfaceMoveSample(path, s, t);
+    view::Vec3 dir = chaseEyeDirection(sample.normal, chaseTravel(path, s, t), lift);
+    dir = view::length(dir) > 1e-6f ? view::normalize(dir) : view::Vec3{0, 0, 1};
+    out.achieved = clearEyeDistance(s, sample.position, dir, eyeDistance);
+    out.facing = view::dot(sample.normal, dir);
+    return out;
+  };
+  return searchSlide(v, target, eyeDistance, probeToEye, score, hint);
 }
 
 SlideOffset alignSlideToFace(const VariantSpec& v, CellId target,
@@ -724,7 +845,16 @@ SlideOffset alignSlideToFace(const VariantSpec& v, CellId target,
   toCam = view::normalize(toCam);
   // The camera angle is fixed (the turntable), so the eye direction is the same for
   // every candidate; only the seat moves under it.
-  return searchSlide(v, target, eyeDistance, [&](const view::Vec3&) { return toCam; });
+  return searchSlide(
+      v, target, eyeDistance, [&](const view::Vec3&) { return toCam; },
+      [&](const PlaySurface& s, const SlideOffset&) {
+        SlideScore out;
+        const SurfaceSeat* seat = seatFor(s, target);
+        if (seat == nullptr) return out;
+        out.achieved = clearEyeDistance(s, seat->centre, toCam, eyeDistance);
+        out.facing = view::dot(seat->normal, toCam);
+        return out;
+      });
 }
 
 void PlaySurface::buildStacked(const VariantSpec& v) {

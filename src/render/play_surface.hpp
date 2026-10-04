@@ -79,6 +79,22 @@ struct ShapeBeat {
 /// no setting: 30 degrees. `Settings::followElevationDeg` overrides it.
 inline constexpr float kDefaultFollowLift = 0.57735027f;
 
+/// The chase camera's eye direction from the piece: behind the travel direction, lifted
+/// toward the surface normal's component perpendicular to that travel, by `lift` (a
+/// tangent). Shared by `surfaceChaseCamera` and the anti-clip search (`alignSlideU`) so
+/// the search can never test a different camera than the one drawn (M17.20).
+[[nodiscard]] view::Vec3 chaseEyeDirection(const view::Vec3& normal,
+                                           const view::Vec3& travel, float lift);
+
+/// The largest distance along `direction` from `target` (toward the eye), up to
+/// `maxDistance`, at which the eye is not blocked from `target` by `surf` itself - found
+/// by bisection against `PlaySurface::blocked`. Never returns less than `minDistance`, so
+/// a degenerate position still has a defined place to put the camera rather than one that
+/// is found by trusting a fixed distance that happens to reach past the shape (M17.20).
+[[nodiscard]] float clearEyeDistance(const PlaySurface& surf, const view::Vec3& target,
+                                     const view::Vec3& direction, float maxDistance,
+                                     float minDistance = 0.5f);
+
 /// The slide offsets that best keep `target`'s cell visible to a camera following a move
 /// along `travel`: they maximise the cell's `facing` (its outward normal toward the
 /// camera) and prefer offsets where nothing else on the shape lies between the two.
@@ -89,6 +105,22 @@ inline constexpr float kDefaultFollowLift = 0.57735027f;
 [[nodiscard]] SlideOffset alignSlideU(const VariantSpec& v, CellId target,
                                       const view::Vec3& travel, float eyeDistance,
                                       float lift = kDefaultFollowLift);
+
+/// The chase anti-clip for a followed move at progress `t`: like the overload above, but
+/// the eye direction is scored against each candidate pose's **own** travel, sampled from
+/// `surfaceMoveSample` on the candidate. The camera's travel depends on the pose the
+/// board is turned to (a chase's direction is the piece's motion on the drawn shape), so
+/// a single travel read off the starting pose asks a different question than the camera
+/// answers - which is how a rotation the search called clear still put the camera through
+/// the tube (M17.20). This is the form the front end uses. With `hint`, the previous
+/// frame's offset is scored first and accepted outright when it is still basically clear,
+/// so a piece's cell-to-cell motion does not re-target a different rotation purely
+/// because the global argmax ticked - the hysteresis that stops the shape jittering
+/// (M17.20).
+[[nodiscard]] SlideOffset alignSlideU(const VariantSpec& v, CellId target,
+                                      const view::MovePath& path, float t,
+                                      float eyeDistance, float lift = kDefaultFollowLift,
+                                      const SlideOffset* hint = nullptr);
 
 /// A chase camera for a followed move on the shape (M17.16, revised): the piece centred
 /// and the camera behind it along `travel`. With `upright` the frame is rolled so the

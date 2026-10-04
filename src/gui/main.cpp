@@ -376,11 +376,12 @@ render::SlideOffset alignOffsetFor(const app::Shell& shell, CellId followed) {
         render::PlaySurface::build(session->variant(), poseFrom(st, session->variant()));
     const view::MovePath& path = session->animation().path();
     const float t = session->animation().progress();
-    const view::Vec3 here = render::surfaceMoveSample(path, surf, t).position;
-    const view::Vec3 ahead =
-        render::surfaceMoveSample(path, surf, std::min(1.0f, t + 0.05f)).position;
-    return render::alignSlideU(session->variant(), followed, ahead - here,
-                               chaseEyeDistance(surf), followLift(st));
+    // Hysteresis: feed the offset drawn last frame back in, so the search keeps a
+    // still-clear rotation instead of jumping to whatever marginally wins this frame
+    // (M17.20).
+    const render::SlideOffset hint{st.geometryAlignOffset, st.geometryAlignOffsetV};
+    return render::alignSlideU(session->variant(), followed, path, t,
+                               chaseEyeDistance(surf), followLift(st), &hint);
   }
   const view::OrbitCamera base = session->playerCamera();
   const view::Vec3 toCamera = view::normalize(base.eye() - base.target);

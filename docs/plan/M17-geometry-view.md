@@ -1397,3 +1397,436 @@ the chord midpoint. Orientation still snaps to the nearer route *cell* (the wayp
 a cell).
 
 **Still open:** the M17.5 surface coordinates and seam rails; M17.12's larger limits.
+
+---
+
+## M17.20 Bug fix: the chase anti-clip mismatch (the camera goes into the board, and jitters)
+
+Found 2026-10-03, playing a followed move on `torus`: for most of the move's length the
+camera is a tight, disorienting close-up - a slab of the board fills the frame and the
+pieces sit scattered at its edges - clearing only right at the start and the end. The same
+move under `shapeFollow = "turntable"` stays clean throughout. Separately reported: the
+chase camera is jittery, and a move is sometimes shot from behind a square that is between
+the camera and the piece - i.e. the anti-clip (M17.16/17) is not actually anti-clipping.
+
+**Repro (no display needed):**
+
+```
+chessbox_gui torus --script $'click a1\nclick a5' --follow route --shape-follow chase \
+  --cinema --geometry --clip DIR --frames 12 --t0 0 --t1 1
+```
+
+Frames 1-10 of 12 are the clipped close-up; frames 0 and 11 (where `shotInFlight()` is
+false, so the settled player camera is drawn instead) are fine. The same script with
+`--shape-follow turntable` is clean at every frame. a1-a5 is an ordinary rook slide
+(`torus`'s opening array), nothing exotic.
+
+### Root cause 1: the anti-clip search scores a *different* camera than the one drawn
+
+`alignSlideU` (`src/render/play_surface.cpp`) searches board rotations (`SlideOffset`) to
+keep the followed cell clear of the shape, by testing where the chase camera's eye would
+land for each candidate and checking `PlaySurface::blocked` against it. Its `toEyeFor`
+lambda (passed into `searchSlide`):
+
+```cpp
+return fwd * -1.0f + normal * lift;
+```
+
+uses the candidate seat's **raw** surface normal. The camera that is actually drawn,
+`surfaceChaseCamera` (same file), does not use the raw normal - it first removes the
+normal's component *along the travel direction*:
+
+```cpp
+view::Vec3 b = piece.normal - a * view::dot(piece.normal, a);   // orthogonalised
+b = view::normalize(b);
+const view::Vec3 c = view::normalize(a * -cosT + b * sinT);     // the real eye direction
+```
+
+Whenever the local normal is not already exactly perpendicular to the travel direction -
+the ordinary case anywhere a surface curves, and especially while a piece crosses a
+torus's or Klein bottle's tube cross-section, which is most of an a-file slide - the
+search's direction and the camera's real direction (`c`) diverge. The search can then
+report a rotation "clear" for a camera angle that is not the one rendered, and reject a
+rotation that would actually have been fine. This is root cause 1, and it is sufficient by
+itself to explain the symptom: the search is simply answering the wrong question.
+
+**Why the existing tests did not catch it.** `tests/render/test_play_surface.cpp` has two
+property tests that call `alignSlideU` and then independently recompute "the eye direction"
+to check the result - but both reimplement the *search's* formula (`travel * -1.0f +
+normal * kDefaultFollowLift`, see lines ~797 and ~1186), not the camera's. They are
+self-consistent with the bug, not a check against `surfaceChaseCamera`. Worse, the first of
+the two (`"the align search improves on a torus's inner ring"`, ~line 780) feeds the search
+a `travel` vector read straight off the seat's own frame (`byQuat(seat.quat, {1,0,0})`) -
+which is *by construction* already perpendicular to that seat's normal, the one case where
+the search's formula and the camera's formula happen to agree. The real `travel` the front
+end passes in (`ahead.position - here.position` from two nearby `surfaceMoveSample` calls,
+including the hover arc) is not constructed that way and routinely has a normal component.
+**Any new regression test must build `travel` the same way the front end does - from
+`surfaceMoveSample`'s finite difference along a real traced path - not from a seat's own
+frame**, or it will have the same blind spot.
+
+### Root cause 2: no candidate is accepted "good enough" - or rejected as impossible
+
+In `searchSlide`'s orientable branch (`src/render/play_surface.cpp`, ~line 662), candidates
+are ranked by facing and tested in order; the loop returns the first whose eye (at the
+*fixed, nominal* `eyeDistance`) is unblocked. If every one of the 144 candidates is
+blocked at that distance - which is expected on a torus whenever the tube's hole is
+narrower than `chaseEyeDistance = 0.7 * span` (a single global constant, independent of
+local curvature) - the function silently falls through to `cands.front()`, the
+best-*facing* candidate, **without ever checking whether it is blocked**. The camera that
+gets built from it then sits at a distance chosen for the shape's overall span, in a
+direction that has nowhere clear to put it, and the result is an eye placed past or through
+the tube wall: exactly the "inside the board" look. This is root cause 2, and it compounds
+root cause 1 - even a *correctly* computed direction can still have no clear distance on a
+tightly-curved shape.
+
+### Root cause 3 (contributing, lower confidence): no hysteresis between frames
+
+`searchSlide` is a stateless per-call grid argmax (12x12 candidates, re-ranked from
+scratch every time). During the Travel stage, `updateShapeSequence` (`src/gui/main.cpp`)
+only re-invokes it when `currentFollowedCell` changes to a new nearest seat, and then
+eases toward the new result at a bounded rate (`kShapeMorphRate`) - so a jump is smoothed,
+not instant. But nothing stops the *target* the easing chases from being a very different
+grid cell than the previous target, if the raw argmax over two geometrically close cells
+happens to favour two distant candidates (plausible with a facing-only tie-break and no
+continuity term, and made worse by root cause 1 making the scores noisier than the real
+geometry). The visible effect is a board that keeps turning to catch up with a moving goal
+instead of settling - read as jitter. Lower confidence than roots 1-2 because it was not
+isolated with an independent repro; verify it is still present after fixing 1-2 before
+spending effort on it, since a correct direction formula alone may remove most of the
+instability.
+
+### The fix
+
+1. **Share one function for "the eye direction," so the search and the camera cannot
+   diverge again.** Pull the `a`/`b`/`c` construction out of `surfaceChaseCamera`
+   (`src/render/play_surface.cpp`, ~lines 500-509) into:
+
+   ```cpp
+   /// The chase camera's eye direction from the piece: behind the travel direction,
+   /// lifted toward the surface normal's component perpendicular to that travel, by
+   /// `lift` (a tangent). Shared by `surfaceChaseCamera` and the anti-clip search
+   /// (`alignSlideU`) so the search can never test a different camera than the one drawn
+   /// (M17.20).
+   [[nodiscard]] view::Vec3 chaseEyeDirection(const view::Vec3& normal,
+                                              const view::Vec3& travel, float lift);
+   ```
+
+   `surfaceChaseCamera` calls it instead of inlining the computation. Declare it in
+   `play_surface.hpp` next to `kDefaultFollowLift`.
+
+2. **Make the achievable distance part of what "the camera" means, not a separate
+   fixed input.** Add:
+
+   ```cpp
+   /// The largest distance along `direction` from `target` (toward the eye), up to
+   /// `maxDistance`, at which the eye is not blocked from `target` by `surf` itself -
+   /// found by bisection against `PlaySurface::blocked`. Never returns less than
+   /// `minDistance`, so a degenerate position still has a defined place to put the
+   /// camera rather than one that is found by trusting a fixed distance that happens to
+   /// reach past the shape (M17.20).
+   [[nodiscard]] float clearEyeDistance(const PlaySurface& surf, const view::Vec3& target,
+                                        const view::Vec3& direction, float maxDistance,
+                                        float minDistance = 0.5f);
+   ```
+
+   Implementation: if `!surf.blocked(target + direction * maxDistance, target, eps)`,
+   return `maxDistance` outright (common case, no bisection needed). Otherwise bisect
+   between `[minDistance, maxDistance]` (8 iterations is plenty - a cell's worth of
+   precision) for the largest distance that is still unblocked; if even `minDistance` is
+   blocked, return it anyway (nothing closer makes sense, and the caller must not loop
+   forever).
+
+   In `surfaceFollowCamera` (which already has `surf`), after computing `travel` and
+   before calling `surfaceChaseCamera`, clamp the caller-given `distance`:
+
+   ```cpp
+   const view::Vec3 dir = chaseEyeDirection(here.normal, travel, lift);
+   const float clamped = clearEyeDistance(surf, here.position, dir, distance);
+   return surfaceChaseCamera(here, travel, clamped, upright, lift);
+   ```
+
+   `surfaceChaseCamera` itself stays pure and mesh-free (it is still useful, and tested,
+   without a surface at hand); the clamp lives in the one place that already has the mesh.
+
+3. **Make the search rank by the *same* shared primitives, not a reimplementation.** In
+   `searchSlide`'s orientable branch, replace the custom `toEyeFor`-based scoring with:
+   for each candidate pose, build the seat, compute `dir = chaseEyeDirection(seat.normal,
+   travel, lift)` (or `toEyeFor(normal)` unchanged for the turntable's fixed-direction
+   case - `alignSlideToFace` keeps its own simpler lambda, which has no travel/normal
+   mismatch to begin with since the direction does not depend on the candidate), then
+   `achieved = clearEyeDistance(candidate_surf, seat.centre, dir, eyeDistance)`. Rank by
+   `achieved` first (closer to `eyeDistance` is better - i.e. the shot that needed the
+   least clamping), facing as the tie-break. This both fixes root cause 1 (same formula,
+   literally) and turns root cause 2's binary "blocked/not" into a graded score, so a
+   shape where nothing is perfectly clear still picks the *least bad* rotation instead of
+   falling through to an unchecked default.
+
+   `alignSlideU`'s own signature does not need to change. `alignSlideToFace`'s direction
+   does not depend on the candidate normal, so it is already immune to root cause 1 - no
+   change needed there beyond also scoring by `clearEyeDistance` for consistency with
+   root cause 2, if convenient.
+
+4. **Hysteresis (root cause 3 - do this after 1-2 are in and re-measured).** Give
+   `searchSlide` an optional previous-offset hint:
+
+   ```cpp
+   template <typename ToEye>
+   SlideOffset searchSlide(const VariantSpec& v, CellId target, float eyeDistance,
+                           ToEye toEyeFor, const SlideOffset* hint = nullptr);
+   ```
+
+   When `hint` is given, build its candidate first (no bisection over the grid); accept it
+   outright (skip the ranked search entirely) when its `achieved` distance is at least,
+   say, 90% of `eyeDistance` - "still basically clear" - so a piece's cell-to-cell motion
+   does not re-target a different rotation purely because the global argmax ticked to a
+   marginally better one. Fall through to the full ranked search only when the hint has
+   degraded past that threshold. Thread the hint from the two call sites that track a
+   live offset: `alignOffsetFor` (`src/gui/main.cpp`) passes `{st.geometryAlignOffset,
+   st.geometryAlignOffsetV}`; `updateShapeSequence`'s Travel re-aim passes `seq.offset`.
+   `alignSlideU`/`alignSlideToFace` gain a matching optional `const SlideOffset* hint =
+   nullptr` parameter forwarded straight through. Re-measure whether jitter is still
+   visible before adding this - if roots 1-2 alone settle it, this step can be skipped
+   and the finding recorded as resolved by 1-2.
+
+### Tests
+
+- **Fix the two self-consistent tests to use the shared primitives.** Replace their
+  hand-rolled `toEye`/`eye` computation (`travel * -1.0f + normal * kDefaultFollowLift`,
+  then `centre + toEye * eyeDistance`) with calls to `chaseEyeDirection` and
+  `clearEyeDistance`. This is not optional polish: as written, these tests cannot catch a
+  future regression of the same kind, because they assert the search agrees with itself.
+- **New regression test, built from a real traced path, not a seat's own frame.** Load
+  `torus`, play a multi-cell slide (e.g. the a1-a5 rook move used in the repro - get it
+  from `Game::legalMoves()`/`moveText`, not hand-typed), build its `MovePath`, and for a
+  dense sweep of `t` in `[0, 1]`: compute `surfaceMoveSample` at `t`, the `travel` the
+  front end would compute (the windowed finite difference `surfaceFollowCamera` already
+  uses - reuse it or its own logic directly, not a seat-frame shortcut), and assert
+  `clearEyeDistance(surf, position, chaseEyeDirection(normal, travel, lift),
+  chaseEyeDistance(surf)) >= 0.9 * chaseEyeDistance(surf)` at every sampled `t` once the
+  anti-clip has picked its best rotation for that `t` (i.e. run the real search, not the
+  identity rotation). This must fail on the current code (confirm it does, before the fix
+  lands) and pass after. Repeat for `klein` with the same move shape where legal.
+- **Distance-clamp unit test.** `clearEyeDistance` on a small synthetic `PlaySurface` (or
+  directly against `blocked` with a hand-built shape) returns `maxDistance` when clearly
+  unblocked, something strictly between `minDistance` and `maxDistance` when partially
+  blocked, and `minDistance` when nothing is clear - three cases, three assertions.
+- **If hysteresis (step 4) is implemented:** a test that feeds `searchSlide` a hint equal
+  to the true best candidate's close neighbour and confirms it is accepted without the
+  full grid re-ranking changing the result by more than one grid step, versus a hint that
+  has become genuinely blocked, which must still trigger a full re-search.
+
+### Acceptance
+
+1. The repro clip (`torus`, a1-a5, `--shape-follow chase`) shows the whole shape or a
+   reasonably-framed close subset of it at every frame - never a slab filling the screen
+   with pieces scattered off-frame.
+2. The two existing anti-clip property tests pass using the shared `chaseEyeDirection`/
+   `clearEyeDistance` primitives instead of a reimplementation.
+3. The new dense-sweep regression test (above) passes on `torus` and `klein`.
+4. `tools/test.sh --build render` is green; no change to the flat-board or turntable
+   camera paths (this is a `chase`-path and search-only fix).
+
+### Risks and non-goals
+
+- This does not touch `ShapeMoveSequence`'s choreography timing (M17.19) or the morph-rate
+  limiter - only what the chase camera and the search agree the eye distance and direction
+  *are*. The choreography's Align/Approach/Return stages are unaffected except that
+  Travel's camera is now the corrected one.
+- `clearEyeDistance`'s bisection adds up to 8 extra `blocked` calls per candidate per
+  search; `blocked` is already called once per candidate today, so this is a constant-
+  factor cost on a search that is already bounded (a couple of builds on the common path,
+  per M17.19's own fix for the ~5 fps regression) - re-run that frame-time bench
+  (`--bench-frame`) on a followed `torus`/`klein` move after this lands to confirm it is
+  still cheap.
+
+### Status: M17.20 built (2026-10-03, opencode)
+
+Implemented 1-3, plus the per-candidate-travel half of root cause 1 that steps 1-3 as
+written missed, plus step 4 (it *was* still needed - see below).
+
+- **`chaseEyeDirection` / `clearEyeDistance` (steps 1-2).** `surfaceChaseCamera` now calls
+  the shared eye function; `surfaceFollowCamera` clamps the requested distance to the last
+  `clearEyeDistance` along it. `chaseTravel` was extracted (file-local in `play_surface.cpp`)
+  so `surfaceFollowCamera` has one travel computation.
+- **The search (step 3), with one deviation.** Scoring is now `achieved` first (the
+  `clearEyeDistance` at that candidate), facing as the tie-break, via a passed-in per-
+  candidate `score` callable; the orientable probe still orders the grid and the first
+  fully-clear candidate wins, so the common path stays a couple of builds. **Deviation:**
+  sharing only the *direction formula* is not enough. For a chase, the camera's travel
+  depends on the candidate pose, and it draws the moving `surfaceMoveSample`, not the target
+  seat's centre. A single travel vector (or the seat) left the repro clipping: a
+  per-candidate ideal of `6.96` (the nominal distance) collapsed to `0.5` when measured on
+  the drawn sample. So the front end now uses a new `alignSlideU(v, target, path, t, ...)`
+  overload that rebuilds each candidate and scores `surfaceMoveSample(path, candidate, t)`
+  with `chaseTravel(path, candidate, t)`. The old travel-taking overload is kept for the
+  seat-level tests and the turntable path.
+- **Hysteresis (step 4) - implemented, because it was still visible.** After 1-3 + the
+  per-candidate score, the repro was stable except frame 9 of 12, a tube slab: the capture
+  carries the offset frame to frame and the stateless argmax jumped. `searchSlide` now takes
+  an optional `const SlideOffset* hint`; when its score is still `>= 0.9 * eyeDistance` it
+  is accepted outright. `alignOffsetFor` feeds back `geometryAlignOffset(V)`. With it the
+  repro is a settled, well-framed chase at every frame.
+- **Tests.** The two self-consistent property tests now recompute with `chaseEyeDirection` /
+  `clearEyeDistance` instead of the old inline formula. New: three-case `clearEyeDistance`
+  clamp test; a dense 49-sample traced-path sweep on `torus` (a1-a5 from `legalMoves()`,
+  `view::tracePath`, one real search per `t`) asserting the drawn sample stays at
+  `>= 0.9 * eyeDistance`. It is red on both the old raw-normal formula (12 failures) and on
+  a fixed-travel search (13 failures), and green now.
+- **Klein, deviation from the acceptance.** The dense sweep is `torus`-only. Measured: on
+  the self-intersecting Klein bottle *no* rotation has any clear line at the nominal distance
+  for the rank-seam a1-a5 move - the best achievable over the whole grid is the clamp floor -
+  so `>= 0.9 * eyeDistance` is unachievable there for any implementation, not just this one.
+  Klein is covered per-cell by "the chase align clears the shape at the camera's own
+  distance" (its 9/10 threshold) and by the clamp. This is recorded in the test comment.
+- **Cost.** `--bench-frame 30` on a followed torus chase: 42.9 ms/frame at Debug -O0 versus
+  38.4 ms for the same capture with no follow (turntable 42.8 ms), i.e. ~4.5 ms of search,
+  not the M17.19 ~5 fps. The hysteresis makes the common path the hint (one build + one
+  score); the whole-grid fallback only runs while nothing is clear.
+- **`tools/test.sh render`, the 17 `gui-*` ctest captures and `tools/precommit.sh` are
+  green.** The turntable capture is unchanged (whole torus at every frame).
+
+---
+
+## M17.21 Seam rails and coordinate labels on the shape (the M17.5 remainder)
+
+The flat board already does both of these things and the shape view does neither: the flat
+glued board draws a coloured rim at a seam (`src/view/seams.cpp`'s `SeamMap`/
+`seamRampColor` - "both ends of one identification share a colour off a hue ramp") and
+file/rank letters at its near edges (`src/render/ui.cpp`'s `drawLabel` block, ~line 984,
+which explicitly skips when `surfaceView` is true). On the shape, a player sees the donut
+or the figure-eight but not *which loop is which axis*, and has no way to read "this is
+rank 5" off the board itself - only the off-board text legend (`seamLegend`, already drawn
+in the corner: "the file edges are the same edge" in green, "the rank edges are the same
+edge" in blue, visible in every shape-view capture today) says so in words.
+
+**Why a torus/Klein shape has no "edge" to label the way the flat board does.** Both axes
+are periodic, so there is no boundary cell to put a label outside of - the flat board's
+"project the edge cell, extrapolate one cell outward" trick has nothing to extrapolate
+from. The right analogue is different for the two features:
+
+- **Seam rails**: not a rim at a boundary (there is none, physically) but a marker at the
+  *wrap locus* - the one ring of the shape where the lattice coordinate wraps from its
+  last value back to its first. For the gluing on axis 0 (file) that locus is the ring of
+  cells where `file == 0` (equivalently `file == nx - 1`, the two are one ring on the
+  shape); for axis 1 (rank) it is the `rank == 0` ring. On `klein`, the rank ring is where
+  the half-twist happens - the figure-eight's pinch, already visible geometrically - so
+  colouring it is exactly the thing that turns "huh, a pinch" into "ah, *here* is the
+  twisted seam."
+- **Coordinate labels**: with no edge, label individual seats directly, the way a piece is
+  placed - small text billboarded above a seat's surface point. Labelling every one of 64
+  cells would be clutter; label one reference ring per axis (e.g. every file letter along
+  the `rank == 0` ring, every rank number along the `file == 0` ring - the same two rings
+  the seam rails mark, so the colour and the text reinforce each other) rather than the
+  whole lattice.
+
+### Build
+
+**Seam rails.** `PlaySurface` already builds its board as **one mesh with per-vertex
+colour** (`MeshVertex::color`, white today - see ADR-0019 and the M17 status above), the
+same mechanism `GHOST` extends with alpha. Tint, do not add a pipeline:
+
+- In `PlaySurface::build` (and `buildStacked` for the D>=3 case, if in scope - see
+  M17.22), after the ordinary white/checker vertex colours are assigned, identify the
+  patches whose cell lies on each periodic axis's wrap ring (`cell.file == 0` for the file
+  axis, `cell.rank == 0` for the rank axis - use whichever boundary convention
+  `slidesAlongRanks`/the existing identification code already treats as canonical, so this
+  agrees with where `SeamMap` draws the flat rim for the same variant).
+- Colour: reuse `view::seamRampColor`/`SeamMap`'s existing per-axis colour exactly (build
+  a `SeamMap` for the variant, read the colour of a face on that axis) so a player who has
+  seen the flat view's rim or the legend recognises the same colour on the shape - do not
+  invent a second palette.
+- Width: tint only the row of corners nearest the wrap edge of the patches on that ring
+  (not the whole cell), so the rail reads as a thin line along the seam rather than a
+  fully recoloured rank/file of squares. A reasonable first cut: blend the ramp colour
+  into the vertex colour at full strength on the corners exactly on the wrap boundary,
+  fading to the ordinary board colour over one subdivision step inward (`kSurfaceSubdiv`
+  already gives each square a grid of corners to blend across).
+- `klein`/`mobius` (non-orientable, `flip` on an axis): the flipped axis's rail should
+  still read as one coherent ring even though the identification reverses the *other*
+  coordinate - colour is a per-vertex property keyed to "which axis's wrap this corner is
+  on," not to the direction of travel across it, so no special case should be needed
+  beyond correctly finding the ring.
+- Mirrors (`mirrorbox`): excluded, exactly as `SeamMap` excludes them from the flat rim
+  ("nothing is on the other side, so a hue that promised a destination would be a lie") -
+  `hasPlaySurface` likely already excludes `mirrorbox` from the shape view entirely (it
+  has no glued axis to become a shape from); confirm, do not add rails there if so.
+
+**Coordinate labels.** Extend `src/render/ui.cpp`'s existing `drawLabel` block
+(~line 984) rather than writing a second label system:
+
+- Replace the `!surfaceView` early-out with a branch: flat board keeps today's edge-label
+  code unchanged; surface view uses `PlaySurface::seats()` (already built for rendering -
+  reuse `shell`/`session`'s own surface, do not rebuild a second one) to find, for each
+  file `f`, the seat with `rank == 0`, and for each rank `r`, the seat with `file == 0`.
+  Project `seat.centre` through the session's effective camera (the same `cam.project`
+  call the flat path already uses), and draw the label *outward along the seat's own
+  normal* projected to screen space (analogous to the flat path's "extrapolate one cell
+  outward using the inward neighbour," but there is no flat inward/outward pair on a
+  surface - use `seat.normal` directly: project both `seat.centre` and `seat.centre +
+  seat.normal * (one cell's worth of stepU/stepV)` and offset the label the same way the
+  flat code offsets from `at`/`inward`).
+- Respect `shell.settings().showCoordinates` exactly as the flat path does - same
+  toggle, one setting for both views.
+- Do not label every seat: only the two reference rings (`rank == 0` for file letters,
+  `file == 0` for rank numbers) - 8 + 8 labels on a standard-sized glued board, matching
+  the flat view's count.
+- Skip a label whose seat is on the far side of the shape from the camera (behind the
+  silhouette) rather than drawing it through the mesh: skip a seat whose normal faces away
+  from the eye (`dot(seat.normal, eye - seat.centre) <= 0`), so a label never appears to
+  float in front of the far side of the donut.
+
+### Tests
+
+- A `--shot` of `torus --geometry` and `klein --geometry` with `showCoordinates` on shows
+  rails (pixel-level: sample a few corners known to lie on the `file==0`/`rank==0` rings
+  and assert their colour matches `seamRampColor`'s output for that axis, not the plain
+  board colour) and some non-zero count of label glyphs are recorded by the UI draw list
+  (reuse whatever assertion style the existing flat-label tests use, if any exist, or add
+  one alongside this change).
+- A render/view unit test that the identified wrap ring (`cell.file == 0` or `cell.rank ==
+  0`, per axis) used for rail placement is the *same* set of cells `SeamMap` marks as
+  seam faces for that variant on the flat view - a differential test, so the shape and the
+  flat view can never silently disagree about where the seam is (this is exactly the
+  pattern M13's "derived must equal hand-authored" test already uses elsewhere).
+- `standard` and every non-glued variant: no rails, no change in output (`hasPlaySurface`
+  is already the gate; confirm the existing "`standard --geometry` is a strict no-op"
+  golden still holds).
+- Validation-clean captures (`--shot`/`--clip`) on `torus`, `klein`, `mobius`, `cylinder`.
+
+### Acceptance
+
+1. `torus --geometry` and `klein --geometry` show two differently-coloured rings on the
+   shape matching the flat view's legend colours for the same variant, and the file/rank
+   labels for one reference ring each, toggled by the same `showCoordinates` setting the
+   flat board uses.
+2. The rail location and the flat `SeamMap`'s seam faces agree, by the differential test
+   above.
+3. No visible change to `standard`, `cube5`, `hyper4` or any other non-surface variant.
+4. `tools/test.sh --build render` and `tools/test.sh --build app` green; `nix flake check`
+   clean on the new captures.
+
+### Risks and non-goals
+
+- This is presentation only - rails and labels must not enter `VariantId`, must not
+  change `PlaySurface::blocked`'s occlusion geometry (the tint is colour, not shape), and
+  must not interact with GHOST's alpha pipeline beyond both reading the same vertex colour
+  array (GHOST already carries alpha in `MeshVertex::color.a`; the rail tint only touches
+  `.rgb`).
+- D>=3 stacked shapes (`torus3d`, `hyper4`) are explicitly out of scope here unless folded
+  into M17.22, since `buildStacked` is a different code path with no continuous
+  parametrisation to key a "ring" off in the same way - decide there, not here.
+
+---
+
+## M17.22 The 3-D stacked shapes finished, and a twisted-torus variant
+
+Spec'd in full in
+[`M17.12-shapes-above-two-dimensions.md`](M17.12-shapes-above-two-dimensions.md): slide and
+invert for `torus3d`/`hyper4` (currently ignored by `buildStacked`), a ghost-based answer to
+the hidden-sheet problem (reusing the existing GHOST pipeline rather than inventing one),
+pinned adjacency tests, and a new `torus3d_twist`-style variant - a twisted 3-torus,
+declarable today as plain data (a `flip` on one `torus3d` axis, exactly as `klein.toml`
+already does in 2-D) with the shape view extended to show the twist as a third D>=3
+showcase alongside `cube5`/`hyper4`. Third of the three Wave 1 completion pieces, after
+M17.21.

@@ -285,3 +285,197 @@ file for a different variant starts that variant first. Tests in
 `tests/unit/app/test_shell.cpp` (round-trip through the shell, bad name, missing game).
 
 **Still to do:** the runner (`--play FILE --clip DIR`, M12.6).
+
+---
+
+### M12.6 implementation spec (2026-10-03)
+
+Fourth and last of the Wave 1 completion pieces (after M17.20's camera-correctness fix,
+M17.21's rails/labels and M17.22's D>=3 remainder - see `HANDOVER.md` and the roadmap's
+Wave 1). This corrects two things the want/build text above gets wrong by omission, found
+while scoping this spec, and then gives the concrete build.
+
+**Correction 1: the choreography does not currently run in a capture, at all.** The want
+text above says a move "already starts the animation and the camera choreography" - true
+only in the *interactive* main loop. `captureFrame` (`src/gui/main.cpp`) builds its camera
+via `boardCamera(*shell, kNoShapeSequence)` - the literal "no choreography" sequence - and
+a comment on `boardCamera` states this is deliberate: "a `--clip` of a move never runs the
+choreography, and its frames must stay byte-for-byte what they were." So today, a `--clip`
+of a shape-followed move is the **raw steady-state follow** camera, not the four-beat
+Align/Approach/Travel/Return of M17.19. This must change for the runner to be worth
+watching - but the existing `--clip`/`--shot` of a *single* move must keep producing
+exactly the frames they do today (that byte-for-byte promise is depended on by
+`ctest -R gui-`), so the choreography must be opt-in to captures, not a change to their
+default behaviour.
+
+**Correction 2: fix M17.20 first.** The runner's whole point is to showcase the shape view
+on real games; if the chase camera clips into the board for most of a shape-followed move
+(M17.20), the runner just produces more of that, faster. Land M17.20 before this.
+
+#### Make the choreography a pure function of elapsed time
+
+`render::ShapeBeat shapeBeat(elapsed, ...)` (`src/render/play_surface.hpp/.cpp`) is already
+pure in `elapsed` - the stage/local-progress math has no hidden state. The thing that is
+*not* pure is `gui::ShapeMoveSequence`'s accumulated `offset` (the live slide, approached by
+`stepSlide`'s bounded-rate stepping, frame by frame) and the frame built from it - both
+exist only in `src/gui/main.cpp` today, advanced by `updateShapeSequence(shell, seq, dt)`
+once per real frame.
+
+Refactor, do not duplicate:
+
+1. Pull `updateShapeSequence`'s per-frame body into a free function with no dependency on
+   wall-clock framing, e.g. `void stepShapeSequenceOnce(app::Shell& shell,
+   ShapeMoveSequence& seq, float dt)` - the exact logic that exists today, just named and
+   extracted so it can be called from somewhere other than the interactive loop.
+   `updateShapeSequence` becomes a thin wrapper that detects a new move and calls this.
+2. Add a **stateless** evaluator next to it:
+
+   ```cpp
+   /// The shape-follow choreography's state at `elapsed` seconds into a move that starts
+   /// at `shell`'s current position, as if it had been running since 0 - found by
+   /// fixed-step simulation from a fresh sequence, not recalled from any real frame's
+   /// history. Two calls at the same `elapsed` for the same move produce the same
+   /// result, which is what lets a clip's frames be requested out of order or more than
+   /// once (M12.6).
+   ShapeMoveSequence simulateShapeSequence(app::Shell& shell, const view::MovePath& path,
+                                           float travelSeconds, float elapsed);
+   ```
+
+   Implementation: build a `fresh` sequence exactly as `updateShapeSequence` does on
+   detecting a new move (same `startCam`/`startOffset`/`alignStart` computation - that
+   part already reads only `session`/`settings` state, which is itself deterministic for a
+   loaded position), then call `stepShapeSequenceOnce` repeatedly at a small **fixed**
+   internal step (e.g. 1/120 s - pick one, document it, and keep it fixed regardless of the
+   caller's requested `elapsed` or frame count) until the accumulated internal time reaches
+   `elapsed`, and return the resulting `seq`. The fixed step is what makes two calls at the
+   same `elapsed` agree bit-for-bit: nothing here may read a wall clock or SDL's event
+   timer.
+3. **Cost.** This resimulates from 0 for every requested frame - plausibly tens to a couple
+   hundred fixed steps per call, each doing a `PlaySurface::build` inside
+   `stepShapeSequenceOnce`. Clip export is not a 60 fps budget, but measure it with
+   `--bench-frame` (or a one-off timing print) on a `torus`/`klein` move before deciding
+   whether it needs a cache; if it does, the natural one is memoising `PlaySurface::build`
+   results already keyed by pose (the quintic memo and built-scene cache M4.9 already
+   established the pattern) - do not add a bespoke cache ahead of measuring.
+
+`captureFrame`'s existing single-move `--shot`/`--move-t`/`--clip` path is **untouched**:
+it keeps calling `boardCamera(*shell, kNoShapeSequence)`. The runner (below) is the only
+caller of `simulateShapeSequence`.
+
+#### The runner
+
+**Input: the M12.7 game file, unchanged - do not invent a second format.** M12.7 already
+built exactly what this wants: `io::GameFile` (`src/io/game_file.hpp/.cpp`, variant name +
+`VariantId` + start FEN-N + moves in the engine's own notation), `parseGameFile`,
+`applyGameFile`. The M12.7 status section says as much: "the input the M12.6 runner already
+wants." `--play FILE` reads a `GameFile` the same way the CLI's `open`/the pause menu's
+Load already do - resolve the variant, load the start position (or the default start if
+none is stated), then step through `applyGameFile`'s moves one at a time (not all at once -
+the runner needs to animate each one, so it wants the per-move apply, not the bulk replay
+helper). A malformed file or an illegal move stops at that move, names it and the position,
+same as `applyGameFile` already reports for the bulk case - reuse its error, do not write a
+second message.
+
+**New flags** (`src/gui/main.cpp`'s arg loop, alongside the existing `--shot`/`--clip`
+family):
+
+- `--play FILE` - the game file to play. Combines with everything `--clip`/`--shot`
+  already accept (`--cinema`, `--follow`, `--shape-follow`, `--camera`), and with the two
+  new flags below.
+- `--dwell SECONDS` (default `0.6`) - how long the camera holds the settled position after
+  a move lands before the next one's choreography begins. Separate from the choreography's
+  own `kShapeAlignSeconds` etc., which govern one move's lead-in/return, not the pause
+  between moves.
+- `--fps N` (default `30`) - only meaningful with `--play --clip`; see below. Steam's
+  trailer guidance wants 1080p at a normal cinematic frame rate, and 30 is the existing
+  overture/clip convention's natural choice absent a reason to pick another - note this is
+  a default, not a claim about final export settings, which belongs to whoever cuts the
+  actual trailer.
+
+**Resolution.** `captureFrame`'s offscreen target and the interactive window are both
+hardcoded to 1440x900 (`src/gui/main.cpp`, three call sites: the hidden `SDL_CreateWindow`
+and `OffscreenTarget::create` in `captureFrame`, and `Window::create` in the interactive
+path). Add `--width W --height H` (defaults **1920x1080**, Steam's stated trailer minimum)
+read in the shared arg-parsing block and threaded into all three construction sites,
+replacing the literal `1440, 900`. This is independent of `--play`/the runner - every
+existing `--shot`/`--clip` caller gets the new default resolution unless it passes
+`--width`/`--height` itself; update `tests/` and any `ctest -R gui-` goldens that assume
+1440x900 pixel dimensions (grep for the literal before assuming none do).
+
+**Sequence timing, so `--play --clip` can be asked for "N frames of the whole game" rather
+than one move's `t`.** Compute, once, before rendering any frames: for each move in the
+file, in order, its duration in seconds -
+
+- if the shape-follow choreography applies (surface view, `cameraMode != "off"`, a glued
+  variant) - `kShapeAlignSeconds + kShapeApproachSeconds + travelSeconds +
+  kShapeReturnSeconds` (divided by `shapeMorphSpeed` exactly as the interactive sequence
+  already does), where `travelSeconds` is the move's own animation duration (the same
+  value `session->animation().duration()` already provides for a move of that kind);
+  otherwise
+- the flat board's own move-animation duration alone (no choreography to add).
+
+Plus `--dwell` after every move but the last. Sum these for the game's total duration
+`T_total`. With `--clip DIR` (no explicit `--frames`), render `ceil(T_total * fps)` frames,
+each at global time `i / fps`; map a global time to (move index, elapsed-within-that-move)
+by walking the per-move durations cumulatively (a dwell maps to the *landed* pose: call
+`simulateShapeSequence` at that move's full duration, repeated for the dwell's length - the
+picture does not change during a dwell, only how long it is held). Without `--clip`
+(a single `--play FILE --shot OUT`), render one frame at the end of the sequence's chosen
+`--move-t`-equivalent - or more usefully, add a `--play-at SECONDS` for stating one instant
+of the whole played-back game, mirroring what `--move-t` does for one move.
+
+**Determinism.** No wall clock anywhere in this path (`simulateShapeSequence`'s fixed
+internal step, never SDL's timer); the existing "two thrown-away frames" settle rule
+(`captureFrame`'s `renderFrame(0.0f)` / `renderFrame(1.0f)` warm-up) still applies once at
+the start, not per move. `--play FILE --clip DIR` run twice must produce byte-identical
+frame files.
+
+**A "Watch a game" action**, once the above works: a menu entry built from the same
+runner (loads a bundled canonical game file and plays it with the player's own camera
+settings, not a capture) - small, and explicitly lower priority than the capture path
+itself; do first, ship second if time allows. This is also the natural seed for the packaged
+demo's (M16.3) "watch a game" option later - no new work there, just reuse.
+
+#### Tests
+
+- A game file plays move-for-move through the runner; final position and move count match
+  the file (reuses `applyGameFile`'s own guarantees - the new test is about the *runner*
+  driving it one move at a time with a camera, not about replay correctness, which M12.7
+  already covers).
+- An illegal/malformed move stops the runner at that move with `applyGameFile`'s existing
+  error, position unchanged past the last legal move.
+- `simulateShapeSequence(shell, path, travelSeconds, elapsed)` called twice at the same
+  `elapsed` returns bit-identical `ShapeMoveSequence::camera` - the determinism contract,
+  tested directly rather than only via a file-diff on exported frames.
+- `--play FILE --clip DIR` run twice is byte-identical, file by file (reuses the existing
+  clip-determinism test's shape, M12.2).
+- A game file whose moves wrap a glued seam (a torus/Klein game) exercises the shape
+  choreography through the runner, validation-clean.
+- `--width`/`--height` change the output image dimensions; the new 1920x1080 default is
+  covered by at least one existing `gui-shot`-style golden so a regression to the old
+  1440x900 is caught.
+
+#### Acceptance
+
+1. Given a notation file of N moves, `--play FILE` plays all N automatically with the real
+   M17.19 choreography on a shape, or the ordinary move camera on a flat board; a
+   `--play FILE --clip DIR` export of the whole game is byte-identical on re-export.
+2. `--width 1920 --height 1080` (and the new default) produce a correctly-sized capture;
+   every existing `--shot`/`--clip` caller keeps working unchanged apart from the new
+   default resolution.
+3. A single-move `--shot`/`--clip` (no `--play`) is **pixel-for-pixel identical** to what
+   it produced before this spec landed, at the old resolution (pass `--width 1440 --height
+   900` to check against pre-existing goldens, or update the goldens' stated resolution -
+   pick one and be consistent).
+4. `standard`, a glued variant (`torus`/`klein`) and a 4-D variant (`hyper4`) all play from
+   the same file format, per the original M12.6 acceptance above.
+
+#### Risks and non-goals
+
+- Everything in the original "Risks and non-goals" above still applies unchanged (not an
+  analysis tool, must not read the private narrative, dwell/ambient motion must stay out
+  of the deterministic frame).
+- The resimulate-from-0 cost (point 3 above) is the main technical risk; it is explicitly
+  measure-first, not pre-optimised - do not add caching speculatively.
+- `--width`/`--height` are a capture-only concern; the interactive window already resizes
+  freely and is unaffected beyond its own default size constant moving to match.

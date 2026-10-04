@@ -790,12 +790,10 @@ TEST_CASE("align turns an inner-ring cell toward the camera", "[render]") {
     }
     return nullptr;
   };
-  // Where the chase camera would sit for a piece travelling along `travel`, and the
-  // direction from the piece to it.
-  const auto eyeFor = [](const SurfaceSeat& seat, const view::Vec3& travel) {
-    const view::Vec3 toEye =
-        view::normalize(travel * -1.0f + seat.normal * kDefaultFollowLift);
-    return std::pair{seat.centre + toEye * 6.0f, toEye};
+  // The camera's own eye direction, shared with the anti-clip search so the two cannot
+  // disagree (M17.20).
+  const auto toEyeFor = [](const SurfaceSeat& seat, const view::Vec3& travel) {
+    return chaseEyeDirection(seat.normal, travel, kDefaultFollowLift);
   };
 
   // The cell facing most away from a nominal camera at rest: the case to fix.
@@ -803,7 +801,7 @@ TEST_CASE("align turns an inner-ring cell toward the camera", "[render]") {
   CellId inner = kInvalidCell;
   float worst = 1e9f;
   for (const SurfaceSeat& seat : rest.seats()) {
-    const float facing = view::dot(seat.normal, eyeFor(seat, restTravel).second);
+    const float facing = view::dot(seat.normal, toEyeFor(seat, restTravel));
     if (facing < worst) {
       worst = facing;
       inner = seat.cell;
@@ -821,7 +819,9 @@ TEST_CASE("align turns an inner-ring cell toward the camera", "[render]") {
   const PlaySurface turned = PlaySurface::build(v, pose);
   const SurfaceSeat* fixed = seatFor(turned, inner);
   REQUIRE(fixed != nullptr);
-  const auto [eye, toEye] = eyeFor(*fixed, travel);
+  const view::Vec3 toEye = toEyeFor(*fixed, travel);
+  const float eyeDist = clearEyeDistance(turned, fixed->centre, toEye, 6.0f);
+  const view::Vec3 eye = fixed->centre + toEye * eyeDist;
   const float facing = view::dot(fixed->normal, toEye);
   CHECK(facing > worst);  // the search improves the facing it targets
   CHECK(facing > 0.0f);   // and lands the piece on the camera's side
@@ -1182,15 +1182,137 @@ TEST_CASE("the chase align clears the shape at the camera's own distance", "[ren
       }
       REQUIRE(fixed != nullptr);
       ++checked;
+      // The search's own shared primitives, against the shape it actually turned: the eye
+      // direction is the camera's and the achieved distance is measured at it (M17.20).
       const view::Vec3 toEye =
-          view::normalize(travel * -1.0f + fixed->normal * kDefaultFollowLift);
-      const view::Vec3 eye = fixed->centre + toEye * eyeDistance;
-      if (!turned.blocked(eye, fixed->centre, 0.02f)) ++unoccluded;
+          chaseEyeDirection(fixed->normal, travel, kDefaultFollowLift);
+      const float achieved = clearEyeDistance(turned, fixed->centre, toEye, eyeDistance);
+      if (achieved >= eyeDistance - 1e-3f) ++unoccluded;
     }
     CAPTURE(name, checked, unoccluded);
     // A Klein bottle passes through itself, so a cell or two can have a nearer sheet over
     // them whatever the slide; the orientable torus must be clear everywhere.
     CHECK(unoccluded >= (std::string(name) == "torus" ? checked : checked * 9 / 10));
+  }
+}
+
+TEST_CASE("clearEyeDistance clamps to the last clear distance along the eye",
+          "[render]") {
+  // M17.20: the anti-clip must be able to pull the camera *closer* when the nominal
+  // distance reaches past the shape, rather than trusting a fixed distance. Three cases:
+  // clearly unblocked returns the nominal maximum, a direction that hits the far wall
+  // before the maximum returns something strictly between, and one already blocked at the
+  // minimum returns the minimum so the caller has a defined place to put the camera.
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("torus"));
+  const PlaySurface surf = PlaySurface::build(v);
+  REQUIRE_FALSE(surf.seats().empty());
+  const SurfaceSeat& a = surf.seats().front();
+  // The seat whose centre is farthest from `a`: the chord runs through the shape, so an
+  // eye beyond it has that tile between it and `a`.
+  const SurfaceSeat* far = &a;
+  for (const SurfaceSeat& s : surf.seats()) {
+    if (dist(s.centre, a.centre) > dist(far->centre, a.centre)) far = &s;
+  }
+  const float chord = dist(far->centre, a.centre);
+  REQUIRE(chord > 0.5f);
+
+  // Case 1: straight out along the surface normal, a short way - nothing in the way.
+  const float clear = clearEyeDistance(surf, a.centre, a.normal, 0.2f, 0.01f);
+  CHECK_THAT(clear, WithinAbs(0.2f, 1e-3f));
+
+  // Case 2: toward the far seat and beyond it - blocked, but there is clear air first.
+  const view::Vec3 through = view::normalize(far->centre - a.centre);
+  const float partial = clearEyeDistance(surf, a.centre, through, 1.5f * chord, 0.01f);
+  CHECK(partial > 0.01f);
+  CHECK(partial < 1.5f * chord);
+
+  // Case 3: the minimum itself already reaches past the far seat - nothing is clear.
+  const float atMin = 1.2f * chord;
+  const float none = clearEyeDistance(surf, a.centre, through, 2.0f * chord, atMin);
+  CHECK_THAT(none, WithinAbs(atMin, 1e-3f));
+}
+
+TEST_CASE("a traced chase on a glued ring stays clear along the whole move", "[render]") {
+  // M17.20 regression. The old anti-clip scored a *different* eye direction than the
+  // camera drew (the raw normal instead of the orthogonalised one) and, when the nominal
+  // distance was blocked, fell through to an unchecked best-facing rotation (root causes
+  // 1 and 2). The two property tests above could not see it because they recomputed the
+  // search's own formula and fed it a travel read off a seat's frame - perpendicular to
+  // that seat's normal by construction, the one case where the two formulas agree. This
+  // traces a real path (the a1-a5 rook slide the repro uses) and, at every sampled `t`,
+  // runs the real search and checks the drawn sample against the camera's own shared
+  // primitives.
+  //
+  // Torus only. On the self-intersecting Klein bottle the whole move (a1-a5) runs along
+  // the rank seam - the figure-eight's pinch - where *no* searched rotation has a clear
+  // line to the nominal distance at all (measured: the best achievable over the whole
+  // sweep is ~0.5, the clamp floor, versus 0.9*eyeDistance required). That is the surface
+  // passing through itself, not a search defect, and it is what `clearEyeDistance`'s
+  // clamp exists to limit; klein is covered per-cell by "the chase align clears the shape
+  // at the camera's own distance" above. The orientable torus, which is the reported
+  // repro, must be clear everywhere.
+  for (const char* name : {"torus"}) {
+    CAPTURE(name);
+    const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
+    const PlaySurface rest = PlaySurface::build(v);
+    const view::Bounds rb = rest.bounds();
+    const float span =
+        std::max({rb.maxX - rb.minX, rb.maxY - rb.minY, rb.maxZ - rb.minZ});
+    const float eyeDistance = std::max(2.0f, 0.7f * span);
+    const float lift = kDefaultFollowLift;
+
+    auto session = app::Session::create(test::loadVariant(name));
+    REQUIRE(session.has_value());
+    app::Session& s = **session;
+    const CellId a1 = v.dims.toCell(Coord::of({0, 0}));
+    const CellId a5 = v.dims.toCell(Coord::of({0, 4}));
+    const Move* move = nullptr;
+    for (const Move& m : s.game().legalMoves()) {
+      if (m.from == a1 && m.to == a5) move = &m;
+    }
+    REQUIRE(move != nullptr);
+    const Piece mover = s.game().position().at(a1);
+    const view::MovePath path =
+        view::tracePath(v, s.game().position(), mover.type, mover.colorOf(), *move);
+    REQUIRE_FALSE(path.steps.empty());
+
+    const auto nearest = [&](const PlaySurface& surf, const view::Vec3& p) {
+      CellId best = kInvalidCell;
+      float bestD = 1e30f;
+      for (const SurfaceSeat& st : surf.seats()) {
+        const float d = dist(st.centre, p);
+        if (d < bestD) {
+          bestD = d;
+          best = st.cell;
+        }
+      }
+      return best;
+    };
+
+    constexpr int kSweep = 48;
+    for (int i = 0; i <= kSweep; ++i) {
+      const float t = static_cast<float>(i) / static_cast<float>(kSweep);
+      const SurfaceMoveSample here = surfaceMoveSample(path, rest, t);
+      const CellId cell = nearest(rest, here.position);
+      REQUIRE(cell != kInvalidCell);
+      // The real chase search: it scores each candidate against that candidate's own
+      // travel on the traced path, and at the moving sample the camera actually draws
+      // (M17.20).
+      const SlideOffset off = alignSlideU(v, cell, path, t, eyeDistance, lift);
+      SurfacePose pose;
+      pose.slideU = off.u;
+      pose.slideV = off.v;
+      const PlaySurface turned = PlaySurface::build(v, pose);
+      const SurfaceMoveSample sample = surfaceMoveSample(path, turned, t);
+      view::Vec3 travelCam =
+          surfaceMoveSample(path, turned, std::min(1.0f, t + 0.10f)).position -
+          surfaceMoveSample(path, turned, std::max(0.0f, t - 0.10f)).position;
+      if (view::length(travelCam) < 1e-5f) travelCam = sample.normal;
+      const view::Vec3 dir = chaseEyeDirection(sample.normal, travelCam, lift);
+      const float achieved = clearEyeDistance(turned, sample.position, dir, eyeDistance);
+      CAPTURE(t, off.u, off.v, achieved, eyeDistance);
+      CHECK(achieved >= 0.9f * eyeDistance);
+    }
   }
 }
 

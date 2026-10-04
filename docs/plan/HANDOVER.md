@@ -126,7 +126,52 @@ lattice cells per drawn tile), so `t6` stays on the lattice and any playable qui
 a sliced view. Finish the 3-D shapes (slide/invert, hidden-sheet handling, adjacency tests)
 before the sliced quintic.
 
-### 5. Then Wave 2
+### 5. Found 2026-10-03, playing it: the chase camera goes into the board, and jitters
+
+**Fix this before anything else below.** Reported during a manual playtest pass: a followed
+move's camera on a shape (`shapeFollow = "chase"`) sometimes clips into the board and
+sometimes jitters. Reproduced and root-caused: `alignSlideU`'s anti-clip search
+(`src/render/play_surface.cpp`) scores a *different* eye direction than the one
+`surfaceChaseCamera` actually draws (the search uses the raw surface normal; the real
+camera first removes its component along the travel direction), so a rotation the search
+calls "clear" can still be looking straight into the shape - and the existing property
+tests cannot catch it, because they reimplement the same (wrong) formula instead of calling
+the real one. A second, compounding bug: when nothing in the search grid is actually clear
+at the nominal eye distance, it silently falls back to the best-*facing* (still occluded)
+candidate rather than ever pulling the camera closer. Full root-cause writeup, the fix (a
+shared `chaseEyeDirection`/`clearEyeDistance` primitive used by both the search and the
+camera, so they cannot diverge again), and the regression tests that would have caught it:
+**[`M17-geometry-view.md`](M17-geometry-view.md), §M17.20.**
+
+### 6. Then the rest of Wave 1, fully spec'd and ready to build, in this order
+
+Spec'd 2026-10-03 for a handoff to opencode (see each file for the detailed build/tests/
+acceptance - this is only the index and the order):
+
+1. **M17.20** above - fix first; M12.6 below records through this camera, so a clip of it
+   is only worth having once this is fixed.
+2. **M17.21** - seam rails and coordinate labels on the shape (the M17.5 remainder):
+   [`M17-geometry-view.md`](M17-geometry-view.md), §M17.21.
+3. **M17.22** - slide/invert/ghost-picking for the D>=3 stacked shapes (`torus3d`,
+   `hyper4`), pinned adjacency tests, and a new twisted-3-torus variant (`flip` on one
+   `torus3d` axis, same trick `klein.toml` already uses in 2-D) with the shape view
+   extended to show the twist:
+   [`M17.12-shapes-above-two-dimensions.md`](M17.12-shapes-above-two-dimensions.md).
+4. **M12.6** - the marketing notation runner (`--play FILE [--clip DIR]`), now including
+   making the M17.19 shape choreography a pure, deterministic function of elapsed time (it
+   currently only runs in interactive play - captures use the plain steady-state follow on
+   purpose, and that default must not change) and `--width`/`--height` capture flags
+   (default bumped to **1920x1080**, Steam's trailer minimum; was a hardcoded 1440x900):
+   [`M12-broadcast.md`](M12-broadcast.md), "M12.6 implementation spec (2026-10-03)".
+
+Trailer-priority variants, from a planning conversation the same day: `standard`,
+`torus`/`klein`/`mobius`, `cube5`/`hyper4`, plus `5d` (time travel, flat board, no shape-
+view work needed), `atomic_torus` (explosion + wrap) and `torus3d` (the twisted-variant's
+untwisted sibling) - see §M17.22 for why `torus3d` specifically rounds out the D>=3 set,
+and `t6` stays lattice-only (no shape view planned; see the Verdict in
+`M17.12-shapes-above-two-dimensions.md`).
+
+### 7. Then Wave 2
 
 M14 onboarding, M16.3 the demo (M16.2 is done), M7 the editors. See the release sequence in
 the roadmap.
