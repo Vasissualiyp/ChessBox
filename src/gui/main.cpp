@@ -503,6 +503,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
   // picture of what they would see.
   (void)(*ui)->setScale(shell->settings().guiScale);
   (*ui)->setIconStyle(render::iconStyleFromName(shell->settings().pieceIcons));
+  // Cinema dresses the frame with a grade and a vignette, not an interface (M18.3).
+  (*ui)->setCinema(cinema);
   {
     const view::Theme theme = view::themeFromName(shell->settings().theme);
     renderer->setTheme(theme);
@@ -531,9 +533,9 @@ int captureFrame(const std::string& variantName, const std::string& path,
     (*ui)->endFrame();
     const render::BoardRect uiRect{request.boardRect[0], request.boardRect[1],
                                    request.boardRect[2], request.boardRect[3]};
-    // Cinema is the board and the move and nothing else: the whole frame is the board and
-    // the interface emits nothing (the overlay is not recorded), so a clip reads as
-    // footage rather than as a screenshot of the game's furniture.
+    // Cinema is the board and the move and nothing else: the whole frame is the board
+    // and the interface builds no furniture, only the frame's grade and vignette
+    // (M18.3), so a clip reads as footage rather than a screenshot of the panels.
     const render::BoardRect frame =
         cinema ? render::BoardRect{0.0f, 0.0f, static_cast<float>(target->width()),
                                    static_cast<float>(target->height())}
@@ -584,9 +586,9 @@ int captureFrame(const std::string& variantName, const std::string& path,
     const std::function<void(VkCommandBuffer)> drawUi = [&](VkCommandBuffer cmd) {
       (*ui)->record(cmd);
     };
-    const std::function<void(VkCommandBuffer)> noUi{};
-    if (auto ok =
-            renderer->render(*target, instances, camera, cinema ? noUi : drawUi, frame);
+    // The interface pass is always recorded now: in cinema it holds only the grade and
+    // vignette, and outside cinema it is exactly the frame it always was.
+    if (auto ok = renderer->render(*target, instances, camera, drawUi, frame);
         !ok.has_value()) {
       std::fprintf(stderr, "%s\n", ok.error().format().c_str());
       return std::nullopt;

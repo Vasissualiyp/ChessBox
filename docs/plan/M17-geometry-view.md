@@ -1859,9 +1859,33 @@ Both halves of the M17.5 remainder are in.
   hue-ramped rings (matching the legend's file/rank colours) plus the reference-ring labels;
   `standard --geometry` remains a strict no-op (`hasPlaySurface` is the gate).
 
----
+### Revision: coordinate labels disabled in 3-D, pending a real redesign (2026-10-04)
 
-## M17.22 The 3-D stacked shapes finished, and a twisted-torus variant
+Playtest verdict on the labels specifically (the seam rails are unaffected and stay): the
+camera-projected file/rank text reads badly wherever the board is shown in a 3-D
+perspective - both the shape view's new reference-ring labels above and the **pre-existing**
+flat-board labels in ordinary 3-D play (the same `drawLabel` mechanism, the non-surface
+branch of `Ui::buildGameHud` that already existed before M17.21). Projecting flat text
+through a steep, turning perspective camera was never going to read as clean lettering, and
+it does not - at a grazing angle a letter skews, overlaps its neighbour, or goes
+nearly edge-on. This is a legibility/typography problem, not a logic bug, and it is not
+worth iterating on in-place the way the camera and the rails were.
+
+**Disabled for now, in both places:** `showCoordinates`'s labels stop being drawn whenever
+the board is *not* in the flat 2-D (`flatView`) projection - i.e. gate the whole label
+block (both the existing flat-3D branch and M17.21's new surface branch) on `session
+.flatView()` in addition to `v.dims.dims() == 2`, rather than drawing camera-projected text
+in any 3-D context. The 2-D orthographic-ish view's labels are unaffected and keep working
+exactly as before - this was never complained about. The seam rails (the coloured rings) are
+presentation, not text, and are not affected by this change at all; `showSeams` still gates
+them independently of `showCoordinates`.
+
+**Deferred to closer to release:** a 3-D-native way to show a cell's coordinate - a billboard
+that always faces the camera rather than flat world-space text, a per-cell tooltip on
+hover/selection instead of an always-on label field, or something else - is real design work,
+not a quick fix, and belongs to a later pass once the rest of the visual language (M18) has
+settled. Do not attempt a redesign as part of disabling the current one; this entry is the
+placeholder to pick back up.
 
 Spec'd in full in
 [`M17.12-shapes-above-two-dimensions.md`](M17.12-shapes-above-two-dimensions.md): slide and

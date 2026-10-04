@@ -805,6 +805,39 @@ void Ui::drawCheckEdges(app::Shell& shell) {
   }
 }
 
+void Ui::drawCinemaLook() {
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  const ImVec2 min = vp->WorkPos;
+  const ImVec2 max(vp->WorkPos.x + vp->WorkSize.x, vp->WorkPos.y + vp->WorkSize.y);
+  ImDrawList* dl = ImGui::GetBackgroundDrawList();
+  // The grade, before the vignette. A very low-alpha crush plus a faint wash of the
+  // theme's accent is the cheap honest version of a colour curve: a black overlay cannot
+  // truly raise contrast, but it does read as a graded frame, and it costs one more 2-D
+  // rectangle rather than a second render target and a fullscreen pass. `ember` is the
+  // one accent, so the wash is cool on manifold and warm on console without a second,
+  // cinema-only colour.
+  //
+  // The vignette is `drawCheckEdges`'s nested-outline technique, neutral instead of red.
+  // It is a dark neutral taken from `shadow`, not `ink`/`soot`: those are the *page*
+  // colours and would lighten the light theme, exactly the trap M18.2 hit.
+  const view::Rgba dark = theme_.shadow.withAlpha(1.0f);
+  dl->AddRectFilled(min, max, u32(dark, 0.06f));
+  dl->AddRectFilled(min, max, u32(theme_.ember, 0.04f));
+  // Many thin rings rather than the check warning's seven fat ones. The check glow is a
+  // shout and reads as one; a cinema vignette has to be soft, and seven steps this size
+  // look like a picture frame. The alpha falls off quadratically so the weight sits at
+  // the very edge and the innermost rings are almost nothing.
+  constexpr int kRings = 80;
+  const float band = px(1.5f);
+  for (int i = 0; i < kRings; ++i) {
+    const float t = static_cast<float>(i) / static_cast<float>(kRings);
+    const float inset = static_cast<float>(i) * band;
+    const float alpha = 0.40f * (1.0f - t) * (1.0f - t);
+    dl->AddRect(ImVec2(min.x + inset, min.y + inset),
+                ImVec2(max.x - inset, max.y - inset), u32(dark, alpha), 0.0f, 0, band);
+  }
+}
+
 float Ui::outEase() const noexcept {
   return smoothstep(enter_ / kOutEnd);
 }
@@ -880,6 +913,13 @@ void Ui::drawGhost(app::Shell& shell) {
 }
 
 UiRequest Ui::build(app::Shell& shell, float fps) {
+  // Cinema is the board and the framing look, nothing else: no screen, no rails, no
+  // transition. The caller records this pass, so drawing only the look here is what keeps
+  // the furniture out while still compositing the grade and vignette over the board.
+  if (cinema_) {
+    drawCinemaLook();
+    return UiRequest{};
+  }
   // A screen change starts the camera moving and shoves the field towards the viewer -
   // or away from it, on the way back out.
   const int screen = static_cast<int>(shell.screen());

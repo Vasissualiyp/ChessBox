@@ -86,6 +86,9 @@ class Ui {
   /// that produces blurry text is not worth having. Must not be called inside a frame.
   Result<void> setScale(float scale);
   void setIconStyle(IconStyle s) noexcept { iconStyle_ = s; }
+  /// Cinema mode: the board is the whole frame and the interface's furniture is dropped.
+  /// The one thing still drawn is the frame's own look - the grade and the vignette.
+  void setCinema(bool on) noexcept { cinema_ = on; }
   /// Open the editor on a page, and the piece designer on one of its tabs. For `--shot`,
   /// so every designer is reviewable the same way every other screen is.
   void openEditorPage(int page, int tab = 0) noexcept {
@@ -137,6 +140,10 @@ class Ui {
   /// is on screen: the position is in trouble, but only while it is the thing being
   /// looked at. Returns with the game, not with the screen.
   void drawCheckEdges(app::Shell& shell);
+  /// The cinema frame's dressing (M18.3): a low-alpha grade and a neutral vignette, the
+  /// only thing the interface draws when `cinema_` is set. A 2-D draw-list overlay, like
+  /// the check warning, rather than a render-target post pass.
+  void drawCinemaLook();
 
   /// Where a pane sits in the shell's transition, as the scale and fade the pane is
   /// drawn with. The arriving pane and the departing ghost ask for their own.
@@ -202,6 +209,9 @@ class Ui {
   /// interface holds no opinion of its own about it.
   IconStyle iconStyle_{IconStyle::Faceted};
   float scale_{1.0f};
+  /// True while the interface is dressing a cinema capture rather than building a screen
+  /// (M18.3). Off for ordinary play, so the frame is byte-for-byte what it always was.
+  bool cinema_{false};
   /// The name in the pause menu's save/load field, kept between frames.
   char gameName_[64]{"quick"};
   /// The shell's clock, and where it is in a screen change. `enter_` runs 0 to 1 as a

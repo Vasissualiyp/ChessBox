@@ -167,6 +167,29 @@ if(TARGET chessbox_gui)
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(gui-play-deterministic PROPERTIES LABELS "render;gui" TIMEOUT 600
     ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  # M18.3: cinema adds a vignette and a grade, ordinary play does not. The torus as its
+  # own shape leaves the ring's centre as page, so corner-vs-centre reads the vignette
+  # cleanly; the ungraded frame must stay flat.
+  add_test(NAME gui-cinema-grade
+    COMMAND ${CMAKE_COMMAND}
+            -DGUI=$<TARGET_FILE:chessbox_gui>
+            -DWORKDIR=${PROJECT_SOURCE_DIR}
+            -DOUT_CINEMA=${CMAKE_BINARY_DIR}/render-captures/gui-cinema-grade-cinema.ppm
+            -DOUT_PLAIN=${CMAKE_BINARY_DIR}/render-captures/gui-cinema-grade-plain.ppm
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_cinema_grade.cmake
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(gui-cinema-grade PROPERTIES LABELS "render;gui" TIMEOUT 180
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  # And a validation-clean `--shot --cinema` on a flat board and a shape.
+  foreach(variant standard torus)
+    add_test(NAME gui-cinema-${variant}
+      COMMAND chessbox_gui ${variant}
+              --shot ${CMAKE_BINARY_DIR}/render-captures/gui-cinema-${variant}.ppm
+              --cinema
+      WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(gui-cinema-${variant} PROPERTIES LABELS "render;gui"
+      TIMEOUT 120 ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  endforeach()
   # The capture default resolution is 1920x1080 (M12.6); a regression to 1440x900 is
   # caught by reading the PPM header.
   add_test(NAME gui-default-resolution
