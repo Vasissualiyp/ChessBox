@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <numbers>
 
@@ -156,6 +157,111 @@ TEST_CASE("instances are built from a snapshot without a GPU", "[render]") {
     REQUIRE(selected == 1);
   }
 }
+
+TEST_CASE("a capture leaves a flourish and a quiet move leaves none", "[render]") {
+  // M18.1. The position is already post-move when the renderer sees it, so the captured
+  // piece is not on the board - the flourish is rebuilt from the animation's own copy of
+  // what was taken, shrunk and faded as a pure function of `t`, plus a blood flash at the
+  // square it stood on. A move that takes nothing has none of it.
+  const auto click = [](app::Session& s, std::initializer_list<int> at) {
+    app::Action a;
+    a.kind = app::ActionKind::ClickCell;
+    a.cell = s.variant().dims.toCell(Coord::of(at));
+    REQUIRE(s.apply(a).has_value());
+  };
+
+  BoardRenderer renderer;
+  auto session = app::Session::create(test::loadVariant("standard"));
+  REQUIRE(session.has_value());
+  app::Session& s = **session;
+  REQUIRE(s.loadFen("8/8/8/3p4/4P3/8/8/8 w - - 0 1").has_value());
+  click(s, {4, 3});  // e4
+  click(s, {3, 4});  // x d5
+  REQUIRE(s.animation().active());
+  REQUIRE(s.animation().captures());
+
+  const view::ViewConfig cfg = s.viewConfig();
+  const auto buildAt = [&](float t) {
+    s.setMoveProgress(t);
+    return renderer.buildInstances(s.snapshot(), cfg, &s.seams(), &s.animation());
+  };
+
+  // Before the fade begins the captured piece is whole: one instance, fully opaque.
+  const InstanceSet whole = buildAt(0.0f);
+  REQUIRE(whole.flourish.size() == 1);
+  CHECK(std::abs(whole.flourish[0].color[3] - 1.0f) < 1e-5f);
+
+  // Mid-fade the piece is still there but translucent, and the flash is rising.
+  const InstanceSet mid = buildAt(0.6f);
+  CHECK_FALSE(mid.flourish.empty());
+  bool sawBlood = false;
+  for (const Instance& f : mid.flourish) {
+    if (std::abs(f.color[0] - renderer.theme().blood.r) < 1e-4f &&
+        std::abs(f.color[1] - renderer.theme().blood.g) < 1e-4f &&
+        std::abs(f.color[2] - renderer.theme().blood.b) < 1e-4f) {
+      sawBlood = true;
+      CHECK(f.color[3] > 0.0f);
+    }
+  }
+  CHECK(sawBlood);
+
+  // Determinism: the same `t` twice is the same frame, byte for byte.
+  const InstanceSet again = buildAt(0.6f);
+  REQUIRE(again.flourish.size() == mid.flourish.size());
+  CHECK(std::memcmp(again.flourish.data(), mid.flourish.data(),
+                    mid.flourish.size() * sizeof(Instance)) == 0);
+
+  // By the time the capturing piece has arrived, the flourish is spent.
+  CHECK(buildAt(1.0f).flourish.empty());
+
+  // A move that takes nothing triggers nothing.
+  auto quiet = app::Session::create(test::loadVariant("standard"));
+  REQUIRE(quiet.has_value());
+  click(**quiet, {4, 1});  // e2
+  click(**quiet, {4, 3});  // e4
+  REQUIRE((*quiet)->animation().active());
+  CHECK_FALSE((*quiet)->animation().captures());
+  const InstanceSet none =
+      renderer.buildInstances((*quiet)->snapshot(), (*quiet)->viewConfig(),
+                              &(*quiet)->seams(), &(*quiet)->animation());
+  CHECK(none.flourish.empty());
+}
+
+#ifdef CB_HAVE_IMGUI
+TEST_CASE("a capture on the shape leaves a flourish on its own square", "[render]") {
+  // The geometry view builds its own pieces from `PlaySurface` seats rather than from the
+  // flat placements, so it needs its own version of the M18.1 flourish. No device: this
+  // is the instance builder, not a render.
+  BoardRenderer renderer;
+  auto session = app::Session::create(test::loadVariant("torus"));
+  REQUIRE(session.has_value());
+  app::Session& s = **session;
+  REQUIRE(s.loadFen("8/8/8/3p4/4P3/8/8/8 w - - 0 1").has_value());
+  const auto click = [&](std::initializer_list<int> at) {
+    app::Action a;
+    a.kind = app::ActionKind::ClickCell;
+    a.cell = s.variant().dims.toCell(Coord::of(at));
+    REQUIRE(s.apply(a).has_value());
+  };
+  click({4, 3});  // e4
+  click({3, 4});  // x d5
+  REQUIRE(s.animation().active());
+  REQUIRE(s.animation().captures());
+
+  BoardOptions options = renderer.options();
+  options.surface = true;
+  renderer.setOptions(options);
+  s.setMoveProgress(0.45f);
+  const InstanceSet set =
+      renderer.buildInstances(s.snapshot(), s.viewConfig(), &s.seams(), &s.animation());
+  CHECK_FALSE(set.flourish.empty());
+  bool translucent = false;
+  for (const Instance& f : set.flourish) {
+    if (f.color[3] > 0.0f && f.color[3] < 1.0f) translucent = true;
+  }
+  CHECK(translucent);
+}
+#endif
 
 TEST_CASE("a glued board marks each seam with the colour of where it leads", "[render]") {
   // One cyan rail per edge is not enough information: a cylinder and a Moebius band

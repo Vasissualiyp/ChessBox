@@ -53,7 +53,26 @@ struct MovePath {
   /// on the very first step.
   Direction startDir{};
   std::vector<PathStep> steps;
+  /// The square a piece was lifted from, or `kInvalidCell` when the move takes nothing.
+  /// This is `Move::captureCell`, not `Move::to`: they are the same square for every
+  /// ordinary capture and differ for exactly one move, en passant.
+  CellId captureCell{kInvalidCell};
+  /// The piece standing on `captureCell` before the move, empty if nothing was taken.
+  /// The position has already moved on by the time the renderer draws, so the flourish
+  /// needs its own copy of what left.
+  Piece captured{};
 };
+
+/// How much of a captured piece is still on the board, as a function of the move's own
+/// progress: 1 while the capturing piece is still on its way, falling smoothly to 0 by
+/// the time it arrives. The captured piece is lifted off the board, not deleted between
+/// frames. Pure in `progress`, so a `--clip` pinned at a `t` reproduces.
+[[nodiscard]] float captureFade(float progress) noexcept;
+
+/// The bright pulse at the captured square: 0 until the pieces close, a peak of 1 as they
+/// meet, back to 0 as the move lands. Same pure-in-`progress` contract as `captureFade`,
+/// and the same smoothstep shape `shotEnvelope` uses for the camera.
+[[nodiscard]] float captureFlash(float progress) noexcept;
 
 /// Trace the route a move took. `type` and `side` are the piece that moved, read from
 /// the position *before* the move is applied - which is also the position `pos` must be,
@@ -116,6 +135,14 @@ class MoveAnimation {
   /// move has finished.
   [[nodiscard]] float duration() const noexcept { return active_ ? duration_ : 0.0f; }
   [[nodiscard]] CellId travellingTo() const noexcept { return to_; }
+  /// True when the running move took something and the flourish has a piece to draw.
+  [[nodiscard]] bool captures() const noexcept {
+    return captureCell_ != kInvalidCell && !captured_.empty();
+  }
+  /// The square the captured piece stood on (`captureCell`, not `to`).
+  [[nodiscard]] CellId captureCell() const noexcept { return captureCell_; }
+  /// The piece the move took, as it stood before the move.
+  [[nodiscard]] Piece capturedPiece() const noexcept { return captured_; }
   /// The route this animation was last started with. Needed by anything that samples a
   /// *different* placement of the same move - the geometry view's surface sampler, which
   /// cannot reconstruct the route itself (M17.15).
@@ -130,6 +157,10 @@ class MoveAnimation {
   float elapsed_{0};
   float duration_{0.0001f};
   CellId to_{kInvalidCell};
+  /// The capture the running move carries, kept so the renderer can draw its flourish
+  /// after the position has already moved on (M18.1).
+  CellId captureCell_{kInvalidCell};
+  Piece captured_{};
   MovePath path_;
   std::vector<Run> runs_;
   std::vector<float> runStart_;  ///< normalised time each run begins at

@@ -313,8 +313,8 @@ TEST_CASE("an en-passant capture animates like the move it is", "[unit][view]") 
   const VariantSpec v = test::loadVariant("standard");
   const PieceTypeId pawn = v.findPiece("pawn");
   Move m;
-  m.from = v.dims.toCell(Coord::of({4, 4}));   // e5
-  m.to = v.dims.toCell(Coord::of({3, 5}));     // d6
+  m.from = v.dims.toCell(Coord::of({4, 4}));         // e5
+  m.to = v.dims.toCell(Coord::of({3, 5}));           // d6
   m.captureCell = v.dims.toCell(Coord::of({3, 4}));  // the pawn on d5
   m.flags = MoveFlag::Capture | MoveFlag::EnPassant;
 
@@ -324,6 +324,10 @@ TEST_CASE("an en-passant capture animates like the move it is", "[unit][view]") 
   REQUIRE_FALSE(p.unexplained);
   REQUIRE(p.steps.size() == 1);
   CHECK(p.steps[0].to == m.to);
+  // The flourish must fade the pawn on d5, not the empty square the capturer lands on.
+  CHECK(p.captureCell == m.captureCell);
+  REQUIRE_FALSE(p.captured.empty());
+  CHECK(p.captured.colorOf() == Color::Black);
 
   const ViewConfig cfg = ViewConfig::forBoard(v.dims);
   const auto placements = layout(v.dims, cfg);
@@ -335,6 +339,67 @@ TEST_CASE("an en-passant capture animates like the move it is", "[unit][view]") 
     (void)anim.sample();
     anim.advance(0.01f);
   }
+}
+
+TEST_CASE("a capture's flourish is a pure function of the move's progress",
+          "[unit][view]") {
+  // M18.1. The captured piece stays whole through the body of the move and is gone by the
+  // time the capturing piece lands; the flash peaks as the two meet. Both read `t` and
+  // nothing else, so a `--clip` pinned at a `t` is byte-identical on re-export.
+  CHECK(captureFade(0.0f) == 1.0f);
+  CHECK(captureFade(1.0f) == 0.0f);
+  CHECK(captureFlash(0.0f) == 0.0f);
+  CHECK(captureFlash(1.0f) == 0.0f);
+
+  float fade = 1.0f;
+  float prevFlash = -1.0f;
+  bool rose = false;
+  bool fell = false;
+  for (int i = 0; i <= 100; ++i) {
+    const float t = static_cast<float>(i) / 100.0f;
+    const float f = captureFade(t);
+    const float g = captureFlash(t);
+    CHECK(f >= 0.0f);
+    CHECK(f <= 1.0f);
+    CHECK(f <= fade + 1e-6f);  // monotonic non-increasing
+    fade = f;
+    CHECK(g >= 0.0f);
+    CHECK(g <= 1.0f);
+    if (g > prevFlash + 1e-6f) rose = true;
+    if (g < prevFlash - 1e-6f) fell = true;
+    prevFlash = g;
+  }
+  CHECK(rose);
+  CHECK(fell);
+}
+
+TEST_CASE("the route remembers what it took", "[unit][view]") {
+  // The position has already moved on by the time the renderer draws, so the captured
+  // piece is not on the board it is handed. The trace carries a copy of it - and it is
+  // `captureCell`, never `to`, that names the square, because en passant is the one move
+  // where the two differ (AGENTS.md's gotcha).
+  const VariantSpec v = test::loadVariant("standard");
+  const PieceTypeId pawn = v.findPiece("pawn");
+  const Position pos = board(v, "8/8/8/3p4/4P3/8/8/8 w - - 0 1");
+  Move m;
+  m.from = v.dims.toCell(Coord::of({4, 3}));  // e4
+  m.to = v.dims.toCell(Coord::of({3, 4}));    // d5
+  m.captureCell = m.to;
+  m.flags = static_cast<std::uint8_t>(MoveFlag::Capture);
+  const MovePath p = tracePath(v, pos, pawn, Color::White, m);
+  CHECK(p.captureCell == m.to);
+  REQUIRE_FALSE(p.captured.empty());
+  CHECK(p.captured.colorOf() == Color::Black);
+
+  const ViewConfig cfg = ViewConfig::forBoard(v.dims);
+  const Theme theme = Theme::manifold();
+  const SeamMap seams = SeamMap::build(v, cfg, theme);
+  MoveAnimation anim;
+  anim.start(cfg, layout(v.dims, cfg), seams, theme, p, 0.12f);
+  REQUIRE(anim.active());
+  CHECK(anim.captures());
+  CHECK(anim.captureCell() == p.captureCell);
+  CHECK_FALSE(anim.capturedPiece().empty());
 }
 
 TEST_CASE("a move no atom explains is animated, not crashed on", "[unit][view]") {

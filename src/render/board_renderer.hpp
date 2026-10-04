@@ -110,6 +110,13 @@ struct InstanceSet {
   /// vertices are already in world space. The pipeline needs *an* instance bound.
   std::uint32_t surfaceInstance{0};
 
+  /// The capture flourish (M18.1): the captured piece shrinking out and the blood flash
+  /// at the square it stood on. Kept apart from `instances` because these must be drawn
+  /// with alpha blending - their alpha *is* the fade - in one pass after the opaque board
+  /// rather than in the per-shape batches, which write depth and do not blend.
+  std::vector<Instance> flourish;
+  std::array<Batch, static_cast<std::size_t>(Archetype::Count)> flourishBatches{};
+
   [[nodiscard]] std::size_t size() const noexcept { return instances.size(); }
 };
 

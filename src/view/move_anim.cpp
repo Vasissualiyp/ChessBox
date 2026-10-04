@@ -50,7 +50,34 @@ CrossedFace firstCrossedFace(const VariantSpec& v, const Walker& before) {
   return {};
 }
 
+/// The one easing every flourish uses: smoothstep, the same shape the move camera's shot
+/// envelope is built from, so no second curve vocabulary appears in the animation.
+float smoothstep(float t) {
+  t = std::clamp(t, 0.0f, 1.0f);
+  return t * t * (3.0f - 2.0f * t);
+}
+
 }  // namespace
+
+float captureFade(float progress) noexcept {
+  // Whole through the first fifth of the move, gone four fifths of the way in - the last
+  // stretch belongs to the capturing piece's arrival, not to the piece that is leaving.
+  const float begin = 0.18f;
+  const float end = 0.82f;
+  if (progress <= begin) return 1.0f;
+  if (progress >= end) return 0.0f;
+  return 1.0f - smoothstep((progress - begin) / (end - begin));
+}
+
+float captureFlash(float progress) noexcept {
+  // A short pulse that rises as the pieces close and is spent by the time the move lands.
+  const float begin = 0.50f;
+  const float peak = 0.80f;
+  const float end = 1.0f;
+  if (progress <= begin || progress >= end) return 0.0f;
+  if (progress < peak) return smoothstep((progress - begin) / (peak - begin));
+  return smoothstep((end - progress) / (end - peak));
+}
 
 MovePath tracePath(const VariantSpec& v, const Position& pos, PieceTypeId type,
                    Color side, const Move& m) {
@@ -58,6 +85,11 @@ MovePath tracePath(const VariantSpec& v, const Position& pos, PieceTypeId type,
   best.from = m.from;
   best.to = m.to;
   best.unexplained = true;
+  // What the move took, recorded before the position is allowed to move on: the renderer
+  // draws the captured piece's flourish from here, and it is `captureCell` (d5 for an en
+  // passant) rather than `to` (d6) that says where it stood.
+  best.captureCell = m.captureCell;
+  if (m.captureCell != kInvalidCell) best.captured = pos.at(m.captureCell);
 
   if (type == kNoPiece || type >= v.pieces.size()) return best;
   const PieceTypeDef& piece = v.pieces[type];
@@ -144,6 +176,8 @@ void MoveAnimation::clear() {
   runEnd_.clear();
   portals_.clear();
   to_ = kInvalidCell;
+  captureCell_ = kInvalidCell;
+  captured_ = Piece{};
 }
 
 void MoveAnimation::start(const ViewConfig& cfg, const std::vector<Placement>& placements,
@@ -153,6 +187,8 @@ void MoveAnimation::start(const ViewConfig& cfg, const std::vector<Placement>& p
   if (path.from == kInvalidCell || path.to == kInvalidCell) return;
   if (secondsPerCell <= 0.0f) return;
   path_ = path;  // the route, for anything that samples it on another placement (M17.15)
+  captureCell_ = path.captureCell;
+  captured_ = path.captured;
 
   // Gather the world positions this route needs in one pass over the placements, rather
   // than building a cell-indexed table: a move touches a handful of cells and the

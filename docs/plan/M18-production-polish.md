@@ -82,6 +82,53 @@ legibility at trailer resolution, not a cosmetics system with options. Must not 
 `Move`/`MoveAnimation`'s timing contract that the move camera (M11) already depends on - this
 is a draw-time decoration over an unchanged animation, not a longer move.
 
+### Status: M18.1 built (2026-10-04, opencode)
+
+A capture now leaves a flourish: the captured piece shrinks and fades out over the move,
+and a blood flash pulses at the square it stood on as the pieces meet.
+
+- **Where it hooks.** The spec guessed the captured piece "is drawn normally until the move
+  resolves, then dropped". It is not: `Session::playChecked` applies the move and calls
+  `refreshSnapshot` *before* `MoveAnimation::start`, so the captured piece is already absent
+  from the `PositionView` the renderer is handed. `view::tracePath` (which already runs
+  against the pre-move position) now records `MovePath::captureCell` and a copy of the
+  captured `Piece`; `MoveAnimation::start` keeps them and exposes `captures()`,
+  `captureCell()`, `capturedPiece()`. `BoardRenderer::buildInstances` rebuilds the piece
+  from that copy. `captureCell` is used, never `to`, so en passant fades the pawn on d5, not
+  the empty square the capturer lands on (AGENTS.md's gotcha).
+- **Pure function of `t`.** `view::captureFade(progress)` returns 1 through the first fifth
+  of the move and falls smoothly to 0 by four fifths of the way in (before the capturing
+  piece arrives); `view::captureFlash(progress)` is a smoothstep pulse peaking at `t = 0.8`.
+  Both live in `src/view/move_anim.cpp` and reuse the `shotEnvelope`-style smoothstep, with
+  no new curve vocabulary and no state beyond `MoveAnimation`'s own progress.
+- **The blended pass.** The opaque pipeline writes alpha but does not blend, so the flourish
+  is kept in a new `InstanceSet::flourish`/`flourishBatches` and drawn as one extra group
+  with the existing GHOST `surfaceBlendPipeline_` (blend on, depth write off, depth test on)
+  - no new pipeline, no second buffer; the flourish instances ride the instance buffer
+  immediately after the opaque ones. The flash is `Archetype::Cell` scaled and grown as it
+  fades, coloured `Theme::blood` (the check-vignette hue), as the spec allows. Both the flat
+  board and the geometry view emit the flourish; flat (`options_.flat`, UI-drawn pieces) is
+  skipped.
+- **Tests.** `[view]` unit tests pin `captureFade`/`captureFlash` boundaries and
+  monotonicity and that the trace/animation carry the captured piece (including en passant);
+  a no-GPU `[render]` test builds instances for a real `standard` capture and checks one
+  opaque captured piece at `t = 0`, a translucent piece plus a blood flash mid-window,
+  byte-identical `flourish` on a repeat build, an empty flourish at `t = 1`, and an empty
+  flourish for a non-capturing move; a second no-GPU test does the same for `torus` with
+  `options.surface` on, so the geometry view's own copy of the flourish is covered.
+- **Deviations.** (1) The captured piece had to be carried on `MovePath`/`MoveAnimation`
+  rather than read from a snapshot that no longer has it. (2) The fade is drawn through the
+  existing GHOST blend pipeline rather than by adding blending to the opaque one or a new
+  pipeline. (3) The flash is the reusable cell slab, not a new ring archetype (the spec's
+  cheaper option).
+- **Verification.** `tools/test.sh --build view render` green; `tools/precommit.sh` green
+  (format, build, arch, unit, property). Visually validated with
+  `standard --cinema --move-t T --script` (e2-e4, d7-d5, exd5) rendered to
+  `build/m181_check/`: at `t = 0` the black pawn sits whole on d5, at `t = 0.45` it is
+  shrunk and translucent against the arriving white pawn, at `t = 0.8` a red flash covers
+  the square, at `t = 0.95` both are spent. Two captures at the same `t` are byte-identical
+  (`cmp`), and every capture is validation-clean.
+
 ## M18.2 Contact shadows
 
 **Want.** Every capture taken during Wave 1's QA pass shows pieces that read as floating a

@@ -809,10 +809,12 @@ InstanceSet BoardRenderer::buildInstances(
 
     std::vector<std::vector<Instance>> byShape(
         static_cast<std::size_t>(Archetype::Count));
-    const auto emitSurfacePiece = [&](const Piece& piece, const view::Vec3& centre,
+    const auto emitSurfacePiece = [&](std::vector<std::vector<Instance>>& into,
+                                      const Piece& piece, const view::Vec3& centre,
                                       const view::Vec3& normal,
                                       const std::array<float, 4>& quat, float fit,
-                                      bool inCheck) {
+                                      bool inCheck, float alpha = 1.0f,
+                                      float scaleMul = 1.0f) {
       view::Rgba pc =
           piece.colorOf() == Color::White ? theme_.whitePiece : theme_.blackPiece;
       if (options_.showCheck && inCheck) pc = mix(pc, theme_.blood, 0.65f);
@@ -826,15 +828,16 @@ InstanceSet BoardRenderer::buildInstances(
       // measure is the square's mean side rather than its shorter one: an embedding
       // squeezes one axis and stretches the other - a Moebius square is four times longer
       // than it is wide - and a piece sized to the short side there is a speck.
-      body.scale[0] = 0.8f * fit;
-      body.scale[1] = 0.8f * fit;
-      body.scale[2] = 0.8f * fit * hgt;
+      body.scale[0] = 0.8f * fit * scaleMul;
+      body.scale[1] = 0.8f * fit * scaleMul;
+      body.scale[2] = 0.8f * fit * hgt * scaleMul;
       body.quat[0] = quat[0];
       body.quat[1] = quat[1];
       body.quat[2] = quat[2];
       body.quat[3] = quat[3];
       toFloat4(pc, body.color);
-      byShape[static_cast<std::size_t>(shape[piece.type])].push_back(body);
+      body.color[3] = alpha;
+      into[static_cast<std::size_t>(shape[piece.type])].push_back(body);
     };
     for (const SurfaceSeat& seat : surf.seats()) {
       const Piece piece = p.at(seat.cell);
@@ -844,7 +847,7 @@ InstanceSet BoardRenderer::buildInstances(
       if (anim != nullptr && anim->active() && seat.cell == anim->travellingTo())
         continue;
       const float fit = std::min(std::sqrt(seat.stepU * seat.stepV), 1.0f);
-      emitSurfacePiece(piece, seat.centre, seat.normal, seat.quat, fit,
+      emitSurfacePiece(byShape, piece, seat.centre, seat.normal, seat.quat, fit,
                        seat.cell == checkCell_);
     }
     // The mover, part-way along the surface between its start and its end.
@@ -853,8 +856,45 @@ InstanceSet BoardRenderer::buildInstances(
       if (!moving.empty()) {
         const SurfaceMoveSample s =
             surfaceMoveSample(anim->path(), surf, anim->progress());
-        emitSurfacePiece(moving, s.position, s.normal, s.quat, s.fit,
+        emitSurfacePiece(byShape, moving, s.position, s.normal, s.quat, s.fit,
                          anim->travellingTo() == checkCell_);
+      }
+    }
+
+    // M18.1: the same capture flourish as the flat board, on its own square of the
+    // surface - the captured piece shrinking and fading, and a blood flash at its foot.
+    std::vector<std::vector<Instance>> byShapeFlourish(
+        static_cast<std::size_t>(Archetype::Count));
+    if (anim != nullptr && anim->active() && anim->captures()) {
+      const float t = anim->progress();
+      const float fade = view::captureFade(t);
+      const float flash = view::captureFlash(t);
+      for (const SurfaceSeat& seat : surf.seats()) {
+        if (seat.cell != anim->captureCell()) continue;
+        if (fade > 0.0f) {
+          const float fit = std::min(std::sqrt(seat.stepU * seat.stepV), 1.0f);
+          emitSurfacePiece(byShapeFlourish, anim->capturedPiece(), seat.centre,
+                           seat.normal, seat.quat, fit, false, fade,
+                           0.35f + 0.65f * fade);
+        }
+        if (flash > 0.0f) {
+          Instance ring{};
+          ring.center[0] = seat.centre.x + seat.normal.x * kHalf;
+          ring.center[1] = seat.centre.y + seat.normal.y * kHalf;
+          ring.center[2] = seat.centre.z + seat.normal.z * kHalf;
+          const float grow = 0.45f + 0.75f * (1.0f - flash);
+          ring.scale[0] = grow;
+          ring.scale[1] = grow;
+          ring.scale[2] = 0.14f;
+          ring.quat[0] = seat.quat[0];
+          ring.quat[1] = seat.quat[1];
+          ring.quat[2] = seat.quat[2];
+          ring.quat[3] = seat.quat[3];
+          toFloat4(theme_.blood, ring.color);
+          ring.color[3] = flash * 0.85f;
+          byShapeFlourish[static_cast<std::size_t>(Archetype::Cell)].push_back(ring);
+        }
+        break;
       }
     }
 
@@ -865,6 +905,13 @@ InstanceSet BoardRenderer::buildInstances(
       out.batches[sh].first = static_cast<std::uint32_t>(out.instances.size());
       out.batches[sh].count = static_cast<std::uint32_t>(byShape[sh].size());
       out.instances.insert(out.instances.end(), byShape[sh].begin(), byShape[sh].end());
+    }
+    for (std::size_t sh = 0; sh < byShapeFlourish.size(); ++sh) {
+      out.flourishBatches[sh].first = static_cast<std::uint32_t>(out.flourish.size());
+      out.flourishBatches[sh].count =
+          static_cast<std::uint32_t>(byShapeFlourish[sh].size());
+      out.flourish.insert(out.flourish.end(), byShapeFlourish[sh].begin(),
+                          byShapeFlourish[sh].end());
     }
     // The board mesh is already in world space and already coloured, so its instance is
     // the identity: no offset, unit scale, white, and no seam band.
@@ -1330,6 +1377,62 @@ InstanceSet BoardRenderer::buildInstances(
     }
   }
 
+  // M18.1: the capture flourish. The position has already moved on, so the captured piece
+  // is no longer in `placements` - the animation kept its own copy and the square it
+  // stood on (`captureCell`, which for en passant is not the landing square). It shrinks
+  // and fades out as a pure function of `t`, so a clip stays reproducible, and a blood
+  // flash marks the square at the moment the pieces meet. Both are drawn blended further
+  // down, which is why their alpha is the fade rather than a number nothing reads.
+  std::vector<std::vector<Instance>> byShapeFlourish(
+      static_cast<std::size_t>(Archetype::Count));
+  if (anim != nullptr && anim->active() && anim->captures() && !options_.flat) {
+    const float t = anim->progress();
+    const float fade = view::captureFade(t);
+    const float flash = view::captureFlash(t);
+    const view::Placement* at = nullptr;
+    for (const view::Placement& pl : placements) {
+      if (pl.cell == anim->captureCell()) {
+        at = &pl;
+        break;
+      }
+    }
+    if (at != nullptr) {
+      if (fade > 0.0f) {
+        const Piece taken = anim->capturedPiece();
+        Instance body{};
+        body.center[0] = at->x;
+        body.center[1] = at->y;
+        body.center[2] = at->z + half.z;
+        const float h = 1.0f + (height[taken.type] - 1.0f) * options_.pieceHeightScale;
+        const float s = 0.8f * fade;
+        body.scale[0] = s;
+        body.scale[1] = s;
+        body.scale[2] = s * h;
+        view::Rgba pc =
+            taken.colorOf() == Color::White ? theme_.whitePiece : theme_.blackPiece;
+        toFloat4(pc, body.color);
+        body.color[3] = fade;
+        byShapeFlourish[static_cast<std::size_t>(shape[taken.type])].push_back(body);
+      }
+      if (flash > 0.0f) {
+        // The flash is the flat cell slab, scaled larger as it fades so it reads as a
+        // pulse rather than a square that blinks out. It sits just above the cell so it
+        // never z-fights the board underneath it.
+        Instance ring{};
+        ring.center[0] = at->x;
+        ring.center[1] = at->y;
+        ring.center[2] = at->z + half.z + 0.012f;
+        const float grow = 0.45f + 0.75f * (1.0f - flash);
+        ring.scale[0] = grow;
+        ring.scale[1] = grow;
+        ring.scale[2] = 0.14f;
+        toFloat4(theme_.blood, ring.color);
+        ring.color[3] = flash * 0.85f;
+        byShapeFlourish[static_cast<std::size_t>(Archetype::Cell)].push_back(ring);
+      }
+    }
+  }
+
   InstanceSet out;
   std::size_t total = 0;
   for (const auto& group : byShape) total += group.size();
@@ -1338,6 +1441,12 @@ InstanceSet BoardRenderer::buildInstances(
     out.batches[s].first = static_cast<std::uint32_t>(out.instances.size());
     out.batches[s].count = static_cast<std::uint32_t>(byShape[s].size());
     out.instances.insert(out.instances.end(), byShape[s].begin(), byShape[s].end());
+  }
+  for (std::size_t s = 0; s < byShapeFlourish.size(); ++s) {
+    out.flourishBatches[s].first = static_cast<std::uint32_t>(out.flourish.size());
+    out.flourishBatches[s].count = static_cast<std::uint32_t>(byShapeFlourish[s].size());
+    out.flourish.insert(out.flourish.end(), byShapeFlourish[s].begin(),
+                        byShapeFlourish[s].end());
   }
   return out;
 }
@@ -1390,13 +1499,17 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
                                    const view::OrbitCamera& camera,
                                    const std::function<void(VkCommandBuffer)>& overlay,
                                    BoardRect boardRect, std::uint32_t frame) {
-  if (auto r = ensureInstanceCapacity(frame, set.instances.size()); !r.has_value())
-    return r;
-  if (!set.instances.empty()) {
+  // The flourish instances ride the same buffer, immediately after the opaque ones, so
+  // the blended pass is one more draw group rather than a second buffer.
+  const std::size_t instanceCount = set.instances.size() + set.flourish.size();
+  if (auto r = ensureInstanceCapacity(frame, instanceCount); !r.has_value()) return r;
+  if (instanceCount > 0) {
     void* mapped = nullptr;
-    vkMapMemory(ctx_->device(), instanceMem_[frame], 0,
-                set.instances.size() * sizeof(Instance), 0, &mapped);
+    vkMapMemory(ctx_->device(), instanceMem_[frame], 0, instanceCount * sizeof(Instance),
+                0, &mapped);
     std::memcpy(mapped, set.instances.data(), set.instances.size() * sizeof(Instance));
+    std::memcpy(static_cast<char*>(mapped) + set.instances.size() * sizeof(Instance),
+                set.flourish.data(), set.flourish.size() * sizeof(Instance));
     vkUnmapMemory(ctx_->device(), instanceMem_[frame]);
   }
 
@@ -1541,6 +1654,27 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
         vkCmdBindIndexBuffer(cmd, surfaceIndexBuffer_[frame], 0, VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(cmd, static_cast<std::uint32_t>(set.surfaceIndices.size()), 1, 0,
                          0, set.surfaceInstance);
+      }
+    }
+    // The capture flourish (M18.1), last and blended: alpha is the fade, so it cannot
+    // ride the opaque per-shape batches above. Depth writes are off but the test stays
+    // on, so a fading piece is still hidden by whatever is in front of it.
+    if (!set.flourish.empty()) {
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, surfaceBlendPipeline_);
+      vkCmdPushConstants(cmd, layout_,
+                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                         sizeof(PushConstants), &push);
+      const VkDeviceSize zero = 0;
+      vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer_, &zero);
+      vkCmdBindVertexBuffers(cmd, 1, 1, &instanceBuffer_[frame], &zero);
+      vkCmdBindIndexBuffer(cmd, indexBuffer_, 0, VK_INDEX_TYPE_UINT16);
+      const std::uint32_t base = static_cast<std::uint32_t>(set.instances.size());
+      for (std::size_t s = 0; s < set.flourishBatches.size(); ++s) {
+        const auto& batch = set.flourishBatches[s];
+        if (batch.count == 0) continue;
+        const MeshRange& range = meshes_.ranges[s];
+        vkCmdDrawIndexed(cmd, range.indexCount, batch.count, range.firstIndex,
+                         range.vertexOffset, base + batch.first);
       }
     }
     vkCmdEndRendering(cmd);
