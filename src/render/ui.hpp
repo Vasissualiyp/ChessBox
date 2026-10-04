@@ -47,6 +47,15 @@ struct UiRequest {
   std::string gameName;
 };
 
+/// Whether the camera-projected file/rank coordinate labels are drawn.
+///
+/// They are flat text projected through the camera, which reads badly under any 3-D
+/// perspective - a letter skews, overlaps its neighbour, or goes nearly edge-on - so they
+/// appear only in the flat 2-D view, never the solid one and never on the shape.
+/// `showCoordinates` still owns them within that (M17.21 label revision).
+[[nodiscard]] bool coordinateLabelsShown(const app::Settings& settings,
+                                         const app::Session& session) noexcept;
+
 /// The game's interface: rails, ledger, status, promotion, library.
 ///
 /// Drawn with Dear ImGui, restyled until it stops looking like Dear ImGui - the

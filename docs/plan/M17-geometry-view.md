@@ -1887,6 +1887,31 @@ not a quick fix, and belongs to a later pass once the rest of the visual languag
 settled. Do not attempt a redesign as part of disabling the current one; this entry is the
 placeholder to pick back up.
 
+### Status: coordinate labels disabled in 3-D built (2026-10-04, opencode)
+
+The 3-D labels are off; the flat 2-D labels and the seam rails are untouched.
+
+- **What changed.** `Ui::buildGameHud`'s label block was gated on `showCoordinates && dims
+  == 2` alone, so it drew camera-projected text on the ordinary solid board and, since
+  M17.21, on the shape. The gate is now the pure predicate
+  `render::coordinateLabelsShown(settings, session)` (`src/render/ui.cpp`, declared in
+  `ui.hpp`), which adds `session.flatView()`, so the block runs only in the flat 2-D
+  projection. Both the pre-existing flat-3D branch and M17.21's surface branch live inside
+  it and so are dropped together. The seam rails are the separate `showSeams` feature and
+  were not touched. (The condition was extracted into a named predicate rather than grown
+  in place, so the decision is testable without a device - a small deviation for
+  testability, no behaviour beyond the gate.)
+- **Tests.** New `tests/render/test_ui_labels.cpp` pins the predicate: shown on a flat 2-D
+  board, hidden once `flatView` is off (the solid board and the shape alike), hidden with
+  `showCoordinates` off, and hidden on a 3-D variant. `tools/test.sh --build render` green
+  (101 cases, 4.6M assertions).
+- **Verification.** `--shot` captures under `build/m17labels_check/` (repo-local, ignored):
+  the flat solid board (`standard`) and the shape (`torus --geometry`) are **byte-identical
+  in the board region** with `showCoordinates` on and off - the labels are gone - while the
+  flat 2-D board differs between on and off, i.e. the `a-h`/`1-8` labels are still drawn
+  there. The shape capture still shows the two hue-ramped seam rings. `tools/precommit.sh`
+  green (format, build, arch, unit, property).
+
 Spec'd in full in
 [`M17.12-shapes-above-two-dimensions.md`](M17.12-shapes-above-two-dimensions.md): slide and
 invert for `torus3d`/`hyper4` (currently ignored by `buildStacked`), a ghost-based answer to

@@ -25,6 +25,15 @@
 
 namespace cb::render {
 using namespace widgets;
+
+bool coordinateLabelsShown(const app::Settings& settings,
+                           const app::Session& session) noexcept {
+  // The flat 2-D projection is the only one the camera-projected text reads in; the solid
+  // board and the shape both drop it (M17.21 label revision).
+  return settings.showCoordinates && session.variant().dims.dims() == 2 &&
+         session.flatView();
+}
+
 namespace {
 
 std::filesystem::path findFont(const char* name) {
@@ -1020,9 +1029,14 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   // rank numbers along the file-0 ring - each pushed out along its seat's own normal
   // (M17.21). Both views share the one `showCoordinates` toggle and the machine face, so
   // a coordinate reads as a measurement either way.
+  //
+  // Projected text only reads in the flat 2-D view, though: in a 3-D perspective a letter
+  // skews, overlaps its neighbour, or goes nearly edge-on, so the whole block is gated on
+  // the flat view and neither the solid board nor the shape draws it (M17.21 label
+  // revision). The seam rails are presentation, not text, and stay.
   const bool surfaceView =
       shell.settings().geometryView && hasPlaySurface(session.variant());
-  if (shell.settings().showCoordinates && v.dims.dims() == 2) {
+  if (coordinateLabelsShown(shell.settings(), session)) {
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
     const view::OrbitCamera cam = session.camera();
     const float w = vp->Size.x;
