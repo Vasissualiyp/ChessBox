@@ -1931,3 +1931,127 @@ deferred, with the reason recorded in
   `torus3d_twist` goldens green; `tools/precommit.sh` green (format, arch, unit, property).
   `nix flake check` was not run (the spec's acceptance asks for it, but AGENTS.md marks it
   the release gate and the task budget allowed skipping it).
+
+---
+
+## M17.23 Bug fix: the Approach/Return camera loses the board entirely
+
+Found 2026-10-04, independently verifying M12.6's runner: a `--play --clip` export of a
+single followed move on `torus` has frames that are **completely empty** - not small, not
+distant, a single flat background colour across every pixel (confirmed: sampling
+`frame_0077.ppm` from a 113-frame clip gives one RGB value for all 2,073,600 pixels). It
+happens during the choreography's Return stage (M17.19) - the camera flying from the close
+chase shot back to the settled, far-above-the-board view.
+
+### Root cause
+
+The Approach/Return blend (`src/render/shape_sequence.cpp`, one call site:
+`seq.camera = view::slerpCamera(session->playerCamera(), want, amount)`) uses
+`view::slerpCamera` (`src/view/camera.cpp`). That function interpolates the camera's **eye
+position** on a straight line in world space, and *derives* `target` from it afterwards:
+
+```cpp
+const Vec3 eye = a.eye() + (b.eye() - a.eye()) * t;
+out.target = eye - e * out.distance;  // e is the slerped view direction
+```
+
+`OrbitCamera` itself does not work this way anywhere else: `target` is the primary,
+authored state (`distance`, `yaw`, `pitch` orbit *around* it) and `eye()` is always a
+*derived* method (`target + direction * distance`). `slerpCamera` inverts that relationship
+- it treats eye as primary and back-solves a target - for exactly the one blend where the
+two endpoints' targets are **not** the same point: `a` is `session->playerCamera()`,
+targeting the board's centre; `b` (`want`) is the chase camera, targeting the piece
+(`surfaceChaseCamera` sets `cam.target = piece.position`, pinned at the landed square during
+Return). A straight eye-space line between a close, piece-centred vantage and a far,
+board-centred one, combined with an *independently* slerped orientation, has no reason to
+keep either target in view partway through - and empirically does not.
+
+**Why the existing test did not catch it.** `tests/unit/view/test_camera.cpp`,
+`"slerpCamera's eye travels a straight line"` is the one test that exercises intermediate
+`t` values, and it sets `a.target = b.target = {0,0,0}` - the *same* point for both
+endpoints. Under same-target inputs the bug's symptom (the derived target drifting away
+from the thing both cameras are actually looking at) is invisible by construction: there is
+only one subject position to begin with, and "eye travels a straight line" says nothing
+about where `target` ends up at intermediate `t` - the test never asserts it. The
+Approach/Return use case this function was built for (M17.19) has **always** had different
+targets; nothing exercised that shape until a full clip was captured and inspected frame by
+frame.
+
+### The fix
+
+Make `target` the thing that is linearly interpolated, and derive `eye` from it - matching
+`OrbitCamera`'s own representation instead of inverting it:
+
+```cpp
+out.target = a.target + (b.target - a.target) * t;
+out.distance = std::max(0.5f, a.distance + (b.distance - a.distance) * t);  // unchanged
+// yaw/pitch/roll: still derived from the slerped quaternion `q`, exactly as today -
+// this is the part M17.19 added to fix the 720-degree-spin defect, and it is untouched.
+```
+
+The orientation slerp (`q = slerp(qa, qb, t)`, and the roll derivation beneath it) is
+**not** the part that is wrong and should not change - `"slerpCamera turns the shortest
+way, never the long way"` pins exactly that property and must keep passing unmodified. Only
+the eye/target relationship inverts. Remove the `eye = lerp(...); target = eye -
+e*distance;` lines entirely; `out.eye()` is then whatever `OrbitCamera::eye()` already
+computes from the new `target`/`distance`/orientation, the same as every other camera in
+the codebase.
+
+**Why this is correct, not just a different bug.** Both `a.target` and `b.target` are
+always on or at the board in every real caller (`session->playerCamera()` targets the board
+centre; a chase/follow camera's target is always a cell or a point on the shape) - so a
+*linear interpolation between two points that are both at/near the board stays at/near the
+board for every `t` in between*, by convexity. That is the literal guarantee the empty
+frame is missing. For the degenerate case the existing test already covers - `a.target ==
+b.target` - this is additionally an improvement, not merely a different behaviour: `target`
+now stays at that exact point for every `t`, rather than only approximately recovering it
+(the old formula's `target` was never actually pinned to equal the shared point at
+intermediate `t` - no test checked that it did).
+
+### Tests
+
+- **Replace** `"slerpCamera's eye travels a straight line"` with
+  `"slerpCamera's target travels a straight line"` - same structure (sample `t` from 0 to
+  1, check against the linear-interpolation prediction), asserting `target` instead of
+  `eye`. If a test still wants an eye-path property, state the weaker one that is actually
+  true now (eye is a smooth, continuous function of `t`, not necessarily straight) rather
+  than deleting coverage outright.
+- **Keep** `"slerpCamera ends on its endpoints"` and
+  `"slerpCamera turns the shortest way, never the long way"` passing unmodified - both are
+  about properties this fix does not touch (endpoint exactness, orientation sweep).
+- **New regression test, built from the actual failure shape**: two `OrbitCamera`s with
+  *different* targets - one far and board-centred, one close and piece-centred, matching
+  the real Align/Approach/Return magnitudes (`distance` around 8-10 for the settled camera,
+  2-4 for a close chase, per `chaseEyeDistance`'s own `0.7 * span` scale) - and assert that
+  for a dense sweep of `t`, **both** `a.target` and `b.target` project to `visible` (or at
+  least one point of a small sphere around each does, to allow for some camera slack)
+  through `slerpCamera(a, b, t)`'s resulting camera. This is the test that must fail on the
+  current code and pass after - confirm it does, the same discipline M17.20 used.
+- **End-to-end**: re-run the exact scenario that found this (`torus`, a followed move,
+  `--play`/`--clip` through the Return stage) and confirm no frame in the sequence is a
+  single flat colour - sample a handful of frames' pixel variance, not just one.
+
+### Acceptance
+
+1. The new regression test (different targets) passes; the existing three `slerpCamera`
+   tests pass with only the one named replacement.
+2. A re-capture of the clip that found this bug (`torus`, the a1-a5-style followed move,
+   `--play`/`--clip` through a full Approach/Return cycle) has no empty frame anywhere in
+   the sequence - every frame's pixel variance is above a trivial threshold.
+3. `tools/test.sh --build render` green; `--play --clip` determinism (byte-identical on
+   re-export) is unaffected, since this changes *what* the camera computes, not whether it
+   reads a clock.
+
+### Risks and non-goals
+
+- This is the one call site (`src/render/shape_sequence.cpp`) and the one function
+  (`view::slerpCamera`) - no other caller exists today (checked:
+  `grep -rn "slerpCamera(" src/` finds exactly one use outside `camera.cpp` itself), so
+  there is no other behaviour to protect beyond the three existing tests named above.
+- Not a redesign of the choreography's stage timing, easing curves, or the chase/follow
+  camera formulas themselves (M17.20's `chaseEyeDirection`/`clearEyeDistance` are untouched)
+  - purely how two endpoint cameras are blended into one in-between camera.
+- If, after this fix, the board is in frame throughout but the transition still *looks*
+  rough (e.g. the board grows/shrinks unevenly, or the pan reads as abrupt), that is a
+  framing/pacing judgement call for a human to weigh in on, not a correctness bug - note it
+  in the status section rather than attempting further tuning unprompted.
