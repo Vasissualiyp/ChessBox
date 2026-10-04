@@ -36,15 +36,40 @@ enum class Deco : std::uint8_t {
 /// once and can be read without opening the menu code.
 Deco decoForScreen(int screen) noexcept;
 
-/// The polygon field behind everything, and its memory of the camera.
+/// The five geometries the background field is built from: the game's own exotic shapes,
+/// drawn as thin wireframes rather than filled polygons. The quintic is deliberately not
+/// one of them - at background scale it is far too busy to read as ambience.
+enum class WireShape : std::uint8_t {
+  Torus,
+  Klein,
+  Mobius,
+  Cube,
+  Tesseract,
+  Count,
+};
+
+/// Draw one wireframe shape, centred on `centre` and `scale` pixels across, turned by
+/// `yaw`/`pitch`, coloured off the theme's cold seam ramp. Exposed so the shape vocabulary
+/// can be smoke-tested headlessly - this is 2-D draw-list decoration, not board state.
+void drawWireShape(ImDrawList* dl, WireShape shape, ImVec2 centre, float scale, float yaw,
+                   float pitch, const view::Theme& theme, float slot, float alpha);
+
+/// The body field behind everything, and its memory of the camera.
 ///
-/// The polygons have a real depth and are projected, rather than being sprites that
+/// The bodies have a real depth and are projected, rather than being sprites that
 /// happen to drift: that is what lets them answer a menu move. `push` adds an impulse
 /// to the whole field's z velocity, and the field swells and sweeps outward past the
-/// frame as the camera goes in.
+/// frame as the camera goes in. Most bodies are now a wireframe rendition of one of the
+/// game's own geometries, in the theme's cold seam palette; a quarter are still piece
+/// icons, because the background is made of the game rather than of decoration.
 class DepthField {
  public:
   DepthField();
+  /// A quieter field for behind the board: fewer bodies, no piece icons (a second set of
+  /// pieces drifting behind the real ones competes with the thing being played), and the
+  /// bodies pushed further out so they read as a frame around the board rather than a
+  /// wash over it.
+  explicit DepthField(bool quiet);
 
   /// Move the field on. `dt` is seconds.
   void advance(float dt);
@@ -56,9 +81,12 @@ class DepthField {
   /// Draw it into `dl`, filling the given rectangle.
   ///
   /// `iconStyle` is the flat-piece set, because the drifting pieces are the same shapes
-  /// the board uses - the background is made of the game, not of decoration.
+  /// the board uses - the background is made of the game, not of decoration. `opacity`
+  /// scales every body's alpha, which is how the game screen draws the same field much
+  /// more faintly than the menus.
   void draw(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
-            IconStyle iconStyle, bool withPieces, bool withPolygons) const;
+            IconStyle iconStyle, bool withPieces, bool withShapes,
+            float opacity = 1.0f) const;
 
  private:
   struct Body {
@@ -70,9 +98,9 @@ class DepthField {
     float spin{0}, spinV{0};
     float size{0};
     float alphaPhase{0}, alphaV{0};
-    float huePhase{0}, hueV{0};
-    std::uint8_t colorA{0}, colorB{0};
-    std::uint8_t shape{0};  ///< index into the piece archetypes, for the mesh bodies
+    float rampPhase{0}, rampV{0};  ///< where this body sits on the seam hue ramp
+    std::uint8_t wire{0};          ///< which WireShape, for the wireframe bodies
+    std::uint8_t shape{0};         ///< index into the piece archetypes, for the mesh bodies
     bool piece{false};
   };
   void respawn(Body& b, std::uint32_t& seed, bool nearPlane) const;
@@ -80,6 +108,7 @@ class DepthField {
   std::vector<Body> bodies_;
   float velocity_{0};
   float clock_{0};
+  bool quiet_{false};
 };
 
 /// Draw one decorative object into a rectangle. `variant` may be null; only the lattice

@@ -92,6 +92,68 @@ TEST_CASE("the candlelit theme's drifting field is muted and dark", "[render]") 
   CHECK(dark < 0.35f);  // muted, not merely a little darker
 }
 
+TEST_CASE("each wireframe body is a real drawing", "[render]") {
+  // The field's vocabulary is five geometries, and each has to project to an actual
+  // figure rather than an empty path or a degenerate line: a shape function that divides
+  // by a radius or forgets an angle can silently emit nothing, and a background of
+  // nothing looks exactly like a feature that was never wired up.
+  const int count = static_cast<int>(WireShape::Count);
+  REQUIRE(count == 5);
+  for (int s = 0; s < count; ++s) {
+    for (const float t : {0.0f, 0.5f, 2.0f}) {
+      DecoFrame f;
+      drawWireShape(&f.dl, static_cast<WireShape>(s), ImVec2(200.0f, 150.0f), 80.0f, t,
+                    t * 0.5f, view::Theme::manifold(), 0.3f, 0.4f);
+      REQUIRE(f.dl.VtxBuffer.Size > 0);
+      const auto [w, h] = extent(f.dl);
+      CHECK(w > 10.0f);
+      CHECK(h > 10.0f);
+    }
+  }
+}
+
+TEST_CASE("the drifting field is the same picture from the same state", "[render]") {
+  // The shell draws the same frame twice in a headless capture, so the field has to be a
+  // pure function of its own accumulated state. Two fields advanced by the same clock must
+  // emit byte-identical geometry; a colour or position that reaches for a global random
+  // source shows up here as a mismatch.
+  DepthField a;
+  DepthField b;
+  for (int i = 0; i < 5; ++i) {
+    a.advance(0.016f);
+    b.advance(0.016f);
+  }
+  DecoFrame fa;
+  DecoFrame fb;
+  a.draw(&fa.dl, ImVec2(0, 0), ImVec2(640, 360), view::Theme::manifold(),
+         IconStyle::Faceted, true, true);
+  b.draw(&fb.dl, ImVec2(0, 0), ImVec2(640, 360), view::Theme::manifold(),
+         IconStyle::Faceted, true, true);
+  REQUIRE(fa.dl.VtxBuffer.Size > 0);
+  REQUIRE(fa.dl.VtxBuffer.Size == fb.dl.VtxBuffer.Size);
+  for (int i = 0; i < fa.dl.VtxBuffer.Size; ++i) {
+    CHECK(fa.dl.VtxBuffer[i].pos.x == fb.dl.VtxBuffer[i].pos.x);
+    CHECK(fa.dl.VtxBuffer[i].pos.y == fb.dl.VtxBuffer[i].pos.y);
+    CHECK(fa.dl.VtxBuffer[i].col == fb.dl.VtxBuffer[i].col);
+  }
+}
+
+TEST_CASE("the board screen's field is wireframes and no pieces", "[render]") {
+  // Behind a real game there must be no piece icons: the board already has actual pieces,
+  // and a second set drifting behind them competes with the thing being played. The quiet
+  // field is therefore wireframes only, whatever flags its caller passes.
+  DepthField quiet{true};
+  quiet.advance(1.0f);
+  DecoFrame wires;
+  quiet.draw(&wires.dl, ImVec2(0, 0), ImVec2(640, 360), view::Theme::manifold(),
+             IconStyle::Faceted, false, true);
+  CHECK(wires.dl.VtxBuffer.Size > 0);
+  DecoFrame pieces;
+  quiet.draw(&pieces.dl, ImVec2(0, 0), ImVec2(640, 360), view::Theme::manifold(),
+             IconStyle::Faceted, true, false);
+  CHECK(pieces.dl.VtxBuffer.Size == 0);
+}
+
 TEST_CASE("a decoration answers a turn", "[render]") {
   // The menu objects can be dragged. The failure this guards against is the quiet one:
   // a turn parameter that is threaded through the call but never reaches the camera,

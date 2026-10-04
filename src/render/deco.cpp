@@ -8,6 +8,7 @@
 #include "app/shell.hpp"
 #include "render/quintic.hpp"
 #include "render/ui_widgets.hpp"
+#include "view/seams.hpp"
 
 namespace cb::render {
 namespace {
@@ -330,14 +331,10 @@ void drawLattice(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& them
   }
 }
 
-void drawTesseract(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
-                   float t, float yawTurn, float elevTurn) {
-  const ImVec2 centre((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
-  // A decoration beside a menu, not the subject: half the size it used to be.
-  const float scale = std::min(max.x - min.x, max.y - min.y) * 0.13f;
-  const float a = t * 0.14f + yawTurn, b = t * 0.09f;
-
-  ImVec2 pts[16];
+/// The 16 vertices of a 4-cube after its two-plane rotation and the fourth-axis
+/// perspective divide. Shared by the Settings screen's tesseract object and the field's
+/// own wireframe body, so the two cannot drift apart.
+void tesseractVertices(Vec3 out[16], float a, float b) {
   for (int i = 0; i < 16; ++i) {
     const float x = static_cast<float>((i & 1) * 2 - 1);
     const float y = static_cast<float>(((i >> 1) & 1) * 2 - 1);
@@ -350,8 +347,22 @@ void drawTesseract(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& th
     const float ny = y * std::cos(b) - z * std::sin(b);
     const float nz = y * std::sin(b) + z * std::cos(b);
     const float k = 1.0f / (2.4f - nw * 0.85f);
-    const Vec3 p = rotateX({nx * k * 2.2f, ny * k * 2.2f, nz * k * 2.2f},
-                           std::clamp(0.35f + elevTurn, -1.35f, 1.35f));
+    out[i] = {nx * k * 2.2f, ny * k * 2.2f, nz * k * 2.2f};
+  }
+}
+
+void drawTesseract(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
+                   float t, float yawTurn, float elevTurn) {
+  const ImVec2 centre((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
+  // A decoration beside a menu, not the subject: half the size it used to be.
+  const float scale = std::min(max.x - min.x, max.y - min.y) * 0.13f;
+  const float a = t * 0.14f + yawTurn, b = t * 0.09f;
+
+  Vec3 cube[16];
+  tesseractVertices(cube, a, b);
+  ImVec2 pts[16];
+  for (int i = 0; i < 16; ++i) {
+    const Vec3 p = rotateX(cube[i], std::clamp(0.35f + elevTurn, -1.35f, 1.35f));
     const float pp = 1.0f / (1.0f + p.z * 0.2f);
     pts[i] = ImVec2(centre.x + p.x * scale * pp, centre.y - p.y * scale * pp);
   }
@@ -370,6 +381,113 @@ void drawTesseract(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& th
     dl->AddRectFilled(ImVec2(p.x - 2, p.y - 2), ImVec2(p.x + 2, p.y + 2),
                       u32(withAlpha(line, 0.85f)));
   }
+}
+
+// ---------------------------------------------------------------------------
+// The field's wireframe vocabulary.
+//
+// Five parametric geometries, each reduced to a handful of line segments in a unit-ish
+// space and projected through the same local Camera the other decorations use. They are
+// self-contained rather than read off the board's own surface functions: this is ambient
+// 2-D decoration that never touches the Vulkan pipeline, and the board surfaces carry
+// board-scale constants and gluing concerns a background does not need.
+// ---------------------------------------------------------------------------
+struct WireSeg {
+  Vec3 a;
+  Vec3 b;
+};
+
+Vec3 torusWirePoint(float u, float v) {
+  constexpr float kRing = 1.0f;
+  constexpr float kTube = 0.42f;
+  const float rr = kRing + kTube * std::cos(v);
+  return {rr * std::cos(u), kTube * std::sin(v), rr * std::sin(u)};
+}
+
+Vec3 kleinWirePoint(float u, float v) {
+  // The figure-eight immersion: a circular cross-section cannot close this gluing, the
+  // lemniscate can. Normalised to about a unit cube.
+  constexpr float kA = 2.0f;
+  const float r =
+      kA + std::cos(u * 0.5f) * std::sin(v) - std::sin(u * 0.5f) * std::sin(2.0f * v);
+  return {r * std::cos(u) * 0.30f,
+          (std::sin(u * 0.5f) * std::sin(v) + std::cos(u * 0.5f) * std::sin(2.0f * v)) *
+              0.42f,
+          r * std::sin(u) * 0.30f};
+}
+
+Vec3 mobiusWirePoint(float u, float v) {
+  const float r = 1.0f + 0.42f * v * std::cos(u * 0.5f);
+  return {r * std::cos(u), 0.42f * v * std::sin(u * 0.5f), r * std::sin(u)};
+}
+
+void addGridBinding(std::vector<WireSeg>& out, Vec3 (*f)(float, float), int nu, int nv,
+                    float v0, float v1) {
+  for (int i = 0; i < nu; ++i) {
+    const float u0 = 2.0f * kPi * static_cast<float>(i) / static_cast<float>(nu);
+    const float u1 = 2.0f * kPi * static_cast<float>(i + 1) / static_cast<float>(nu);
+    for (int j = 0; j < nv; ++j) {
+      const float va = v0 + (v1 - v0) * static_cast<float>(j) / static_cast<float>(nv);
+      const float vb =
+          v0 + (v1 - v0) * static_cast<float>(j + 1) / static_cast<float>(nv);
+      out.push_back({f(u0, va), f(u1, va)});
+      out.push_back({f(u0, va), f(u0, vb)});
+    }
+  }
+}
+
+void buildWireShape(WireShape shape, std::vector<WireSeg>& out) {
+  switch (shape) {
+    case WireShape::Torus:
+      addGridBinding(out, torusWirePoint, 14, 8, 0.0f, 2.0f * kPi);
+      break;
+    case WireShape::Klein:
+      addGridBinding(out, kleinWirePoint, 16, 8, 0.0f, 2.0f * kPi);
+      break;
+    case WireShape::Mobius:
+      addGridBinding(out, mobiusWirePoint, 20, 4, -1.0f, 1.0f);
+      break;
+    case WireShape::Cube: {
+      Vec3 pts[8];
+      for (int i = 0; i < 8; ++i) {
+        pts[i] = {static_cast<float>((i & 1) * 2 - 1),
+                  static_cast<float>(((i >> 1) & 1) * 2 - 1),
+                  static_cast<float>(((i >> 2) & 1) * 2 - 1)};
+      }
+      for (int i = 0; i < 8; ++i) {
+        for (int d = 0; d < 3; ++d) {
+          const int j = i ^ (1 << d);
+          if (j < i) continue;
+          out.push_back({pts[i], pts[j]});
+        }
+      }
+      break;
+    }
+    case WireShape::Tesseract: {
+      Vec3 pts[16];
+      tesseractVertices(pts, 0.62f, 0.37f);
+      for (int i = 0; i < 16; ++i) {
+        for (int d = 0; d < 4; ++d) {
+          const int j = i ^ (1 << d);
+          if (j < i) continue;
+          out.push_back({pts[i], pts[j]});
+        }
+      }
+      break;
+    }
+    case WireShape::Count:
+      break;
+  }
+}
+
+/// The field's line colour: a cold hue off the seam ramp, pulled towards the page's own
+/// ground so a wireframe sits *under* the interface rather than glowing through it. On
+/// the light page that is a pale tint; on the candlelit page it is a dark one, which is
+/// what keeps the field from lighting up the dark ground it is supposed to disappear into.
+view::Rgba fieldHue(const view::Theme& theme, float slot) {
+  const view::Rgba seam = view::seamRampColor(theme, slot);
+  const view::Rgba ground = theme.light ? theme.soot : theme.ink;
+  return widgets::mix(ground, seam, 0.34f);
 }
 
 void drawAtom(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
@@ -418,33 +536,36 @@ void drawAtom(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
        u32(theme.light ? theme.panel : theme.ink));
 }
 
-/// The pastel set the field drifts through on the light page. Deliberately not from the
-/// theme: these are the only colours in the shell that mean nothing at all, and giving
-/// them names in the palette would invite something to start using them for state.
-constexpr view::Rgba kPastels[]{
-    view::Rgba::hex(0xC8D6F7), view::Rgba::hex(0xE2D3F7), view::Rgba::hex(0xC9EDE3),
-    view::Rgba::hex(0xFAE2CD), view::Rgba::hex(0xF6D2DF), view::Rgba::hex(0xCDEBF7),
-};
-/// The same field on the candlelit page: the same shapes, muted and dark, so it sits
-/// *under* the interface instead of glowing through it. Still named here rather than in
-/// the palette - a colour that means nothing should keep meaning nothing in both themes -
-/// but it is chosen for the dark ground, so it is a second set and not the first one
-/// faded by a constant.
-constexpr view::Rgba kPastelsDark[]{
-    view::Rgba::hex(0x333C55), view::Rgba::hex(0x3B3352), view::Rgba::hex(0x2E4438),
-    view::Rgba::hex(0x453627), view::Rgba::hex(0x452F39), view::Rgba::hex(0x2C3F49),
-};
-constexpr int kPastelCount = 6;
 constexpr float kZNear = 0.34f;
 constexpr float kZFar = 4.6f;
 
 }  // namespace
 
+void drawWireShape(ImDrawList* dl, WireShape shape, ImVec2 centre, float scale, float yaw,
+                   float pitch, const view::Theme& theme, float slot, float alpha) {
+  if (alpha <= 0.0f) return;
+  std::vector<WireSeg> segs;
+  buildWireShape(shape, segs);
+  if (segs.empty()) return;
+  Camera cam;
+  cam.centre = centre;
+  cam.scale = scale;
+  cam.yaw = yaw;
+  cam.pitch = pitch;
+  const view::Rgba line = fieldHue(theme, slot);
+  for (const WireSeg& s : segs) {
+    dl->AddLine(cam(s.a).at, cam(s.b).at, u32(withAlpha(line, alpha)), 1.2f);
+  }
+}
+
 Deco decoForScreen(int screen) noexcept {
   switch (static_cast<app::Screen>(screen)) {
+    // The main menu used to add the quintic cross-section as a second, stacked object.
+    // At the size a background gets it is far too busy, so it is retired for these
+    // screens and the redone DepthField alone carries the background.
     case app::Screen::Welcome:
     case app::Screen::MainMenu:
-      return Deco::Manifold;
+      return Deco::None;
     // The library's object is the selected variant's *overture*, which the screen draws
     // itself - see Ui::drawOvertureObject. The turning lattice it replaces said only how
     // many boards a variant had; an overture says what shape they are on.
@@ -467,27 +588,34 @@ Deco decoForScreen(int screen) noexcept {
   }
 }
 
-DepthField::DepthField() {
-  std::uint32_t seed = 0xC0FFEEu;
+DepthField::DepthField() : DepthField(false) {}
+
+DepthField::DepthField(bool quiet) : quiet_(quiet) {
   // Enough bodies, spread through the whole depth, that the field is a presence rather
   // than a few specks: it is the background the menus are read against, so it has to be
-  // visible without ever competing with the board. The polygon-to-piece ratio stays
-  // roughly 3:1 - the pieces are the game appearing in its own background.
-  bodies_.resize(120);
+  // visible without ever competing with the board. A wireframe reads as more complex than
+  // a filled polygon at a glance, so there are fewer bodies than the old 120 - more weight
+  // each, less confetti.
+  const std::uint32_t seed = quiet ? 0x9E3779B9u : 0xC0FFEEu;
+  std::uint32_t s = seed;
+  bodies_.resize(quiet ? 24 : 56);
   for (std::size_t i = 0; i < bodies_.size(); ++i) {
     Body& b = bodies_[i];
-    // A few of them are pieces rather than polygons: the background is made out of the
-    // game, which is cheaper than inventing a second vocabulary for it.
-    b.piece = i % 4 == 3;
-    respawn(b, seed, false);
-    b.z = kZNear + nextFloat(seed) * (kZFar - kZNear);
+    // A few of them are pieces rather than wireframes: the background is made out of the
+    // game, which is cheaper than inventing a second vocabulary for it. The board screen
+    // has real pieces to compete with, so its field is wireframes only.
+    b.piece = !quiet && i % 4 == 3;
+    respawn(b, s, false);
+    b.z = kZNear + nextFloat(s) * (kZFar - kZNear);
   }
 }
 
 void DepthField::respawn(Body& b, std::uint32_t& seed, bool nearPlane) const {
-  // Born on an annulus, so nothing is ever in front of the menu.
+  // Born on an annulus, so nothing is ever in front of the menu. The quiet field's ring
+  // is wider: it has to leave the middle of the frame (where the board sits) clear.
   b.angle = nextFloat(seed) * 2.0f * kPi;
-  b.radius = 0.62f + nextFloat(seed) * 1.15f;
+  b.radius = quiet_ ? 1.30f + nextFloat(seed) * 1.00f
+                    : 0.62f + nextFloat(seed) * 1.15f;
   b.angleV =
       (nextFloat(seed) < 0.5f ? -1.0f : 1.0f) * (0.006f + nextFloat(seed) * 0.013f);
   b.radiusV = 0.02f + nextFloat(seed) * 0.05f;
@@ -498,10 +626,9 @@ void DepthField::respawn(Body& b, std::uint32_t& seed, bool nearPlane) const {
   b.zDrift = -0.010f - nextFloat(seed) * 0.025f;
   b.alphaPhase = nextFloat(seed) * 2.0f * kPi;
   b.alphaV = 0.18f + nextFloat(seed) * 0.24f;
-  b.huePhase = nextFloat(seed) * 2.0f * kPi;
-  b.hueV = 0.05f + nextFloat(seed) * 0.07f;
-  b.colorA = static_cast<std::uint8_t>(nextFloat(seed) * kPastelCount) % kPastelCount;
-  b.colorB = static_cast<std::uint8_t>(nextFloat(seed) * kPastelCount) % kPastelCount;
+  b.rampPhase = nextFloat(seed);
+  b.rampV = 0.02f + nextFloat(seed) * 0.05f;
+  b.wire = static_cast<std::uint8_t>(nextFloat(seed) * 5.0f) % 5;
   b.shape = static_cast<std::uint8_t>(nextFloat(seed) * 7.0f) % 7;
   b.z = nearPlane ? kZNear + 0.05f : kZFar;
 }
@@ -526,8 +653,8 @@ void DepthField::advance(float dt) {
 }
 
 void DepthField::draw(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
-                      IconStyle iconStyle, bool withPieces, bool withPolygons) const {
-  const view::Rgba* palette = theme.light ? kPastels : kPastelsDark;
+                      IconStyle iconStyle, bool withPieces, bool withShapes,
+                      float opacity) const {
   const ImVec2 centre((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
   const float rx = (max.x - min.x) * 0.46f;
   const float ry = (max.y - min.y) * 0.52f;
@@ -536,7 +663,7 @@ void DepthField::draw(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme&
   std::vector<const Body*> order;
   order.reserve(bodies_.size());
   for (const Body& b : bodies_) {
-    if (b.piece ? withPieces : withPolygons) order.push_back(&b);
+    if (b.piece ? withPieces : withShapes) order.push_back(&b);
   }
   std::sort(order.begin(), order.end(),
             [](const Body* a, const Body* b) { return a->z > b->z; });
@@ -551,31 +678,24 @@ void DepthField::draw(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme&
                        std::clamp((b.z - kZNear) / 0.5f, 0.0f, 1.0f);
     if (fade <= 0.0f) continue;
 
-    const view::Rgba a = palette[b.colorA];
-    const view::Rgba c = palette[b.colorB];
-    const float mixT = std::sin(clock_ * b.hueV + b.huePhase) * 0.5f + 0.5f;
-    view::Rgba tint{a.r + (c.r - a.r) * mixT, a.g + (c.g - a.g) * mixT,
-                    a.b + (c.b - a.b) * mixT, 1.0f};
+    // Where this body sits on the seam ramp right now. Slow, and per-body, so the field
+    // is a web of related cold hues rather than one flat colour.
+    const float slot = std::fmod(clock_ * b.rampV + b.rampPhase, 1.0f);
 
     if (b.piece) {
+      const view::Rgba tint = fieldHue(theme, slot < 0.0f ? slot + 1.0f : slot);
       icon(dl, iconStyle, kPieceShapes[b.shape], at, b.size * scale,
-           u32(withAlpha(tint, fade * 0.52f)), u32(withAlpha(tint, fade * 0.34f)));
+           u32(withAlpha(tint, opacity * fade * 0.34f)),
+           u32(withAlpha(tint, opacity * fade * 0.22f)));
       continue;
     }
 
+    // A faint breathing alpha, so the web does not read as a fixed decal in the capture.
     const float alpha =
-        fade *
-        (0.40f + 0.42f * (std::sin(clock_ * b.alphaV + b.alphaPhase) * 0.5f + 0.5f));
-    const int sides = 3 + static_cast<int>(b.shape % 4);
-    dl->PathClear();
-    for (int i = 0; i < sides; ++i) {
-      const float ang =
-          b.spin + 2.0f * kPi * static_cast<float>(i) / static_cast<float>(sides);
-      const float r =
-          b.size * scale * (0.55f + 0.35f * std::sin(ang * 3.0f + b.huePhase));
-      dl->PathLineTo(ImVec2(at.x + std::cos(ang) * r, at.y + std::sin(ang) * r));
-    }
-    dl->PathFillConvex(u32(withAlpha(tint, alpha)));
+        opacity * fade *
+        (0.18f + 0.24f * (std::sin(clock_ * b.alphaV + b.alphaPhase) * 0.5f + 0.5f));
+    drawWireShape(dl, static_cast<WireShape>(b.wire), at, b.size * scale * 0.62f, b.spin,
+                  b.spin * 0.55f, theme, slot < 0.0f ? slot + 1.0f : slot, alpha);
   }
 }
 

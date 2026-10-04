@@ -421,6 +421,72 @@ If the game-screen version cannot be tuned subtle enough to avoid distracting du
 play, ship it cinema-mode-only (or capture-only) rather than shipping something that hurts the
 moment-to-moment experience for the sake of a background.
 
+### Status: M18.4 built (2026-10-04, opencode)
+
+The confetti is gone. The background is now the game's own exotic geometries as thin
+wireframes in the theme's cold seam palette, the quintic object is retired from the main
+menu, and the board screen has a much quieter copy in its margins.
+
+- **The shape vocabulary.** Five `WireShape` drawers live in `deco.cpp` alongside
+  `drawTesseract`, using the same local `Camera`/`rotateX`/`rotateY` 2-D projection and
+  adding nothing to the Vulkan pipeline: torus, Klein bottle (the figure-eight immersion),
+  Möbius strip, cube, and the 4-cube. The tesseract's vertex math is now shared with the
+  Settings screen's `drawTesseract` (`tesseractVertices`), so the two cannot drift apart.
+  They are self-contained parametrisations rather than calls into the board's own surface
+  functions: `kleinSurf`/`shellTube` are internal to `overture_scene.cpp`'s anonymous
+  namespace and carry board-scale constants a background has no use for, and this item is
+  explicitly ambient decoration rather than a second board renderer. The quintic/`t6` is
+  deliberately not in the vocabulary. `drawWireShape` is exposed so the shapes can be
+  smoke-tested without a display.
+- **The field's colour.** The `kPastels`/`kPastelsDark` arrays are deleted. Bodies now
+  sample `view::seamRampColor` and mix it 34% into the page's own ground (`soot` on the
+  light theme, `ink` on the candlelit one), so a wireframe reads as a faint cold hue and
+  sits *under* the interface instead of glowing through it. The existing "candlelit field
+  is muted and dark" test is unchanged and still passes - the console field's raw vertex
+  RGB stays under 0.35 luminance, which the dark-ground mix guarantees.
+- **The body vocabulary and count.** Every non-piece body is now one of the five
+  wireframes; the piece icons are kept (`i % 4 == 3` - the game appearing in its own
+  background was never the problem). The menu field dropped from 120 bodies to 56: a
+  wireframe reads as more complex than a filled triangle, so fewer, heavier bodies. The
+  main-menu object is folded to `Deco::None` (`decoForScreen`), retiring the quintic
+  cross-section; `Deco::Manifold`/`drawManifold` are untouched for any later use.
+- **The game screen.** `Ui` gained a `boardField_` (`DepthField(true)`): 24 bodies,
+  wireframes only (a second set of pieces drifting behind the real ones competes with the
+  thing being played), born on a wider annulus (`radius` 1.30-2.30 rather than 0.62-1.77)
+  so they stay out towards the frame, drawn at 0.80 opacity. It is advanced in `Ui::tick`
+  and drawn first in `buildGameHud`, behind the labels.
+- **A note on "behind".** The interface is recorded into the ImGui pass, which the renderer
+  composites *after* the Vulkan board - there is no way to put a draw-list layer literally
+  behind the board geometry. The wider quiet-field ring is what keeps it out of the board's
+  footprint instead: a before/after difference image of the game screen (`build/m184_check/`)
+  shows bodies only at the frame's edges and nothing over the board. The menu field is
+  unaffected by this because no board is drawn under it.
+- **Tuning choices (all by eye, all retunable).** Menu: 56 bodies, wireframe alpha
+  `(0.18 + 0.24·breath)·fade`, piece icons at 0.34 fill / 0.22 outline. Board: 24 bodies,
+  wider ring, 0.80 opacity. Line width 1.2 px. Shape grids: torus 14×8, Klein 16×8,
+  Möbius 20×4, cube and tesseract exact. These are judgement calls - the exact body count,
+  opacity and ring width can be moved without touching the mechanism.
+- **Tests.** Three new `[render]` cases: each `WireShape` emits a non-empty, non-degenerate
+  figure at `t` = 0, 0.5, 2.0; two fields advanced by the same clock emit byte-identical
+  positions and colours (the determinism contract); and the quiet field draws wireframes
+  and emits nothing at all when asked for piece bodies. The existing draw-list properties
+  (alpha-zero emits nothing, turn reaches the camera, zoom scales) still pass.
+- **Deviations.** (1) Self-contained parametrisations rather than reusing the board
+  surfaces, for the reason above. (2) The game-screen background is a faint overlay kept
+  clear of the board by geometry, not literally behind it, for the compositing reason above.
+  (3) `withPolygons` was renamed `withShapes` on `DepthField::draw`, and an `opacity`
+  parameter added; the menu and board fields share one code path.
+- **Verification.** `tools/test.sh --build render` green (109 cases, 4.8M assertions) and
+  `--build app` green (59 cases); the ten `gui-*` screen captures pass validation-clean,
+  including `gui-menu` and `gui-board` with the new background; `tools/precommit.sh` green
+  (format, build, arch, unit, property). Menu and game captures are byte-identical on
+  re-run (`cmp`), and the visuals are in `build/m184_check/`: the menu shows cold
+  torus/Klein/Möbius/cube/tesseract wireframes where the pastel polygons used to be, and
+  the game screen's version is visibly subtler and stays off the board.
+- **Open.** Acceptance criterion 3 asks for the user's eye on the game-screen tuning; the
+  mechanism is correct and restrained, and the numbers (24 bodies, 0.80 opacity, 34% hue
+  mix) are the retuning knobs if it reads as too faint or too present in motion.
+
 ## M18.5 Audio v1
 
 **Want.** The game is completely silent. `Settings` already carries `volumeMaster`/

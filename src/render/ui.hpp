@@ -306,6 +306,9 @@ class Ui {
   Deco leaving_{Deco::None};
   bool deeper_{true};
   DepthField field_;
+  /// The much quieter field the board screen draws behind the game: wireframes only, fewer
+  /// bodies, further out and fainter, so it never competes with the pieces being played.
+  DepthField boardField_{true};
   /// Which variant the new-game screen is showing details for.
   std::string pickedVariant_;
   /// That variant's own one-line description, and the name it was read for, so the file

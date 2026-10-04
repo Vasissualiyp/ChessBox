@@ -386,6 +386,7 @@ void Ui::tick(float dt) {
   lastDt_ = dt;
   clock_ += dt;
   field_.advance(dt);
+  boardField_.advance(dt);
   // Ease the arrival rather than run it linearly: a screen that stops dead has not
   // travelled anywhere.
   if (enter_ < 1.0f) enter_ = std::min(1.0f, enter_ + dt * 2.2f);
@@ -1021,6 +1022,12 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   request.boardRect[1] = 0.0f;
   request.boardRect[2] = vp->Size.x;
   request.boardRect[3] = vp->Size.y;
+
+  // The ambient field, much quieter than the menus': wireframes only, a wider ring so the
+  // bodies stay out towards the frame rather than washing over the board, and a low
+  // opacity. The board is the subject; this is only the room it sits in (M18.4).
+  boardField_.draw(ImGui::GetBackgroundDrawList(), ImVec2(0.0f, 0.0f),
+                   ImVec2(vp->Size.x, vp->Size.y), t, iconStyle_, false, true, 0.80f);
 
   // File and rank labels. On the flat board they sit on the near edges rather than on its
   // cells: a label *inside* the edge cell is covered by whatever stands there and reads
