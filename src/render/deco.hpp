@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstdint>
+#include <vector>
 
 #include <imgui.h>
 
@@ -36,23 +38,67 @@ enum class Deco : std::uint8_t {
 /// once and can be read without opening the menu code.
 Deco decoForScreen(int screen) noexcept;
 
-/// The five geometries the background field is built from: the game's own exotic shapes,
-/// drawn as thin wireframes rather than filled polygons. The quintic is deliberately not
-/// one of them - at background scale it is far too busy to read as ambience.
+/// The six geometries the background field is built from: the game's own exotic shapes,
+/// drawn as thin wireframes rather than filled polygons. The quintic is here as clutter,
+/// one body among many - not as the dense, dominant object `Deco::Manifold` used to draw.
 enum class WireShape : std::uint8_t {
   Torus,
   Klein,
   Mobius,
   Cube,
   Tesseract,
+  Quintic,
   Count,
 };
 
+/// One line segment of a wireframe body, in the field's own local space (before the
+/// camera projects it).
+struct WireSegment {
+  std::array<float, 3> a;
+  std::array<float, 3> b;
+};
+
+/// The segments a wireframe body is built from. `yaw`/`pitch` are the two independent
+/// orientation angles: they drive the tesseract's two 4-D rotation planes (as
+/// `drawTesseract` does) and are ignored by the other five, which are turned by the
+/// camera.
+///
+/// Exposed so the quintic body can be pinned to the shared `quinticPoint` oracle
+/// (`render/quintic.hpp`) the t6 overture already uses, rather than a second hand-derived
+/// surface.
+[[nodiscard]] std::vector<WireSegment> wireShapeSegments(WireShape shape,
+                                                         float yaw = 0.62f,
+                                                         float pitch = 0.37f);
+
+/// The coarse grid the quintic wire body walks, per (k1, k2) patch: this many cells along
+/// x (over [0, pi/2]) and y (over [-1, 1]). Paired with `wireShapeSegments(Quintic)` for
+/// the differential test.
+inline constexpr int kQuinticWireCellsX = 2;
+inline constexpr int kQuinticWireCellsY = 2;
+
 /// Draw one wireframe shape, centred on `centre` and `scale` pixels across, turned by
-/// `yaw`/`pitch`, coloured off the theme's cold seam ramp. Exposed so the shape vocabulary
-/// can be smoke-tested headlessly - this is 2-D draw-list decoration, not board state.
+/// `yaw`/`pitch`, coloured off the theme's cold seam ramp. Exposed so the shape
+/// vocabulary can be smoke-tested headlessly - this is 2-D draw-list decoration, not
+/// board state.
 void drawWireShape(ImDrawList* dl, WireShape shape, ImVec2 centre, float scale, float yaw,
                    float pitch, const view::Theme& theme, float slot, float alpha);
+
+/// A read-only snapshot of one drifting body, for the tests. The field's containment
+/// floor and the independence of its two orientation rates are properties of the body
+/// state, and the projected draw list cannot show either (depth and the camera are folded
+/// in).
+struct BodyState {
+  float yaw{0};
+  float pitch{0};
+  float centreDistance{0};  ///< from the field's centre, after the breathing offset
+  WireShape wire{WireShape::Torus};
+  bool piece{false};
+};
+
+/// The nearest a body may drift to the field's centre, in the field's own units.
+/// `advance` clamps the breathed radius to this, so no phase of the cycle can carry a
+/// body inside it.
+inline constexpr float kFieldMinRadius = 1.20f;
 
 /// The body field behind everything, and its memory of the camera.
 ///
@@ -88,6 +134,11 @@ class DepthField {
             IconStyle iconStyle, bool withPieces, bool withShapes,
             float opacity = 1.0f) const;
 
+  /// A snapshot of every body's orientation and centre distance, for the tests. Only
+  /// meaningful after `advance` has run at least once (the projected position is computed
+  /// there); the drawing code never reads it.
+  [[nodiscard]] std::vector<BodyState> bodies() const;
+
  private:
   struct Body {
     float px{0}, py{0};  ///< position on the plane, in units of half the frame
@@ -95,12 +146,14 @@ class DepthField {
     float zDrift{0};
     float angle{0}, angleV{0};
     float radius{0}, radiusV{0}, radiusPhase{0};
-    float spin{0}, spinV{0};
+    /// Two independent orientation velocities, so a body tumbles through orientation
+    /// space rather than retracing the single ellipse one shared `spin` used to trace.
+    float yaw{0}, yawV{0}, pitch{0}, pitchV{0};
     float size{0};
     float alphaPhase{0}, alphaV{0};
     float rampPhase{0}, rampV{0};  ///< where this body sits on the seam hue ramp
     std::uint8_t wire{0};          ///< which WireShape, for the wireframe bodies
-    std::uint8_t shape{0};         ///< index into the piece archetypes, for the mesh bodies
+    std::uint8_t shape{0};  ///< index into the piece archetypes, for the mesh bodies
     bool piece{false};
   };
   void respawn(Body& b, std::uint32_t& seed, bool nearPlane) const;

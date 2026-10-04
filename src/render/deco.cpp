@@ -386,11 +386,14 @@ void drawTesseract(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& th
 // ---------------------------------------------------------------------------
 // The field's wireframe vocabulary.
 //
-// Five parametric geometries, each reduced to a handful of line segments in a unit-ish
+// Six parametric geometries, each reduced to a handful of line segments in a unit-ish
 // space and projected through the same local Camera the other decorations use. They are
 // self-contained rather than read off the board's own surface functions: this is ambient
 // 2-D decoration that never touches the Vulkan pipeline, and the board surfaces carry
-// board-scale constants and gluing concerns a background does not need.
+// board-scale constants and gluing concerns a background does not need. The one
+// exception is the quintic, which reads the shared `render/quintic.hpp` formula the t6
+// overture uses - there is no board surface to read, and one copy of that formula is the
+// point.
 // ---------------------------------------------------------------------------
 struct WireSeg {
   Vec3 a;
@@ -436,7 +439,7 @@ void addGridBinding(std::vector<WireSeg>& out, Vec3 (*f)(float, float), int nu, 
   }
 }
 
-void buildWireShape(WireShape shape, std::vector<WireSeg>& out) {
+void buildWireShape(WireShape shape, std::vector<WireSeg>& out, float yaw, float pitch) {
   switch (shape) {
     case WireShape::Torus:
       addGridBinding(out, torusWirePoint, 14, 8, 0.0f, 2.0f * kPi);
@@ -464,13 +467,43 @@ void buildWireShape(WireShape shape, std::vector<WireSeg>& out) {
       break;
     }
     case WireShape::Tesseract: {
+      // The two angles are the two independent 4-D rotation planes (`xw` and `yz`),
+      // exactly as the Settings screen's `drawTesseract` turns a 4-cube - that is what
+      // reads as a hypercube rather than a cube. The camera's own turn is fixed in
+      // `drawWireShape`.
       Vec3 pts[16];
-      tesseractVertices(pts, 0.62f, 0.37f);
+      tesseractVertices(pts, yaw, pitch);
       for (int i = 0; i < 16; ++i) {
         for (int d = 0; d < 4; ++d) {
           const int j = i ^ (1 << d);
           if (j < i) continue;
           out.push_back({pts[i], pts[j]});
+        }
+      }
+      break;
+    }
+    case WireShape::Quintic: {
+      // A sparse grid of the Calabi-Yau quintic's own surface, coarser than
+      // `drawManifold` so it reads as a handful of segments rather than a quilt. The
+      // formula is the shared `quinticPoint` oracle (via the `quintic` wrapper above),
+      // the same the t6 overture collapses onto - never a second derivation.
+      const float xSpan = kPi * 0.5f;
+      for (int k1 = 0; k1 < kQuinticN; ++k1) {
+        for (int k2 = 0; k2 < kQuinticN; ++k2) {
+          for (int i = 0; i < kQuinticWireCellsX; ++i) {
+            const float xa =
+                xSpan * static_cast<float>(i) / static_cast<float>(kQuinticWireCellsX);
+            const float xb = xSpan * static_cast<float>(i + 1) /
+                             static_cast<float>(kQuinticWireCellsX);
+            for (int j = 0; j < kQuinticWireCellsY; ++j) {
+              const float ya = -1.0f + 2.0f * static_cast<float>(j) /
+                                           static_cast<float>(kQuinticWireCellsY);
+              const float yb = -1.0f + 2.0f * static_cast<float>(j + 1) /
+                                           static_cast<float>(kQuinticWireCellsY);
+              out.push_back({quintic(k1, k2, xa, ya), quintic(k1, k2, xb, ya)});
+              out.push_back({quintic(k1, k2, xa, ya), quintic(k1, k2, xa, yb)});
+            }
+          }
         }
       }
       break;
@@ -483,7 +516,8 @@ void buildWireShape(WireShape shape, std::vector<WireSeg>& out) {
 /// The field's line colour: a cold hue off the seam ramp, pulled towards the page's own
 /// ground so a wireframe sits *under* the interface rather than glowing through it. On
 /// the light page that is a pale tint; on the candlelit page it is a dark one, which is
-/// what keeps the field from lighting up the dark ground it is supposed to disappear into.
+/// what keeps the field from lighting up the dark ground it is supposed to disappear
+/// into.
 view::Rgba fieldHue(const view::Theme& theme, float slot) {
   const view::Rgba seam = view::seamRampColor(theme, slot);
   const view::Rgba ground = theme.light ? theme.soot : theme.ink;
@@ -545,17 +579,32 @@ void drawWireShape(ImDrawList* dl, WireShape shape, ImVec2 centre, float scale, 
                    float pitch, const view::Theme& theme, float slot, float alpha) {
   if (alpha <= 0.0f) return;
   std::vector<WireSeg> segs;
-  buildWireShape(shape, segs);
+  buildWireShape(shape, segs, yaw, pitch);
   if (segs.empty()) return;
   Camera cam;
   cam.centre = centre;
   cam.scale = scale;
-  cam.yaw = yaw;
-  cam.pitch = pitch;
+  // For the tesseract the two angles already turned its two 4-D planes, so the camera
+  // sits at the same fixed legible pose `drawTesseract` uses. Every other shape is turned
+  // by the camera, and the two angles are independent yaw and pitch rather than one
+  // shared spin.
+  cam.yaw = shape == WireShape::Tesseract ? 0.0f : yaw;
+  cam.pitch = shape == WireShape::Tesseract ? 0.35f : pitch;
   const view::Rgba line = fieldHue(theme, slot);
   for (const WireSeg& s : segs) {
     dl->AddLine(cam(s.a).at, cam(s.b).at, u32(withAlpha(line, alpha)), 1.2f);
   }
+}
+
+std::vector<WireSegment> wireShapeSegments(WireShape shape, float yaw, float pitch) {
+  std::vector<WireSeg> segs;
+  buildWireShape(shape, segs, yaw, pitch);
+  std::vector<WireSegment> out;
+  out.reserve(segs.size());
+  for (const WireSeg& s : segs) {
+    out.push_back({{s.a.x, s.a.y, s.a.z}, {s.b.x, s.b.y, s.b.z}});
+  }
+  return out;
 }
 
 Deco decoForScreen(int screen) noexcept {
@@ -594,8 +643,8 @@ DepthField::DepthField(bool quiet) : quiet_(quiet) {
   // Enough bodies, spread through the whole depth, that the field is a presence rather
   // than a few specks: it is the background the menus are read against, so it has to be
   // visible without ever competing with the board. A wireframe reads as more complex than
-  // a filled polygon at a glance, so there are fewer bodies than the old 120 - more weight
-  // each, less confetti.
+  // a filled polygon at a glance, so there are fewer bodies than the old 120 - more
+  // weight each, less confetti.
   const std::uint32_t seed = quiet ? 0x9E3779B9u : 0xC0FFEEu;
   std::uint32_t s = seed;
   bodies_.resize(quiet ? 24 : 56);
@@ -611,24 +660,29 @@ DepthField::DepthField(bool quiet) : quiet_(quiet) {
 }
 
 void DepthField::respawn(Body& b, std::uint32_t& seed, bool nearPlane) const {
-  // Born on an annulus, so nothing is ever in front of the menu. The quiet field's ring
-  // is wider: it has to leave the middle of the frame (where the board sits) clear.
+  // Born on an annulus, so nothing rests over the centre. Both rings now start at 1.30 -
+  // the menu's used to begin at 0.62, which put a body's average well inside the floor
+  // the breathe could then cross. The quiet field's ring is only slightly wider because
+  // the board, not empty page, sits behind it.
   b.angle = nextFloat(seed) * 2.0f * kPi;
-  b.radius = quiet_ ? 1.30f + nextFloat(seed) * 1.00f
-                    : 0.62f + nextFloat(seed) * 1.15f;
+  b.radius = quiet_ ? 1.30f + nextFloat(seed) * 1.00f : 1.30f + nextFloat(seed) * 1.20f;
   b.angleV =
       (nextFloat(seed) < 0.5f ? -1.0f : 1.0f) * (0.006f + nextFloat(seed) * 0.013f);
   b.radiusV = 0.02f + nextFloat(seed) * 0.05f;
   b.radiusPhase = nextFloat(seed) * 2.0f * kPi;
-  b.spin = nextFloat(seed) * 2.0f * kPi;
-  b.spinV = (nextFloat(seed) - 0.5f) * 0.10f;
+  // Two independent orientation velocities, not one shared spin: a body wanders through
+  // orientation space instead of tracing a single ellipse.
+  b.yaw = nextFloat(seed) * 2.0f * kPi;
+  b.pitch = nextFloat(seed) * 2.0f * kPi;
+  b.yawV = (nextFloat(seed) - 0.5f) * 0.10f;
+  b.pitchV = (nextFloat(seed) - 0.5f) * 0.10f;
   b.size = b.piece ? 130.0f + nextFloat(seed) * 160.0f : 95.0f + nextFloat(seed) * 210.0f;
   b.zDrift = -0.010f - nextFloat(seed) * 0.025f;
   b.alphaPhase = nextFloat(seed) * 2.0f * kPi;
   b.alphaV = 0.18f + nextFloat(seed) * 0.24f;
   b.rampPhase = nextFloat(seed);
   b.rampV = 0.02f + nextFloat(seed) * 0.05f;
-  b.wire = static_cast<std::uint8_t>(nextFloat(seed) * 5.0f) % 5;
+  b.wire = static_cast<std::uint8_t>(nextFloat(seed) * 6.0f) % 6;
   b.shape = static_cast<std::uint8_t>(nextFloat(seed) * 7.0f) % 7;
   b.z = nearPlane ? kZNear + 0.05f : kZFar;
 }
@@ -642,13 +696,25 @@ void DepthField::advance(float dt) {
   std::uint32_t seed = static_cast<std::uint32_t>(clock_ * 1000.0f) | 1u;
   for (Body& b : bodies_) {
     b.angle += b.angleV * dt;
-    b.spin += b.spinV * dt;
+    b.yaw += b.yawV * dt;
+    b.pitch += b.pitchV * dt;
     b.z += (b.zDrift + velocity_ * (b.piece ? 0.72f : 1.0f)) * dt;
     if (b.z < kZNear) respawn(b, seed, false);
     if (b.z > kZFar + 0.6f) respawn(b, seed, true);
     const float breathe = std::sin(clock_ * b.radiusV + b.radiusPhase) * 0.10f;
-    b.px = std::cos(b.angle) * (b.radius + breathe);
-    b.py = std::sin(b.angle) * (b.radius + breathe) * 0.92f;
+    float px = std::cos(b.angle) * (b.radius + breathe);
+    float py = std::sin(b.angle) * (b.radius + breathe) * 0.92f;
+    // The breathe rides on the spawn radius, so at its trough it could carry a body back
+    // inside the floor it was born outside of. Clamp the actual distance from centre, in
+    // whichever direction it is at, so no phase of the cycle crosses the floor.
+    const float distance = std::hypot(px, py);
+    if (distance > 1e-5f && distance < kFieldMinRadius) {
+      const float k = kFieldMinRadius / distance;
+      px *= k;
+      py *= k;
+    }
+    b.px = px;
+    b.py = py;
   }
 }
 
@@ -694,9 +760,19 @@ void DepthField::draw(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme&
     const float alpha =
         opacity * fade *
         (0.18f + 0.24f * (std::sin(clock_ * b.alphaV + b.alphaPhase) * 0.5f + 0.5f));
-    drawWireShape(dl, static_cast<WireShape>(b.wire), at, b.size * scale * 0.62f, b.spin,
-                  b.spin * 0.55f, theme, slot < 0.0f ? slot + 1.0f : slot, alpha);
+    drawWireShape(dl, static_cast<WireShape>(b.wire), at, b.size * scale * 0.62f, b.yaw,
+                  b.pitch, theme, slot < 0.0f ? slot + 1.0f : slot, alpha);
   }
+}
+
+std::vector<BodyState> DepthField::bodies() const {
+  std::vector<BodyState> out;
+  out.reserve(bodies_.size());
+  for (const Body& b : bodies_) {
+    out.push_back({b.yaw, b.pitch, std::hypot(b.px, b.py), static_cast<WireShape>(b.wire),
+                   b.piece});
+  }
+  return out;
 }
 
 void drawDeco(ImDrawList* dl, Deco what, ImVec2 min, ImVec2 max, const view::Theme& theme,

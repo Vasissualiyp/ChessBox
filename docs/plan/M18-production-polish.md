@@ -569,6 +569,51 @@ a couple of seconds apart) of the menu shows the tesseract performing its own tw
 turn and at least one other shape tumbling on an independent axis rather than repeating a
 fixed loop.
 
+### Status: M18.4 revision built (2026-10-04, opencode)
+
+The quintic is back as the sixth wireframe, one body among many; the clutter starts further
+from the centre and can no longer breathe back into it; and each body now tumbles on two
+independent orientation rates rather than one shared angle.
+
+- **The quintic body.** `WireShape::Quintic` is a sparse grid of the shared
+  `render/quintic.hpp` formula - the same `quinticPoint` the `t6` overture collapses onto -
+  walked over all 5x5 `(k1, k2)` patches at 2x2 cells each (200 segments, comparable to the
+  torus's 224), so it reads as a body-sized tangle rather than a quilt. Both `DepthField`
+  populations now pick uniformly from all six shapes (`nextFloat * 6 % 6`). `Deco::Manifold`
+  stays retired from the main menu exactly as before.
+- **Containment.** The menu field's spawn annulus moved from `0.62..1.77` to `1.30..2.50`
+  (the quiet field's `1.30..2.30` is unchanged); on top of that, `advance` clamps the body's
+  actual distance from centre to `kFieldMinRadius = 1.20` after the breathing offset and the
+  frame's vertical squeeze, so the trough of the cycle can never carry a body back inside the
+  floor it was born outside of. `1.20` is deliberately the tightest distance the quiet field
+  ever shipped at its spawn minimum, so the board screen's clearance is not loosened.
+- **Per-shape rotation.** `Body::spin/spinV` is replaced by independent `yaw/yawV` and
+  `pitch/pitchV`; `drawWireShape` feeds both to the camera for torus/Klein/Mobius/cube. The
+  tesseract is the exception the spec asked for: its two rates now drive `tesseractVertices`'
+  two 4-D planes (`xw` and `yz`), with the camera parked at `drawTesseract`'s fixed
+  `pitch = 0.35`, so it performs the same two-plane 4-D turn as the Settings screen's own
+  object instead of merely spinning a baked projection in 3-D.
+- **Tests.** Three new `[render]` cases in `tests/render/test_deco.cpp`: the quintic's
+  segments are non-degenerate and every endpoint is exactly a `quinticPoint` sample on the
+  body's own coarse grid (the differential against the shared oracle); two same-shape bodies
+  wander off the old `pitch == 0.55 * yaw` line by different amounts (which the old single
+  `spin` makes impossible); and every body in both fields stays at or outside
+  `kFieldMinRadius` across 720 s (over two of the slowest breathing cycles). The existing
+  "each wireframe body is a real drawing" case now covers six shapes. The containment test
+  was checked against a temporarily-disabled clamp and failed as expected (closest
+  `1.136 < 1.200`), so it is not vacuous.
+- **Exposed for tests.** `wireShapeSegments(WireShape, yaw, pitch)` (with the public
+  `WireSegment`), `DepthField::bodies()` and `kFieldMinRadius`; none is on the drawing path.
+- **Verification.** `tools/test.sh --build render` green (114 cases, 4.85M assertions) and
+  `--build app` green (173 cases total across both tags); `gui-menu`/`gui-welcome`/`gui-board`
+  validation-clean; `tools/precommit.sh` green (format, build, arch, unit, property).
+  Captures in `build/m18_rev_check/`: the menu (`--screen menu`) shows a quintic tangle among
+  the torus/Klein/Mobius/cube/tesseract bodies, sized and faded like the rest, and the board
+  capture keeps its quiet field at the frame edges with nothing over the board.
+- **Tuning choices (all by eye, all retunable).** Menu ring `1.30..2.50`, quiet ring
+  `1.30..2.30`, breathe amplitude unchanged at `0.10`, containment floor `1.20`, quintic grid
+  2x2 cells per patch. The floor is the knob if a future field wants more clearance.
+
 ## M18.5 Audio v1
 
 **Want.** The game is completely silent. `Settings` already carries `volumeMaster`/

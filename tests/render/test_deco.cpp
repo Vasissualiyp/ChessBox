@@ -8,12 +8,16 @@
 
 #ifdef CB_HAVE_IMGUI
 
+#include <array>
+#include <cmath>
+#include <cstddef>
 #include <utility>
 #include <vector>
 
 #include <imgui.h>
 
 #include "render/deco.hpp"
+#include "render/quintic.hpp"
 
 using namespace cb;
 using namespace cb::render;
@@ -98,7 +102,7 @@ TEST_CASE("each wireframe body is a real drawing", "[render]") {
   // by a radius or forgets an angle can silently emit nothing, and a background of
   // nothing looks exactly like a feature that was never wired up.
   const int count = static_cast<int>(WireShape::Count);
-  REQUIRE(count == 5);
+  REQUIRE(count == 6);
   for (int s = 0; s < count; ++s) {
     for (const float t : {0.0f, 0.5f, 2.0f}) {
       DecoFrame f;
@@ -112,11 +116,109 @@ TEST_CASE("each wireframe body is a real drawing", "[render]") {
   }
 }
 
+TEST_CASE("the quintic wire body is the shared oracle, not a second surface",
+          "[render]") {
+  // The quintic has returned as a sixth wireframe body, but as one of the six, not as the
+  // dominant object it used to be. Its geometry must come from the same `quinticPoint`
+  // formula the t6 overture settles onto - a hand-derived second surface would drift from
+  // the overture silently. Every segment endpoint must therefore be an oracle sample on
+  // the wire body's own coarse grid.
+  const std::vector<WireSegment> segs = wireShapeSegments(WireShape::Quintic);
+  REQUIRE(!segs.empty());
+  const float xSpan = 3.14159265358979f * 0.5f;
+  const auto onGrid = [xSpan](const std::array<float, 3>& p) {
+    for (int k1 = 0; k1 < kQuinticN; ++k1) {
+      for (int k2 = 0; k2 < kQuinticN; ++k2) {
+        for (int i = 0; i <= kQuinticWireCellsX; ++i) {
+          for (int j = 0; j <= kQuinticWireCellsY; ++j) {
+            const float x =
+                xSpan * static_cast<float>(i) / static_cast<float>(kQuinticWireCellsX);
+            const float y = -1.0f + 2.0f * static_cast<float>(j) /
+                                        static_cast<float>(kQuinticWireCellsY);
+            const std::array<float, 3> q = quinticPoint(k1, k2, x, y);
+            if (std::abs(q[0] - p[0]) < 1e-5f && std::abs(q[1] - p[1]) < 1e-5f &&
+                std::abs(q[2] - p[2]) < 1e-5f) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+    return false;
+  };
+  for (const WireSegment& s : segs) {
+    // A degenerate segment (both ends the same point) is not a line, so it would satisfy
+    // the membership check vacuously; rule it out first.
+    CHECK((std::abs(s.a[0] - s.b[0]) + std::abs(s.a[1] - s.b[1]) +
+           std::abs(s.a[2] - s.b[2])) > 1e-6f);
+    CHECK(onGrid(s.a));
+    CHECK(onGrid(s.b));
+  }
+}
+
+TEST_CASE("a body's two orientation rates are independent", "[render]") {
+  // Regression for the old single-`spin` coupling: yaw and pitch were both derived from
+  // one value (`pitch == 0.55 * yaw`), so a body traced one fixed path through
+  // orientation space rather than genuinely tumbling. `pitch - 0.55 * yaw` was then a
+  // constant (zero) for every body at every time; with two independent rates it drifts.
+  DepthField field;
+  field.advance(0.25f);
+  const std::vector<BodyState> before = field.bodies();
+  REQUIRE(!before.empty());
+
+  const auto residual = [](const BodyState& b) { return b.pitch - 0.55f * b.yaw; };
+
+  // Find two wireframe bodies of the same shape, to make the divergence claim concrete.
+  std::size_t i0 = 0, i1 = 0;
+  bool found = false;
+  for (std::size_t i = 0; i < before.size() && !found; ++i) {
+    if (before[i].piece) continue;
+    for (std::size_t j = i + 1; j < before.size(); ++j) {
+      if (before[j].piece || before[j].wire != before[i].wire) continue;
+      i0 = i;
+      i1 = j;
+      found = true;
+      break;
+    }
+  }
+  REQUIRE(found);
+
+  field.advance(9.0f);
+  const std::vector<BodyState> after = field.bodies();
+  REQUIRE(after.size() == before.size());
+
+  // The two same-shape bodies have each wandered off the old coupling line, and by
+  // different amounts: they are not moving together along one shared path.
+  const float moved0 = std::abs(residual(after[i0]) - residual(before[i0]));
+  const float moved1 = std::abs(residual(after[i1]) - residual(before[i1]));
+  CHECK((moved0 > 1e-3f || moved1 > 1e-3f));
+  CHECK(std::abs(moved0 - moved1) > 1e-4f);
+}
+
+TEST_CASE("a drifting body never breathes into the centre", "[render]") {
+  // The spawn radius is only the body's *average* distance from centre; the sinusoidal
+  // breathe rides on top of it, so without a clamp a body would swing inside the floor it
+  // was moved out of. Sample a whole cycle (the slowest breathe is ~314 s) and pin the
+  // invariant for both the menu field and the quieter board field, whose margin is
+  // tighter.
+  for (const bool quiet : {false, true}) {
+    DepthField field{quiet};
+    float closest = 1e9f;
+    for (int step = 0; step < 3600; ++step) {
+      field.advance(0.2f);
+      for (const BodyState& b : field.bodies()) {
+        closest = std::min(closest, b.centreDistance);
+      }
+    }
+    CHECK(closest >= kFieldMinRadius - 1e-4f);
+  }
+}
+
 TEST_CASE("the drifting field is the same picture from the same state", "[render]") {
   // The shell draws the same frame twice in a headless capture, so the field has to be a
-  // pure function of its own accumulated state. Two fields advanced by the same clock must
-  // emit byte-identical geometry; a colour or position that reaches for a global random
-  // source shows up here as a mismatch.
+  // pure function of its own accumulated state. Two fields advanced by the same clock
+  // must emit byte-identical geometry; a colour or position that reaches for a global
+  // random source shows up here as a mismatch.
   DepthField a;
   DepthField b;
   for (int i = 0; i < 5; ++i) {
