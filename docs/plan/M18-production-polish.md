@@ -26,6 +26,10 @@ worked, M18 needs footage that sells.
 5. **M18.5 Audio v1** - the game is silent. `Settings` already has volume sliders stored
    "for when it does" (`src/app/settings.hpp`). Biggest single perception change, biggest
    lift; scoped so a v1 needs no licensed assets at all.
+6. **M18.6 The flat/shape morph, and view controls that cannot contradict each other** -
+   SHAPE currently snaps instead of morphing (the overture already does this exact morph,
+   one layer over - `PlaySurface` just never asks for it), and 2D/SHAPE can be set to states
+   that make no sense together.
 
 ## M18.1 Capture/move juice
 
@@ -366,13 +370,117 @@ and a follow-up with authored sounds (once sourced) replacing the procedural one
 and fine; record that distinction in the status note so a later pass knows which sounds are
 placeholders.
 
+## M18.6 A morph between the flat board and its shape, and view controls that cannot
+## contradict each other
+
+**Want.** Two things, found while playing with the SHAPE toggle (M17): switching it snaps
+instantly between the flat board and the fully-formed shape, where everywhere else a
+transition like this (a screen change, a variant selection in the library) morphs - that
+inconsistency is exactly the kind of rough edge that reads as unfinished. Separately, the 2D/
+3D button and the SHAPE button can be set to states that make no sense together: SHAPE is
+offered while the board is flat 2D (a donut has no 2D rendering - there is nothing to show),
+and switching to 2D while SHAPE is on silently does *something* rather than being refused.
+
+**It already exists, one layer over.** The library/menu overture
+(`render::derivedOvertureScene`/the hand-authored scenes, `src/render/overture_scene.cpp`)
+already does precisely this morph: "pure in `t`...it opens on the flat board, forms the
+surface the variant's identifications imply, and unwinds." The underlying surface functions
+(`kleinSurf`, `shellTube`, and their siblings) take continuous roll parameters (`th`, `ph`)
+where 0 is the flat board and the shipped value is fully formed - "the flat box falls out of
+it as `th = ph = 0`" (`shellTube`'s own comment). `PlaySurface` - the *play* board's version
+of the same shapes - calls these at the fully-formed value **always**;
+`render::SurfacePose`'s own doc comment says so explicitly: "The surface functions still
+*carry* a geometric eversion - the overtures use it - but the play board does not take it."
+So the morph this item wants is not new math, it is **exposing a knob `PlaySurface` already
+has access to but never uses**.
+
+**Build.**
+
+- **Add a `formed` field to `SurfacePose`** (`src/render/overture_scene.hpp`), 0..1, default
+  1 (so every existing caller that does not set it keeps today's always-fully-formed
+  behaviour - `nix flake check`'s goldens must not move). Thread it into `PlaySurface::build`/
+  `buildStacked`'s calls to the underlying surface functions as the `th`/`ph` (or equivalent)
+  scale, exactly the way `pose.openness`/`pose.twist` are already threaded through today -
+  this is adding one more pose component to a mechanism that already passes several.
+- **A target the front end eases toward**, exactly `Settings::geometryEvert`'s own pattern
+  ("the `INVERT` button... sets a **target** the front end eases... to, so the pose stays a
+  pure function of its number"): a new `Settings::geometryFormed` (default 1) is the live,
+  eased value actually fed to `SurfacePose::formed`; toggling SHAPE sets a target (1 to show
+  the shape, 0 to return to flat) and the interactive loop eases the live value toward it over
+  a fixed duration - reuse whichever easing helper `geometryEvert`'s own transition already
+  uses rather than inventing a second one. Still a pure function of a number, still
+  `--shot`-able mid-transition (state `--formed 0.5` the way `--evert`/`--slide` already can
+  be stated for a capture).
+- **What "flat" looks like at `formed = 0`.** This needs an actual decision, not just a
+  number: does the board at `formed = 0` look like the *ordinary flat board* (cells at their
+  lattice positions, same as `flatView`/non-surface rendering), or like the overture's own
+  "opens on the flat board" pose (which may differ slightly - check `shellTube`/`kleinSurf`'s
+  `th = ph = 0` output against the ordinary flat-board layout before assuming they coincide).
+  If they do not naturally coincide, the honest fix is adjusting the surface function's
+  `formed = 0` case to match the real flat board exactly (a torus's `th=0` state should **be**
+  the ordinary 8x8 grid, not merely resemble it), since the morph has to land exactly on the
+  thing SHAPE-off already draws, or toggling twice would leave the board in a visibly
+  different place than where it started - pin this with a test, not an eyeball check.
+- **Mutual exclusivity (the simpler half).** `widgets::button` already takes an `enabled`
+  parameter - every call site in `src/render/ui.cpp`'s view-control row currently passes a
+  hardcoded `true` for it. Change two call sites (~line 1274 and ~line 1286 at the time of
+  writing - grep for the `"2D"`/`"3D"` and `"SHAPE"` button calls, they sit beside each
+  other): the 2D/3D button's `enabled` becomes `!shell.settings().geometryView` (greyed out
+  while the shape is showing - the player sees why: the state that would conflict is right
+  there, lit), and the SHAPE button's `enabled` becomes `!session.flatView()` (greyed out in
+  2D, since there is nothing to show). Do **not** hide either button - a control that
+  disappears is a worse surprise than one that is visibly present but refuses a click; keep
+  both visible, just non-interactive, matching how `button`'s existing `enabled=false` state
+  already renders elsewhere in the interface.
+- **What happens to an in-flight morph if the now-disabled control is attempted anyway?**
+  It cannot be, by construction, once the buttons are gated - but a scripted `--script`
+  capture or a settings-file edit could still set both `flatView` and `geometryView` true at
+  once. Decide and document one resolution (flat wins, since a shape has no 2D rendering to
+  fall back to) rather than leaving the combination undefined; a short test should pin it.
+
+**Tests.**
+
+- A property test that `PlaySurface` at `SurfacePose::formed = 0` produces the same cell
+  positions as the ordinary flat (non-surface) board layout, for `torus`/`klein`/`mobius` -
+  the "lands exactly on what SHAPE-off already draws" guarantee above, pinned.
+- A property test that `formed = 1` is pixel/position-identical to today's always-fully-
+  formed output (the existing shape-view goldens must not move - this is the backward-
+  compatibility check for the new default).
+- A test that `--formed 0.5` (or whatever the capture flag ends up named) produces a
+  validation-clean, in-between frame - the shape recognisably mid-morph, not a half-built
+  mesh or a crash.
+- A UI test (or a documented manual check, matching how other `widgets::button` `enabled`
+  states are verified elsewhere) that the 2D/3D button is disabled exactly when
+  `geometryView` is on, and SHAPE is disabled exactly when `flatView` is on.
+- A test pinning the `flatView && geometryView` resolution decided above.
+
+**Acceptance.**
+
+1. Pressing SHAPE morphs the board from flat to its shape over a short, visible transition
+   instead of snapping; pressing it again morphs back, landing exactly on the ordinary flat
+   board.
+2. The 2D/3D button is greyed out while SHAPE is on; the SHAPE button is greyed out in 2D -
+   neither can be used to reach a contradictory state.
+3. Every existing shape-view and flat-view golden/capture is unchanged (the new default of
+   `formed = 1` reproduces today's output exactly).
+4. `tools/test.sh --build render` and `--build app` green.
+
+**Risks and non-goals.** Not a new animation system - this reuses the overture's own roll
+math and the `geometryEvert`-style eased-target pattern, both already established. Not every
+pose control needs the same morph treatment (slide/invert/ghost can stay as they are unless
+a later note says otherwise) - scope this to the flat<->shape transition and the two buttons
+named above. If `formed = 0` turns out not to coincide with the flat board for some shape
+after investigation, fixing that is in scope (it is load-bearing for acceptance criterion 1),
+but changing the *shipped, fully-formed* shape's appearance is not - `formed = 1` must stay
+pixel-identical to today.
+
 ## Dependencies and ordering
 
-M18.1-M18.3 touch only `src/render`/`src/view` and are independent of each other and of
-M18.4/M18.5 - any order, any subset. M18.4 is independent of everything else in this file.
-M18.5 is a new layer and the most self-contained of the five (new module, event hooks, no
-shared state with M18.1-M18.4) but is also the largest - do it last, or in parallel with the
-others if capacity allows, since nothing here blocks on it.
+M18.1-M18.3 and M18.6 touch only `src/render`/`src/view`/`src/gui` and are independent of
+each other and of M18.4/M18.5 - any order, any subset. M18.4 is independent of everything
+else in this file. M18.5 is a new layer and the most self-contained of the six (new module,
+event hooks, no shared state with the others) but is also the largest - do it last, or in
+parallel with the others if capacity allows, since nothing here blocks on it.
 
 ## Risks and non-goals (the whole milestone)
 
