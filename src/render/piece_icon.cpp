@@ -175,6 +175,7 @@ PieceIcon pieceIcon(IconStyle style, Archetype shape) {
     case Archetype::Portal:
     case Archetype::Arrow:
     case Archetype::Fillet:
+    case Archetype::Disc:
     case Archetype::Count:
       return {};
   }

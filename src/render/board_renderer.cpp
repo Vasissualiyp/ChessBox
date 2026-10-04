@@ -39,6 +39,13 @@ struct BlurPush {
 };
 static_assert(sizeof(BlurPush) == 32);
 
+// The contact shadow (M18.2). The disc mesh's radius is half its extent, so an instance
+// scale of 0.68 wants a world radius of 0.34: a touch wider than a piece's own foot
+// (about 0.27) so the contact shows around the base, and still inside the cell (half
+// extent 0.46). Lifted a hair above the board so it never z-fights the square it grounds.
+constexpr float kShadowScale = 0.68f;
+constexpr float kShadowLift = 0.004f;
+
 void toFloat4(const view::Rgba& c, float out[4]) {
   out[0] = c.r;
   out[1] = c.g;
@@ -839,6 +846,29 @@ InstanceSet BoardRenderer::buildInstances(
       body.color[3] = alpha;
       into[static_cast<std::size_t>(shape[piece.type])].push_back(body);
     };
+    // M18.2: a soft decal under each occupied seat, lying on the surface and turned to
+    // the seat's own frame, exactly where the piece stands. The travelling piece's shadow
+    // is pinned to the surface under it - `ground`, never the hovered `position` - so the
+    // contact stays true while the piece rides above the board.
+    std::vector<std::vector<Instance>> byShapeShadow(
+        static_cast<std::size_t>(Archetype::Count));
+    const auto emitSurfaceShadow = [&](const view::Vec3& centre, const view::Vec3& normal,
+                                       const std::array<float, 4>& quat, float fit) {
+      Instance sh{};
+      sh.center[0] = centre.x + normal.x * (kHalf + kShadowLift);
+      sh.center[1] = centre.y + normal.y * (kHalf + kShadowLift);
+      sh.center[2] = centre.z + normal.z * (kHalf + kShadowLift);
+      const float s = kShadowScale * fit;
+      sh.scale[0] = s;
+      sh.scale[1] = s;
+      sh.scale[2] = 1.0f;
+      sh.quat[0] = quat[0];
+      sh.quat[1] = quat[1];
+      sh.quat[2] = quat[2];
+      sh.quat[3] = quat[3];
+      toFloat4(theme_.shadow, sh.color);
+      byShapeShadow[static_cast<std::size_t>(Archetype::Disc)].push_back(sh);
+    };
     for (const SurfaceSeat& seat : surf.seats()) {
       const Piece piece = p.at(seat.cell);
       if (piece.empty()) continue;
@@ -849,6 +879,7 @@ InstanceSet BoardRenderer::buildInstances(
       const float fit = std::min(std::sqrt(seat.stepU * seat.stepV), 1.0f);
       emitSurfacePiece(byShape, piece, seat.centre, seat.normal, seat.quat, fit,
                        seat.cell == checkCell_);
+      emitSurfaceShadow(seat.centre, seat.normal, seat.quat, fit);
     }
     // The mover, part-way along the surface between its start and its end.
     if (anim != nullptr && anim->active()) {
@@ -858,6 +889,7 @@ InstanceSet BoardRenderer::buildInstances(
             surfaceMoveSample(anim->path(), surf, anim->progress());
         emitSurfacePiece(byShape, moving, s.position, s.normal, s.quat, s.fit,
                          anim->travellingTo() == checkCell_);
+        emitSurfaceShadow(s.ground, s.normal, s.quat, s.fit);
       }
     }
 
@@ -913,6 +945,12 @@ InstanceSet BoardRenderer::buildInstances(
       out.flourish.insert(out.flourish.end(), byShapeFlourish[sh].begin(),
                           byShapeFlourish[sh].end());
     }
+    for (std::size_t sh = 0; sh < byShapeShadow.size(); ++sh) {
+      out.shadowBatches[sh].first = static_cast<std::uint32_t>(out.shadows.size());
+      out.shadowBatches[sh].count = static_cast<std::uint32_t>(byShapeShadow[sh].size());
+      out.shadows.insert(out.shadows.end(), byShapeShadow[sh].begin(),
+                         byShapeShadow[sh].end());
+    }
     // The board mesh is already in world space and already coloured, so its instance is
     // the identity: no offset, unit scale, white, and no seam band.
     Instance identity{};
@@ -954,7 +992,25 @@ InstanceSet BoardRenderer::buildInstances(
 
   // Two passes so instances of the same shape are contiguous: one draw call per shape.
   std::vector<std::vector<Instance>> byShape(static_cast<std::size_t>(Archetype::Count));
+  // M18.2: the contact shadows, kept apart from the opaque batches because they blend.
+  // The flat (`options_.flat`) board draws its pieces in the interface, so the renderer
+  // has no shadow to ground and emits none - the same cut the M18.1 flourish takes.
+  std::vector<std::vector<Instance>> byShapeShadow(
+      static_cast<std::size_t>(Archetype::Count));
   const view::Vec3 half = cellHalfExtent();
+
+  // One soft decal on the cell under a piece, at the cell's own surface point.
+  const auto emitShadow = [&](float x, float y, float z) {
+    Instance sh{};
+    sh.center[0] = x;
+    sh.center[1] = y;
+    sh.center[2] = z + half.z + kShadowLift;
+    sh.scale[0] = kShadowScale;
+    sh.scale[1] = kShadowScale;
+    sh.scale[2] = 1.0f;
+    toFloat4(theme_.shadow, sh.color);
+    byShapeShadow[static_cast<std::size_t>(Archetype::Disc)].push_back(sh);
+  };
 
   // One piece, wherever it happens to be this frame. A travelling piece is the same
   // call with a different position, which is what keeps the animation from being a
@@ -1045,6 +1101,7 @@ InstanceSet BoardRenderer::buildInstances(
     if (anim != nullptr && anim->active() && pl.cell == anim->travellingTo()) continue;
 
     emitPiece(piece, pl.x, pl.y, pl.z, pl.cell == checkCell_);
+    if (!options_.flat) emitShadow(pl.x, pl.y, pl.z);
   }
 
   // Where each sub-board ended up. Measured once and used twice: by the plinths, and by
@@ -1342,6 +1399,9 @@ InstanceSet BoardRenderer::buildInstances(
     const Piece moving = p.at(anim->travellingTo());
     if (at.moving && !moving.empty()) {
       emitPiece(moving, at.x, at.y, at.z + at.lift, false);
+      // The shadow stays on the board under a piece that is lifting or leaping over a
+      // seam; following it up would turn the contact into a lie (M18.2).
+      if (!options_.flat) emitShadow(at.x, at.y, at.z);
     }
     for (const view::MoveAnimation::Portal& portal : anim->openPortals()) {
       // A doorway standing across the seam the piece crossed: thin on the axis the
@@ -1448,6 +1508,12 @@ InstanceSet BoardRenderer::buildInstances(
     out.flourish.insert(out.flourish.end(), byShapeFlourish[s].begin(),
                         byShapeFlourish[s].end());
   }
+  for (std::size_t s = 0; s < byShapeShadow.size(); ++s) {
+    out.shadowBatches[s].first = static_cast<std::uint32_t>(out.shadows.size());
+    out.shadowBatches[s].count = static_cast<std::uint32_t>(byShapeShadow[s].size());
+    out.shadows.insert(out.shadows.end(), byShapeShadow[s].begin(),
+                       byShapeShadow[s].end());
+  }
   return out;
 }
 
@@ -1499,9 +1565,10 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
                                    const view::OrbitCamera& camera,
                                    const std::function<void(VkCommandBuffer)>& overlay,
                                    BoardRect boardRect, std::uint32_t frame) {
-  // The flourish instances ride the same buffer, immediately after the opaque ones, so
-  // the blended pass is one more draw group rather than a second buffer.
-  const std::size_t instanceCount = set.instances.size() + set.flourish.size();
+  // The contact shadows and the flourish ride the same buffer, immediately after the
+  // opaque ones, so each blended pass is one more draw group rather than a second buffer.
+  const std::size_t shadowBase = set.instances.size() + set.flourish.size();
+  const std::size_t instanceCount = shadowBase + set.shadows.size();
   if (auto r = ensureInstanceCapacity(frame, instanceCount); !r.has_value()) return r;
   if (instanceCount > 0) {
     void* mapped = nullptr;
@@ -1510,6 +1577,8 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     std::memcpy(mapped, set.instances.data(), set.instances.size() * sizeof(Instance));
     std::memcpy(static_cast<char*>(mapped) + set.instances.size() * sizeof(Instance),
                 set.flourish.data(), set.flourish.size() * sizeof(Instance));
+    std::memcpy(static_cast<char*>(mapped) + shadowBase * sizeof(Instance),
+                set.shadows.data(), set.shadows.size() * sizeof(Instance));
     vkUnmapMemory(ctx_->device(), instanceMem_[frame]);
   }
 
@@ -1654,6 +1723,27 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
         vkCmdBindIndexBuffer(cmd, surfaceIndexBuffer_[frame], 0, VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(cmd, static_cast<std::uint32_t>(set.surfaceIndices.size()), 1, 0,
                          0, set.surfaceInstance);
+      }
+    }
+    // The contact shadows (M18.2), blended like the flourish: a soft decal under each
+    // occupied cell. Depth writes are off but the test stays on, so a piece in front of a
+    // shadow still hides it. Drawn before the flourish, which belongs on top.
+    if (!set.shadows.empty()) {
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, surfaceBlendPipeline_);
+      vkCmdPushConstants(cmd, layout_,
+                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                         sizeof(PushConstants), &push);
+      const VkDeviceSize zero = 0;
+      vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer_, &zero);
+      vkCmdBindVertexBuffers(cmd, 1, 1, &instanceBuffer_[frame], &zero);
+      vkCmdBindIndexBuffer(cmd, indexBuffer_, 0, VK_INDEX_TYPE_UINT16);
+      const std::uint32_t base = static_cast<std::uint32_t>(shadowBase);
+      for (std::size_t s = 0; s < set.shadowBatches.size(); ++s) {
+        const auto& batch = set.shadowBatches[s];
+        if (batch.count == 0) continue;
+        const MeshRange& range = meshes_.ranges[s];
+        vkCmdDrawIndexed(cmd, range.indexCount, batch.count, range.firstIndex,
+                         range.vertexOffset, base + batch.first);
       }
     }
     // The capture flourish (M18.1), last and blended: alpha is the fade, so it cannot

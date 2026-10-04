@@ -184,6 +184,58 @@ to a second thin disc mesh rather than fighting the single-material constraint -
 whichever is chosen and why, the way GHOST's status note already records its own pipeline
 decision.
 
+### Status: M18.2 built (2026-10-04, opencode)
+
+Every occupied cell now carries a soft, dark contact shadow under its piece; empty cells
+have none. It reads on the ordinary board and on the geometry view.
+
+- **Route: a new disc mesh, not the shader flag.** The spec's preferred route - a new
+  per-instance flag adding a radial falloff to the flat-slab `Cell` path - was rejected on
+  inspection: it needs either a new field on the 84-byte hot `Instance` struct (and its
+  vertex-attribute layout) or an overloaded meaning for an existing field, and it puts a
+  branch into the fragment shader every draw executes. A new `Archetype::Disc` instead bakes
+  the falloff into the mesh's *vertex alpha* - the exact channel the geometry view's ghost
+  board already rides, which the shader already multiplies into the instance colour - so the
+  soft edge is data: no shader change, no new pipeline, no new attribute. A disc is also
+  genuinely round, where a falloff on the box slab still shows square sides at a grazing
+  angle. This is the same "one more translucent draw group through the existing blend
+  pipeline" pattern M18.1's flourish established.
+- **Where it hooks.** `BoardRenderer::buildInstances` emits one shadow per occupied
+  placement, plus one for the travelling piece at its current ground position (not its
+  hovered one); `options_.flat` emits none, the same cut the flourish takes, because the
+  interface draws those pieces. They live in a new `InstanceSet::shadows`/`shadowBatches`
+  and are drawn through `surfaceBlendPipeline_` (blend on, depth write off, depth test on)
+  immediately after the opaque board and before the flourish. The geometry view builds its
+  own from `PlaySurface` seats, turned to the seat's frame and lifted `kShadowLift` above
+  the tile so it cannot z-fight.
+- **Hover.** `SurfaceMoveSample` gained `ground`, the pre-hover point on the surface, so a
+  gliding piece's shadow stays pinned under it instead of riding up with the hover; a leap's
+  ground is its chord. `position` is unchanged, so the camera is untouched.
+- **Colour.** The spec suggested `Theme::soot`/`ink`, but those are *background* colours that
+  flip with the theme: on the light `manifold` theme they are the palest values in the
+  palette, so a shadow from them would read as a glow. Added `Theme::shadow` instead - a
+  deep slate on `manifold` (alpha 0.34) and a near-black on `console` (alpha 0.17), each
+  alpha tuned so the decal darkens the square without eroding a black piece on a dark
+  square. The disc's vertex-alpha profile holds near-solid to 0.55 of the radius then eases
+  to zero, so the visible rim is soft rather than a cone.
+- **Tests.** A no-GPU `[render]` test pins one shadow per occupied cell, none on an empty
+  FEN, translucency, and a byte-identical rebuild; another pins the disc mesh's radial alpha
+  ramp (solid core, zero rim); a third does the same for `torus` with `options.surface` on.
+  `test_theme`'s new contrast case measures the shadow composited over both squares in both
+  themes: it must darken the square and leave both piece colours above 1.8:1.
+- **Verification.** `tools/test.sh --build view render` green (100 render cases including
+  the validation-layer GPU runs, 68 view cases); `tools/precommit.sh` green (format, build,
+  arch, unit, property). Visually validated to `build/m182_check/`: `standard --shot`
+  before/after differs only by the shadows under the pieces, `torus --geometry --shot`
+  shows them lying on the surface, and two captures of the same state are byte-identical
+  (`cmp`).
+- **Deviations.** (1) The disc mesh rather than the spec's preferred shader flag, for the
+  reasons above. (2) `Theme::shadow` rather than `soot`/`ink`, which are background colours
+  that would *lighten* the light theme. (3) The shadow rides the blended pass after the
+  opaque pieces (depth test hides it under them) rather than literally "before the piece";
+  a translucent decal cannot go through the opaque, depth-writing pipeline, and this is the
+  order M18.1's flourish already set.
+
 ## M18.3 Cinema vignette and grade
 
 **Want.** `--cinema` strips the interface so the board is the whole frame, but the frame

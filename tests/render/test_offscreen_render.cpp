@@ -227,6 +227,65 @@ TEST_CASE("a capture leaves a flourish and a quiet move leaves none", "[render]"
   CHECK(none.flourish.empty());
 }
 
+TEST_CASE("an occupied cell gets one contact shadow and an empty cell gets none",
+          "[render]") {
+  // M18.2. One soft decal per occupied cell, at the cell's own surface point; a cell with
+  // nothing on it has nothing to ground. No device: this is the instance builder.
+  BoardRenderer renderer;
+
+  auto full = app::Session::create(test::loadVariant("standard"));
+  REQUIRE(full.has_value());
+  const InstanceSet start =
+      renderer.buildInstances((*full)->snapshot(), (*full)->viewConfig());
+  // The standard opening: 32 pieces, so 32 shadows.
+  REQUIRE(start.shadows.size() == 32);
+  // Deterministic: the same position twice is the same shadow data, byte for byte.
+  const InstanceSet again =
+      renderer.buildInstances((*full)->snapshot(), (*full)->viewConfig());
+  REQUIRE(again.shadows.size() == start.shadows.size());
+  CHECK(std::memcmp(again.shadows.data(), start.shadows.data(),
+                    start.shadows.size() * sizeof(Instance)) == 0);
+  // The decal is dark and translucent - alpha is what makes it a shadow rather than
+  // paint.
+  for (const Instance& sh : start.shadows) {
+    CHECK(sh.color[3] > 0.0f);
+    CHECK(sh.color[3] < 1.0f);
+  }
+
+  // An almost-empty board shadows only its pieces.
+  auto sparse = app::Session::create(test::loadVariant("standard"));
+  REQUIRE(sparse.has_value());
+  REQUIRE((*sparse)->loadFen("4k3/8/8/8/8/8/8/4K3 w - - 0 1").has_value());
+  const InstanceSet two =
+      renderer.buildInstances((*sparse)->snapshot(), (*sparse)->viewConfig());
+  REQUIRE(two.shadows.size() == 2);
+}
+
+TEST_CASE("the contact shadow mesh is a soft disc, not a hard slab", "[render]") {
+  // The point of a dedicated mesh: the alpha is baked into its vertices as a radial ramp,
+  // so the existing shader - which multiplies the vertex colour into the instance colour
+  // - draws a soft edge with no branch and no second pipeline (M18.2).
+  const MeshLibrary lib = MeshLibrary::build();
+  const MeshRange& range = lib.ranges[static_cast<std::size_t>(Archetype::Disc)];
+  REQUIRE(range.indexCount > 0);
+  REQUIRE(range.indexCount % 3 == 0);
+
+  float innerAlpha = -1.0f;
+  float rimAlpha = 2.0f;
+  float maxRadius = 0.0f;
+  for (std::uint32_t k = 0; k < range.indexCount; ++k) {
+    const std::uint32_t idx = static_cast<std::uint32_t>(range.vertexOffset) +
+                              lib.indices[range.firstIndex + k];
+    const MeshVertex& v = lib.vertices[idx];
+    const float radius = std::sqrt(v.pos[0] * v.pos[0] + v.pos[1] * v.pos[1]);
+    maxRadius = std::max(maxRadius, radius);
+    if (radius < 1e-4f) innerAlpha = std::max(innerAlpha, v.color[3]);
+    if (radius > maxRadius - 1e-3f) rimAlpha = std::min(rimAlpha, v.color[3]);
+  }
+  CHECK(innerAlpha > 0.9f);  // solid at the centre
+  CHECK(rimAlpha < 0.1f);    // faded to nothing at the rim
+}
+
 #ifdef CB_HAVE_IMGUI
 TEST_CASE("a capture on the shape leaves a flourish on its own square", "[render]") {
   // The geometry view builds its own pieces from `PlaySurface` seats rather than from the
@@ -260,6 +319,33 @@ TEST_CASE("a capture on the shape leaves a flourish on its own square", "[render
     if (f.color[3] > 0.0f && f.color[3] < 1.0f) translucent = true;
   }
   CHECK(translucent);
+}
+
+TEST_CASE("a shaped board shadows every occupied seat", "[render]") {
+  // The geometry view builds its own pieces from `PlaySurface` seats, so it needs its own
+  // shadows, placed on the surface and turned to its normal. No device: instance data.
+  BoardRenderer renderer;
+  const VariantSpec v = test::loadVariant("torus");
+  const Position p = Position::startPosition(v);
+  const view::ViewConfig cfg = view::ViewConfig::forBoard(v.dims);
+  BoardOptions options = renderer.options();
+  options.surface = true;
+  renderer.setOptions(options);
+  const InstanceSet set = renderer.buildInstances(view::PositionView::capture(p), cfg);
+
+  REQUIRE(set.shadows.size() == 32);
+  // Each shadow lies on the surface under its seat, facing the seat's own normal.
+  const PlaySurface surf = PlaySurface::build(v);
+  for (const Instance& sh : set.shadows) {
+    CHECK(sh.color[3] > 0.0f);
+    CHECK(sh.color[3] < 1.0f);
+    // A unit quaternion: the decal was turned onto the surface, not left flat.
+    const float qlen = std::sqrt(sh.quat[0] * sh.quat[0] + sh.quat[1] * sh.quat[1] +
+                                 sh.quat[2] * sh.quat[2] + sh.quat[3] * sh.quat[3]);
+    CHECK(std::abs(qlen - 1.0f) < 1e-3f);
+  }
+  // ...and there is one near each seat that holds a piece.
+  REQUIRE_FALSE(surf.empty());
 }
 #endif
 

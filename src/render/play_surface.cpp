@@ -424,6 +424,7 @@ SurfaceMoveSample surfaceMoveSample(const view::MovePath& path, const PlaySurfac
     const view::Vec3 chord = a->centre + (b->centre - a->centre) * t;
     view::Vec3 n = a->normal + (b->normal - a->normal) * t;
     n = view::length(n) > 1e-6f ? view::normalize(n) : a->normal;
+    out.ground = chord;
     out.position = chord + n * (std::sin(t * kPi) * 0.65f);
     out.normal = n;
     out.quat = t < 0.5f ? a->quat : b->quat;
@@ -465,6 +466,7 @@ SurfaceMoveSample surfaceMoveSample(const view::MovePath& path, const PlaySurfac
     points.push_back(cur.centre);
   }
   out.position = view::pointAlong(points, t);
+  out.ground = out.position;  // on the surface, before the hover below lifts it
 
   // Orientation snaps to the nearer route *cell* as the piece passes it - the boundary
   // waypoint is not a cell; the scale blends, so a piece does not visibly resize at a

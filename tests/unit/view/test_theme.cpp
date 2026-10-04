@@ -58,6 +58,27 @@ TEST_CASE("both piece colours read on the token they stand on", "[unit][view]") 
   }
 }
 
+TEST_CASE("a contact shadow does not swallow a piece", "[unit][view]") {
+  // M18.2: the shadow is drawn under every piece, so it becomes part of the surface the
+  // piece is read against. Composited at its own alpha it must still leave both piece
+  // colours legible on both squares, and it must darken the square - a shadow that
+  // *lightens* the board (which is what `soot`/`ink` do on the light theme, because they
+  // are background colours) is a glow, not a shadow.
+  const auto over = [](const Rgba& under, const Rgba& shadow) {
+    const float a = shadow.a;
+    return Rgba{under.r * (1.0f - a) + shadow.r * a, under.g * (1.0f - a) + shadow.g * a,
+                under.b * (1.0f - a) + shadow.b * a, 1.0f};
+  };
+  for (const Theme& t : {Theme::manifold(), Theme::console()}) {
+    for (const Rgba& square : {t.boardLight, t.boardDark}) {
+      const Rgba shadowed = over(square, t.shadow);
+      CHECK(luminance(shadowed) < luminance(square));
+      CHECK(contrast(t.whitePiece, shadowed) > 1.8f);
+      CHECK(contrast(t.blackPiece, shadowed) > 1.8f);
+    }
+  }
+}
+
 TEST_CASE("body text is legible on the ground it is drawn on", "[unit][view]") {
   for (const Theme& t : {Theme::manifold(), Theme::console()}) {
     CHECK(contrast(t.bone, t.ink) > 7.0f);       // primary type

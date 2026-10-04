@@ -90,6 +90,7 @@ const char* modelNameFor(Archetype a) {
     case Archetype::Portal:
     case Archetype::Arrow:
     case Archetype::Fillet:
+    case Archetype::Disc:
     case Archetype::Count:
       break;
   }

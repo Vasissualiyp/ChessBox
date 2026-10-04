@@ -34,6 +34,9 @@ void frameGeometryCamera(app::Session& session, const BoardOptions& options,
 /// `t`, like `moveCamera` and like an overture (M17.15).
 struct SurfaceMoveSample {
   view::Vec3 position{};
+  /// Where `position` sits *on* the surface, before the glide's hover lifts it: the point
+  /// a contact shadow stays pinned to while the piece rides above the board (M18.2).
+  view::Vec3 ground{};
   view::Vec3 normal{0.0f, 0.0f, 1.0f};
   std::array<float, 4> quat{{0.0f, 0.0f, 0.0f, 1.0f}};
   float fit{1.0f};  ///< the piece scale factor seats already carry

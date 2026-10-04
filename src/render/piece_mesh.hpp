@@ -50,6 +50,8 @@ enum class Archetype : std::uint8_t {
              ///< on whichever axis the seam it belongs to actually faces
   Arrow,     ///< the flat triangular head on a timeline's rail: a direction, in the board
   Fillet,    ///< a quarter disc: the rounded corner where a connector bends into a rail
+  Disc,      ///< a soft radial decal: the contact shadow under a piece (M18.2). Its
+             ///< falloff is baked into its vertices, so no other shape is one
   Count
 };
 

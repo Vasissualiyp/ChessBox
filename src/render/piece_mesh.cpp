@@ -16,11 +16,18 @@ void pushTri(MeshLibrary& m, std::uint32_t a, std::uint32_t b, std::uint32_t c) 
   m.indices.push_back(static_cast<std::uint16_t>(c));
 }
 
+std::uint32_t pushVertexColor(MeshLibrary& m, float x, float y, float z, float nx,
+                              float ny, float nz, float h, const float rgba[4]) {
+  const auto index = static_cast<std::uint32_t>(m.vertices.size());
+  m.vertices.push_back(
+      MeshVertex{{x, y, z}, {nx, ny, nz}, h, {rgba[0], rgba[1], rgba[2], rgba[3]}});
+  return index;
+}
+
 std::uint32_t pushVertex(MeshLibrary& m, float x, float y, float z, float nx, float ny,
                          float nz, float h) {
-  const auto index = static_cast<std::uint32_t>(m.vertices.size());
-  m.vertices.push_back(MeshVertex{{x, y, z}, {nx, ny, nz}, h, {1.0f, 1.0f, 1.0f, 1.0f}});
-  return index;
+  const float white[4]{1.0f, 1.0f, 1.0f, 1.0f};
+  return pushVertexColor(m, x, y, z, nx, ny, nz, h, white);
 }
 
 /// A truncated cone, which covers every round part of every piece: a disc when the
@@ -163,6 +170,55 @@ void addQuarterDisc(MeshLibrary& m, std::int32_t base, float r, float hz, int se
     const std::uint32_t v3 = put(0, 0, -hz, nx, ny, 0);
     pushTri(m, v0 - off, v1 - off, v2 - off);
     pushTri(m, v0 - off, v2 - off, v3 - off);
+  }
+}
+
+/// A flat disc whose vertex alpha holds near the centre and falls to nothing at the rim -
+/// the contact shadow (M18.2). The falloff is data, not a shader branch: the existing
+/// shader multiplies the vertex colour into the instance colour, the same channel the
+/// geometry view's ghost board uses, so a soft edge costs no branch and no second
+/// pipeline. Radius 0.5, like the portal cube, so an instance scale of 0.68 wants a world
+/// radius of 0.34 - a touch wider than a piece's own foot (about 0.27), which is what
+/// lets the contact show around the base instead of hiding under it.
+void addShadowDisc(MeshLibrary& m, std::int32_t base) {
+  const auto off = static_cast<std::uint32_t>(base);
+  constexpr float kRadius = 0.5f;
+  constexpr int kRings = 3;
+  // Hold the decal nearly solid out to this fraction of the radius, then ease to zero, so
+  // what a piece does not cover still reads as a shadow with a soft, not hard, edge.
+  constexpr float kHold = 0.55f;
+  const auto alphaAt = [](float u) {
+    if (u <= kHold) return 1.0f;
+    const float s = (u - kHold) / (1.0f - kHold);
+    return 1.0f - s * s * (3.0f - 2.0f * s);
+  };
+  const auto put = [&](float x, float y, float a) {
+    const float col[4]{1.0f, 1.0f, 1.0f, a};
+    // Height 0: the shadow shades with the board's foot rather than a shade brighter.
+    return pushVertexColor(m, x, y, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, col);
+  };
+  const float tau = 2.0f * std::numbers::pi_v<float>;
+  const std::uint32_t centre = put(0.0f, 0.0f, 1.0f);
+  std::uint32_t prev[kSegments];
+  for (int ring = 1; ring <= kRings; ++ring) {
+    const float u = static_cast<float>(ring) / kRings;
+    const float radius = kRadius * u;
+    const float alpha = alphaAt(u);
+    std::uint32_t cur[kSegments];
+    for (int i = 0; i < kSegments; ++i) {
+      const float a = tau * static_cast<float>(i) / kSegments;
+      cur[i] = put(std::cos(a) * radius, std::sin(a) * radius, alpha);
+    }
+    for (int i = 0; i < kSegments; ++i) {
+      const int j = (i + 1) % kSegments;
+      if (ring == 1) {
+        pushTri(m, centre - off, cur[i] - off, cur[j] - off);
+      } else {
+        pushTri(m, prev[i] - off, prev[j] - off, cur[j] - off);
+        pushTri(m, prev[i] - off, cur[j] - off, cur[i] - off);
+      }
+    }
+    for (int i = 0; i < kSegments; ++i) prev[i] = cur[i];
   }
 }
 
@@ -321,6 +377,10 @@ void buildArchetype(MeshLibrary& m, Archetype which, std::int32_t base) {
       addQuarterDisc(m, base, 0.46f, 0.055f, 10);
       return;
 
+    case Archetype::Disc:
+      addShadowDisc(m, base);
+      return;
+
     case Archetype::Count:
       return;
   }
@@ -366,6 +426,8 @@ std::string_view archetypeName(Archetype a) {
       return "arrow";
     case Archetype::Fillet:
       return "fillet";
+    case Archetype::Disc:
+      return "disc";
     case Archetype::Count:
       break;
   }

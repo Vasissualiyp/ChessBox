@@ -117,6 +117,13 @@ struct InstanceSet {
   std::vector<Instance> flourish;
   std::array<Batch, static_cast<std::size_t>(Archetype::Count)> flourishBatches{};
 
+  /// The contact shadows (M18.2): one soft, dark decal under each occupied cell, flat or
+  /// on a shape. Kept apart from `instances` for the same reason as the flourish - their
+  /// softness *is* their alpha, so they cannot ride the opaque per-shape batches. Drawn
+  /// in the same blended pass, before the flourish.
+  std::vector<Instance> shadows;
+  std::array<Batch, static_cast<std::size_t>(Archetype::Count)> shadowBatches{};
+
   [[nodiscard]] std::size_t size() const noexcept { return instances.size(); }
 };
 

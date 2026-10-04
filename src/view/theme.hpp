@@ -97,6 +97,15 @@ struct Theme {
   /// thing standing on the page rather than as a pattern printed on it.
   Rgba boardRim{Rgba::hex(0x241C15)};
 
+  /// The contact shadow under a piece (M18.2). It is always darker than what it falls on,
+  /// in both themes - a decal that *lightens* the board is a glow, not a shadow. It
+  /// cannot be drawn from `soot`/`ink`, because those are *background* colours and flip
+  /// with the page: on the light theme they are the palest values in the palette, so a
+  /// shadow from them would read as a halo. The alpha is part of the colour because it is
+  /// the only thing that says how strong the contact is; `test_theme` holds both ends -
+  /// it must darken the square and must leave both piece colours legible on it.
+  Rgba shadow{Rgba::hex(0x0A0806, 0.17f)};
+
   /// The disc a flat board's piece stands on.
   ///
   /// One colour for *both* sides, deliberately. Drawing a white piece as a dark figure
@@ -160,6 +169,9 @@ struct Theme {
     t.boardLight = Rgba::hex(0x98A4BE);
     t.boardDark = Rgba::hex(0x59637E);
     t.boardRim = Rgba::hex(0x39415A);
+    // A deep slate that leans blue to match the board, not a warm brown - the light shell
+    // has no warm ground for a brown shadow to blend into.
+    t.shadow = Rgba::hex(0x141C2E, 0.34f);
     t.pieceToken = Rgba::hex(0x7C8AA6);
     t.whitePiece = Rgba::hex(0xF6F9FF);
     t.blackPiece = Rgba::hex(0x10141E);
