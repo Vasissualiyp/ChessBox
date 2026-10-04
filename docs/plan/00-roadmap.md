@@ -41,6 +41,7 @@ directory. Read `docs/ARCHITECTURE.md` first.
 | M15 | Campaign: the geometry ladder | a designed progression with a concept boss per leg, ending on a `t6` puzzle finale | not started | [M15](M15-campaign.md) |
 | M16 | Steam publishing: store, demo and release | Coming Soon page, build pipeline, demo/Next Fest, ratings, launch | in progress: M16.2 packaging + SteamPipe scaffolding done; M16.1 store page is process | [M16](M16-publishing.md) |
 | M17 | Play on the shape: the geometry view | a button turns the play board into its own topology - the torus is a donut, the Klein bottle a bottle - and a move is played on it | not started, first in the release sequence's Wave 1 tail | [M17](M17-geometry-view.md) |
+| M18 | Production polish: the game stops reading as a tech demo | capture/move juice, contact shadows, a cinema vignette/grade, an ambient background drawn from the game's own geometry instead of abstract confetti, and v1 audio | spec'd, not started; sits beside the release sequence rather than inside it - see its own Dependencies section | [M18](M18-production-polish.md) |
 
 Each completed milestone's plan file ends with a **Status** section recording what was
 built, what was deferred, and why - including the places where the plan turned out to

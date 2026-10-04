@@ -208,3 +208,18 @@ The derived path only triggers for a variant whose name is in no C++ table. To s
   (a screen-change resets the pane transition after the tick; the second advances it). One
   frame and the library draws at alpha zero.
 - Temp variant files must be deleted before committing (see above).
+
+## 8. After Wave 1: M18, production polish
+
+Spec'd 2026-10-04, once all of Wave 1 (items 6 above) is done. Not a release-sequence item -
+see [`M18-production-polish.md`](M18-production-polish.md)'s own header for why. Prompted by
+a direct playtest note: the engine and the camera work are solid, but a capture vanishes with
+no acknowledgement, pieces have no contact shadow, the game is completely silent, the menu
+background is disconnected rainbow confetti, and `--cinema` output is unframed. Five
+independent pieces, cheapest/highest-impact first: M18.1 capture/move juice, M18.2 contact
+shadows, M18.3 a cinema vignette/grade, M18.4 the ambient background redone (the game's own
+geometries - torus, Klein, Möbius, cube, hypercube; explicitly not the quintic - drawn as
+quiet wireframes instead of filled confetti, brought to the game screen too), M18.5 audio v1
+(SDL3's own audio API, procedurally synthesised SFX, no licensed assets needed, no music yet).
+Full build/test/acceptance detail is in the spec file; none of it has been dispatched for
+implementation yet.
