@@ -2620,20 +2620,34 @@ OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v) {
 
 OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v, SurfacePose pose) {
   const float e = std::clamp(pose.evert, 0.0f, 1.0f);
+  // The morph knob (M18.6). The surface functions' own roll parameters are 0 at the flat
+  // board and the shipped value at the formed shape, so scaling them is the morph - the
+  // same mechanism the hand-authored overtures animate. At `formed = 1` every product is
+  // exactly the shipped constant (`kTau * 1.0f == kTau`), which is what keeps every
+  // existing capture bit-for-bit unchanged.
+  const float form = std::clamp(pose.formed, 0.0f, 1.0f);
+  // The shipped ring radius is not 1 (the real ratio is 1:1, so a hole is a legibility
+  // cheat), and `tube`/`kleinSurf` apply it the instant the ring roll begins. Scaling the
+  // roll from zero alone would therefore jump the ranks out by that factor on the first
+  // frame; the overtures ramp the radius in for exactly this reason, and so does the morph
+  // (M18.6). At `form = 1` the ramp returns the shipped constant to the bit.
+  const auto ramp = [form](float hi) {
+    return form >= 1.0f ? hi : 1.0f + (hi - 1.0f) * form;
+  };
   switch (kind) {
     case app::SurfaceKind::Tube: {
       TubeOpt o;
-      o.th = kTau;
+      o.th = kTau * form;
       o.thickness = pose.thickness;
       o.evert = e;
       return tube(u, v, o);
     }
     case app::SurfaceKind::Torus: {
       TubeOpt o;
-      o.th = kTau;
-      o.ph = kTau;
+      o.th = kTau * form;
+      o.ph = kTau * form;
       // The ring radius is the surface's "width"; `thickness` is the tube's own radius.
-      o.open = 2.2f * pose.openness;
+      o.open = pose.openness * ramp(2.2f);
       o.thickness = pose.thickness;
       o.evert = e;
       return tube(u, v, o);
@@ -2643,12 +2657,14 @@ OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v, SurfacePose pos
       // `len` sets the ribbon's loop radius and `wid` its width; `openness` lengthens the
       // loop, `thickness` widens the ribbon.
       return kMobiusStrip ? stripSurface(u, v, kW * stretch * pose.openness,
-                                         kH / stretch * pose.thickness, kTau, 1.0f, e)
-                          : band(u, v, kTau, 1.0f, e);
+                                         kH / stretch * pose.thickness, kTau * form, 1.0f, e)
+                          : band(u, v, kTau * form, 1.0f, e);
     }
     case app::SurfaceKind::Klein:
-      return kleinSurf(u, v, kTau, 1.0f, kTau, pose.twist, 2.05f * pose.openness, e,
-                       pose.collapsePhase, pose.thickness);
+      // The pinch is scaled with the rolls: at `form = 0` the cross-section must be the
+      // flat line again, not the figure-eight the fully-formed bottle needs.
+      return kleinSurf(u, v, kTau * form, form, kTau * form, pose.twist,
+                       pose.openness * ramp(2.05f), e, pose.collapsePhase, pose.thickness);
     case app::SurfaceKind::FlatGrid:
     case app::SurfaceKind::MirrorBox:
       return flatBoard()(u, v);
@@ -2677,12 +2693,18 @@ bool playShapePosition(const VariantSpec& v, CellId cell, OvVec3& out, SurfacePo
     // three gluings close T^2 as the shell's surface, the level axis becomes the shell's
     // radius, and four levels come out as four shells about one core circle. The file and
     // rank axes are periodic, so a slide is just sampling one cell further along - the
-    // same shape, differently parked (M17.22).
+    // same shape, differently parked (M17.22). `formed` scales the two rolls exactly as
+    // the 2-D surfaces do (M18.6), so the same flat-to-shape morph reaches this shape.
     constexpr float kE = 4.0f;
+    const float form = std::clamp(pose.formed, 0.0f, 1.0f);
+    // The core-circle radius is the same legibility cheat the 2-D torus uses, and the same
+    // ramp keeps `formed = 0` continuous with the flat box (M18.6); at 1 it is the shipped
+    // 10.5 to the bit.
+    const float open = form >= 1.0f ? 10.5f : 1.0f + (10.5f - 1.0f) * form;
     const Coord c = d.toCoord(cell);
     out = shellTube((fi(c.c[0]) + 0.5f + pose.slideU) / kE,
-                    (fi(c.c[1]) + 0.5f + pose.slideV) / kE, kTau, kTau,
-                    0.62f + fi(c.c[2]) * 0.82f, 10.5f);
+                    (fi(c.c[1]) + 0.5f + pose.slideV) / kE, kTau * form, kTau * form,
+                    0.62f + fi(c.c[2]) * 0.82f, open);
     return true;
   }
   if (d.dims() == 4 && v.name == "hyper4") {

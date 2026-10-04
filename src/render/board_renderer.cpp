@@ -649,7 +649,9 @@ InstanceSet BoardRenderer::buildInstances(
   // board are the same shape. The pieces stay instanced, because a piece *is* an object
   // standing on the surface. `PlaySurface` owns every placement and the picker reads the
   // same one, which is what makes a click land on the square under the cursor (M17).
-  if (options_.surface && hasPlaySurface(v)) {
+  // `!options_.flat` is the M18.6 resolution of the two view modes: a shape has no 2D
+  // rendering, so if a script or settings file sets both, the flat board wins.
+  if (options_.surface && !options_.flat && hasPlaySurface(v)) {
     InstanceSet out;
     SurfacePose pose;
     pose.slideU = options_.surfaceSlideU;
@@ -660,6 +662,7 @@ InstanceSet BoardRenderer::buildInstances(
     pose.thickness = options_.surfaceThickness;
     const float nx = static_cast<float>(v.dims.extent(0));
     pose.collapsePhase = nx > 0.0f ? options_.surfaceCollapseSquares / nx : 0.0f;
+    pose.formed = options_.surfaceFormed;
     const PlaySurface surf = PlaySurface::build(v, pose);
 
     std::vector<Archetype> shape(v.pieces.size(), Archetype::Tower);

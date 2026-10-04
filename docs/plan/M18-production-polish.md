@@ -607,8 +607,73 @@ pose control needs the same morph treatment (slide/invert/ghost can stay as they
 a later note says otherwise) - scope this to the flat<->shape transition and the two buttons
 named above. If `formed = 0` turns out not to coincide with the flat board for some shape
 after investigation, fixing that is in scope (it is load-bearing for acceptance criterion 1),
-but changing the *shipped, fully-formed* shape's appearance is not - `formed = 1` must stay
-pixel-identical to today.
+  but changing the *shipped, fully-formed* shape's appearance is not - `formed = 1` must stay
+  pixel-identical to today.
+
+### Status: M18.6 built, with one sub-part deferred (2026-10-04, opencode)
+
+SHAPE now rolls the board between flat and its shape through the overtures' own roll
+parameters, and the two view controls refuse the states that contradict each other. The
+morph machinery, the settings/flag plumbing and the gating are complete and tested; the
+exact landing of the morph's flat end on the ordinary lattice board is deferred, and why is
+recorded below.
+
+- **The morph is a pose knob already there.** `SurfacePose::formed` (0..1, default 1) scales
+  `derivedSurfaceAt`'s roll parameters: `th`/`ph` for `tube`/`torus`, `th` for the ribbon,
+  and `th`/`pinch`/`ph` for the Klein cross-section, with `shellTube`'s two rolls for
+  `torus3d`. `PlaySurface` reads it through the pose it already threads everywhere, and the
+  front end feeds it from a new `Settings::geometryFormed` (live, transient, not written to
+  disk) that the interactive loop eases toward `geometryView` with the same `dt * 2` ramp
+  `geometryEvert` uses. `--formed` states it for a capture and `--shot` reproduces.
+- **The frame is continuous, and forming was front-loaded.** Scaling the rolls from zero
+  alone made the torus jump: `tube`/`kleinSurf`/`shellTube` apply the ring-radius cheat (2.2,
+  2.05, 10.5) the instant `ph > 0`, so `ph = 0+` scales the ranks out by that factor while
+  `ph = 0` does not. The overtures ramp the radius in with the roll for exactly this reason;
+  the morph now ramps it too (`ramp(hi)` returns the shipped constant exactly at
+  `formed = 1`). Before the ramp, `formed = 0.01` moved a seat 4.3 units; after, under 0.1.
+- **Formed = 1 is bit-for-bit.** Every product is `kTau * 1.0f`, the ramp returns the
+  shipped constant at 1, and the renderer's surface gate is unchanged for a formed board.
+  `torus`, `klein`, `torus3d` and `hyper4` `--geometry` captures are byte-identical to a
+  HEAD build, except for an 18x10-pixel box on the button row - which is the intended M18.6
+  gating (the 2D/3D button greyed out), not the board. `torus --shot` is byte-identical.
+- **Gating (the simpler half).** `widgets::button`'s `enabled` is now
+  `!shell.settings().geometryView` for the 2D/3D button and `!session.flatView()` for SHAPE;
+  both stay visible, only inert. `--flat` (new, capture only) was added to state the 2D token
+  view for a `--shot`, since no script or settings path could reach it; the captures confirm
+  SHAPE greyed in 2D and 3D greyed in SHAPE.
+- **Flat wins when both are set.** A settings file or script can still set `flatView` and
+  `geometryView` at once; the renderer's surface path is now gated on `!options.flat`, so the
+  ordinary board is drawn (a shape has no 2D rendering). The `optionsFor` camera gate states
+  the same, and a no-GPU test pins that the surface mesh is not built.
+- **Deferred: `formed = 0` is the overture's flat pose, not the lattice board.** The surface
+  functions' `th = ph = 0` embedding places cell `(f, r)` at `(f, r)` with the ranks
+  *reversed* relative to `view::layout`: same files, same plane, opposite handedness. The two
+  flat states cannot be joined by a continuous morph without a rank collapse (a linear blend
+  of the two collapses every rank onto one line), and making them coincide means either
+  collapsing the board or changing the shipped `formed = 1` shape, which the spec forbids. So
+  pressing SHAPE still starts from a rank-mirrored flat and rolls to the shape; the roll is
+  smooth but the very first frame is a mirror. The relationship is pinned in
+  `test_play_surface.cpp` ("the morph's flat end is the flat board, reflected in rank")
+  rather than hidden, and joining the two flat embeddings is left to a later change (the
+  honest scope-down the spec allowed for this exact sub-part).
+- **D >= 3 (torus3d) morphs, roughly.** `shellTube` carries the same two rolls, so the
+  threaded `formed` does roll the nested shells; the intermediate frames are validation-clean
+  but visually busy (per-cell frames are recomputed from neighbours as the box turns), so the
+  torus3d transition is the least polished part of this item. `hyper4` has no roll parameter
+  (a bounded 4-cube) and is honestly a snap - there is no continuous roll to expose.
+- **Tests.** `[render]`: formed = 1 is bit-identical for every shape; the flat end is pinned
+  as the reflected lattice board; the morph is continuous and non-degenerate over a 100-step
+  sweep (`stepU`/`stepV` positive, bounded seat travel) for torus/Klein/Moebius; the
+  flat-wins resolution builds no surface mesh; `surfacePose` carries `geometryFormed`. A new
+  `gui-formed` CTest renders `--geometry --formed 0.5` and fails on any validation message.
+- **Verification.** `tools/test.sh --build render` (106 cases, 4.76M assertions) and
+  `--build app` green; `ctest --preset dev -R gui-` 30/30 (all existing shape/flat captures
+  validation-clean, determinism intact). `tools/precommit.sh` green (format, build, arch,
+  unit, property). Captures under `build/m186_check/`: the torus morph at formed
+  0/0.01/0.1/0.25/0.5/0.75/1 is a recognisable continuous roll, the 2D and SHAPE buttons are
+  each greyed in the other's state, and `torus`, `klein`, `torus3d` and `hyper4`
+  `--geometry --formed 1` match a HEAD build's board bit-for-bit (only the intended 18x10-px
+  button box differs), while `torus --shot` is byte-identical.
 
 ## Dependencies and ordering
 

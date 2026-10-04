@@ -347,6 +347,26 @@ TEST_CASE("a shaped board shadows every occupied seat", "[render]") {
   // ...and there is one near each seat that holds a piece.
   REQUIRE_FALSE(surf.empty());
 }
+
+TEST_CASE("flat 2D wins over the shape when both are set", "[render]") {
+  // M18.6: a settings-file edit (or a script) can set `flatView` and `geometryView` at
+  // once, even though the interface greys each control out in the other's state. The
+  // resolution is flat - a shape has no 2D rendering - so the renderer refuses the surface
+  // under `options.flat` rather than drawing a donut the 2D control cannot describe.
+  BoardRenderer renderer;
+  const VariantSpec v = test::loadVariant("torus");
+  const Position p = Position::startPosition(v);
+  const view::ViewConfig cfg = view::ViewConfig::forBoard(v.dims);
+  BoardOptions options = renderer.options();
+  options.surface = true;
+  options.flat = true;
+  renderer.setOptions(options);
+  const InstanceSet set = renderer.buildInstances(view::PositionView::capture(p), cfg);
+  CHECK(set.surfaceVertices.empty());
+  CHECK(set.surfaceIndices.empty());
+  // It is the ordinary board underneath, not nothing at all.
+  CHECK_FALSE(set.instances.empty());
+}
 #endif
 
 TEST_CASE("a glued board marks each seam with the colour of where it leads", "[render]") {

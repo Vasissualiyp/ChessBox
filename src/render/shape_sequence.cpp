@@ -86,6 +86,7 @@ SurfacePose surfacePose(const app::Settings& s, const VariantSpec& v) {
   pose.thickness = s.geometryThickness;
   const float nx = static_cast<float>(v.dims.extent(0));
   pose.collapsePhase = nx > 0.0f ? s.kleinShift / nx : 0.0f;
+  pose.formed = s.geometryFormed;
   return pose;
 }
 
@@ -160,7 +161,7 @@ std::shared_ptr<const PlaySurface> SurfaceCache::get(const VariantSpec& v,
                                                      const SurfacePose& pose) {
   const Key key{&v,          pose.slideU,       pose.slideV, pose.evert,
                 pose.twist,  pose.openness,     pose.stretch, pose.thickness,
-                pose.collapsePhase};
+                pose.collapsePhase, pose.formed};
   for (auto& [k, surf] : entries_) {
     if (k == key) return surf;
   }

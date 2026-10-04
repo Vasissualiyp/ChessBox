@@ -68,6 +68,11 @@ std::unique_ptr<Shell> Shell::create(std::vector<std::string> library,
   shell->settingsPath_ =
       settingsPath.empty() ? Settings::defaultPath() : std::move(settingsPath);
   shell->settings_ = Settings::load(shell->settingsPath_);
+  // The shape morph's live value starts settled at its target (M18.6): a loaded
+  // `geometry_view` means the fully-formed shape, its absence means the flat board. The
+  // transient value is never written to disk, so it cannot come in mid-morph; deriving it
+  // here is what stops a glued variant opening with a spurious morph on the first frame.
+  shell->settings_.geometryFormed = shell->settings_.geometryView ? 1.0f : 0.0f;
   shell->currentVariant_ = shell->settings_.lastVariant;
   // The shell always opens on the main menu. The curated first-run sequence is now the
   // on-demand Tutorial row rather than something the game opens onto by itself.

@@ -61,7 +61,7 @@ class SurfaceCache {
 
  private:
   using Key = std::tuple<const VariantSpec*, float, float, float, float, float, float,
-                         float, float>;
+                         float, float, float>;
   std::vector<std::pair<Key, std::shared_ptr<const PlaySurface>>> entries_;
 };
 

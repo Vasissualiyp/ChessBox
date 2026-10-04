@@ -1325,7 +1325,11 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     ImGui::SameLine();
     // View mode travels with the player: a flat board is easier to read, a solid one
     // easier to understand. Cold, because it is a view of the geometry, not a move.
-    if (button(session.flatView() ? "2D" : "3D", t, px(64), false, true, true, display)) {
+    // Greyed out while SHAPE is on (M18.6): a shape has no 2D rendering to fall back to,
+    // so the one state that would contradict SHAPE cannot be entered from here. It stays
+    // visible rather than hidden - a control that disappears is the worse surprise.
+    if (button(session.flatView() ? "2D" : "3D", t, px(64), false, true,
+               !shell.settings().geometryView, display)) {
       const bool flat = !session.flatView();
       session.setFlatView(flat);
       shell.settings().flatView = flat;
@@ -1337,7 +1341,9 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     if (hasPlaySurface(session.variant())) {
       ImGui::SameLine();
       const bool on = shell.settings().geometryView;
-      if (button("SHAPE", t, px(84), on, true, true, display)) {
+      // Greyed out in 2D (M18.6): a donut has no 2D rendering, so SHAPE is refused there
+      // rather than silently doing something. Visible but inert, as above.
+      if (button("SHAPE", t, px(84), on, true, !session.flatView(), display)) {
         shell.settings().geometryView = !on;
         request.settingsChanged = true;
       }

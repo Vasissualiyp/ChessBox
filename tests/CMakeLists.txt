@@ -78,6 +78,15 @@ if(TARGET chessbox_gui)
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(gui-evert PROPERTIES LABELS "render;gui" TIMEOUT 120
     ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  # M18.6: a mid-morph frame - the board part-way between flat and its shape - is a real
+  # mesh, not a half-built one: validation-clean and a picture at 0.5.
+  add_test(NAME gui-formed
+    COMMAND chessbox_gui torus
+            --shot ${CMAKE_BINARY_DIR}/render-captures/gui-formed.ppm
+            --geometry --formed 0.5
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(gui-formed PROPERTIES LABELS "render;gui" TIMEOUT 120
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
   # And slid round itself: half a cell along each axis, which is where no square sits
   # where the unposed board put it and every one of them is still on the surface.
   add_test(NAME gui-slide

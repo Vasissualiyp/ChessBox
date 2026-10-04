@@ -63,6 +63,12 @@ struct Settings {
   /// false back to 0. The ramp lives in the front end, not in the pose, so a pose stays a
   /// pure function of its number and a still stays reproducible (M17.7).
   bool geometryInvert{false};
+  /// The live, eased amount of the shape, 0 (flat board) to 1 (fully formed), fed to
+  /// `SurfacePose::formed` (M18.6). The SHAPE toggle is the target: the front end eases
+  /// this toward 0 or 1 with the same ramp `geometryEvert` uses, so the pose stays a pure
+  /// function of the number and `--shot --formed` reproduces. Transient like the align
+  /// offset: not written to disk, reset from `geometryView` when the shell is built.
+  float geometryFormed{1.0f};
   /// How opaque the geometry view's board mesh is, 1 fully opaque down to `kGhostMin` as
   /// a ghost, so the far side of the shape and the pieces on it show through. The pieces
   /// stay opaque; the point is to see them (M17.10).

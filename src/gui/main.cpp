@@ -179,6 +179,7 @@ render::BoardOptions optionsFrom(const app::Settings& s) {
   o.surfaceOpenness = s.geometryWidth;
   o.surfaceThickness = s.geometryThickness;
   o.surfaceCollapseSquares = s.kleinShift;
+  o.surfaceFormed = s.geometryFormed;
   return o;
 }
 
@@ -188,7 +189,13 @@ render::BoardOptions optionsFor(const app::Shell& shell) {
   render::BoardOptions o = optionsFrom(shell.settings());
 #ifdef CB_HAVE_IMGUI
   const app::Session* session = shell.session();
-  o.surface = shell.settings().geometryView && session != nullptr &&
+  const app::Settings& s = shell.settings();
+  // The surface path stays on while the board is forming or un-forming, so the morph is
+  // drawn all the way down to flat rather than snapping the instant SHAPE is toggled
+  // (M18.6). Flat 2D wins if both are set: the renderer also refuses the surface under
+  // `options.flat`, but stating it here keeps the camera and the draw agreeing.
+  const bool wantSurface = (s.geometryView || s.geometryFormed > 1e-4f) && !s.flatView;
+  o.surface = wantSurface && session != nullptr &&
               render::hasPlaySurface(session->variant());
 #else
   (void)shell;
@@ -371,9 +378,9 @@ int captureFrame(const std::string& variantName, const std::string& path,
                  int previewDims, bool clip, int clipFrames, float clipT0, float clipT1,
                  bool cinema, const std::string& followMode,
                  const std::string& shapeFollow, float moveT, int benchFrames,
-                 bool geometry, float evert, float slideU, float slideV, float ghost,
-                 const std::string& playFile, float dwell, int fps, float playAt,
-                 bool framesGiven, int width, int height) {
+                 bool geometry, float evert, float formed, bool flatCapture, float slideU,
+                 float slideV, float ghost, const std::string& playFile, float dwell,
+                 int fps, float playAt, bool framesGiven, int width, int height) {
   // Captures use default settings, never the person's own. A screenshot that changes
   // because whoever ran it likes a larger interface is not a screenshot of the game -
   // and `ctest -R gui-` would then pass or fail by whose machine it ran on.
@@ -414,8 +421,16 @@ int captureFrame(const std::string& variantName, const std::string& path,
     }
   }
   // A capture can state that it wants the play board as its own shape (M17), so the
-  // surface is reviewable the same way every other screen is.
-  if (geometry) shell->settings().geometryView = true;
+  // surface is reviewable the same way every other screen is. `--formed` states the morph
+  // point (M18.6); `--geometry` alone is the fully-formed shape, exactly as before.
+  if (geometry) {
+    shell->settings().geometryView = true;
+    shell->settings().geometryFormed = formed;
+  }
+  if (flatCapture) {
+    shell->settings().flatView = true;
+    if (shell->session() != nullptr) shell->session()->setFlatView(true);
+  }
   shell->settings().geometryEvert = evert;
   shell->settings().geometrySlideU = slideU;
   shell->settings().geometrySlideV = slideV;
@@ -818,6 +833,9 @@ int main(int argc, char** argv) {
   int benchFrames = 0;
   bool geometry = false;
   float evert = 0.0f;
+  float formed = 1.0f;
+  bool formedGiven = false;
+  bool flatCapture = false;
   float slideU = 0.0f;
   float slideV = 0.0f;
   float ghost = 1.0f;
@@ -856,6 +874,8 @@ int main(int argc, char** argv) {
           "and --evert 0..1 turns that shape through itself - a torus inside out,\n"
           "while --slide and --slide-v move the board round the shape, in cells, and\n"
           "--ghost 0.35..1 makes it translucent so the far side shows through.\n"
+          "--formed 0..1 states how far that shape has formed (0 the flat board), and\n"
+          "--flat draws the ordinary 2D token view instead of the shape.\n"
           "--play FILE plays a saved game (M12.7) move by move: with --clip it exports\n"
           "the whole game, with --shot it captures one instant. --dwell SECONDS is the\n"
           "pause held after each move (default 0.6), --fps N the export frame rate\n"
@@ -886,6 +906,11 @@ int main(int argc, char** argv) {
       cinema = true;
     else if (arg == "--geometry")
       geometry = true;
+    else if (arg == "--formed" && i + 1 < argc) {
+      formed = std::strtof(argv[++i], nullptr);
+      formedGiven = true;
+    } else if (arg == "--flat")
+      flatCapture = true;
     else if (arg == "--evert" && i + 1 < argc)
       evert = std::strtof(argv[++i], nullptr);
     else if (arg == "--slide" && i + 1 < argc)
@@ -924,8 +949,9 @@ int main(int argc, char** argv) {
     return captureFrame(variantName.empty() ? "standard" : variantName, targetPath,
                         script, screen, overtureT, previewDims, !clipDir.empty(),
                         clipFrames, clipT0, clipT1, cinema, followMode, shapeFollow,
-                        moveT, benchFrames, geometry, evert, slideU, slideV, ghost,
-                        playFile, dwell, captureFps, playAt, framesGiven, width, height);
+                        moveT, benchFrames, geometry || formedGiven, evert, formed,
+                        flatCapture, slideU, slideV, ghost, playFile, dwell, captureFps,
+                        playAt, framesGiven, width, height);
   }
 
   auto shell = makeShell();
@@ -1245,6 +1271,16 @@ int main(int argc, char** argv) {
         st.geometryEvert = std::min(target, st.geometryEvert + step);
       } else if (st.geometryEvert > target) {
         st.geometryEvert = std::max(target, st.geometryEvert - step);
+      }
+      // And the flat<->shape morph the same way (M18.6): SHAPE toggles `geometryView`, and
+      // this eases the live `geometryFormed` toward it. The surface path stays on while it
+      // is not yet flat, so toggling SHAPE off morphs back to the ordinary board instead
+      // of snapping - see `optionsFor`.
+      const float formTarget = st.geometryView ? 1.0f : 0.0f;
+      if (st.geometryFormed < formTarget) {
+        st.geometryFormed = std::min(formTarget, st.geometryFormed + step);
+      } else if (st.geometryFormed > formTarget) {
+        st.geometryFormed = std::max(formTarget, st.geometryFormed - step);
       }
     }
 

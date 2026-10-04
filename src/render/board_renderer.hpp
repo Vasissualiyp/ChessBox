@@ -86,6 +86,10 @@ struct BoardOptions {
   /// other before the collapse into the figure-eight (one square = 360/nx degrees),
   /// ramped along the rank so the square lines spiral.
   float surfaceCollapseSquares{0.0f};
+  /// How far the surface has formed, 0 to 1 (M18.6): 0 is the flat board the SHAPE
+  /// toggle starts from, 1 is the shipped shape. Default 1 so the flag is a no-op unless
+  /// the front end is mid-morph.
+  float surfaceFormed{1.0f};
   /// The board mesh's alpha, 1 opaque down to a translucent ghost so the far side of the
   /// shape and the pieces on it show through (M17.10). The pieces stay opaque.
   float surfaceGhost{1.0f};

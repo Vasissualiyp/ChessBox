@@ -228,6 +228,7 @@ void Settings::sanitize() {
   frameCap = std::clamp(frameCap, 0, 360);
   pieceHeightScale = std::clamp(pieceHeightScale, 0.0f, 2.0f);
   geometryEvert = std::clamp(geometryEvert, 0.0f, 1.0f);
+  geometryFormed = std::clamp(geometryFormed, 0.0f, 1.0f);
   // Never fully transparent: a board you cannot see is not a ghost, it is gone.
   geometryGhost = std::clamp(geometryGhost, 0.35f, 1.0f);
   kleinTwist = std::clamp(kleinTwist, 0.0f, 6.0f);

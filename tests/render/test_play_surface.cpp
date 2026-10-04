@@ -24,6 +24,7 @@
 #include "render/overture_scene.hpp"
 #include "render/play_surface.hpp"
 #include "support/variants.hpp"
+#include "view/layout.hpp"
 
 using namespace cb;
 using namespace cb::render;
@@ -1816,6 +1817,125 @@ TEST_CASE("the stacked shape's adjacency is pinned, not asserted in prose", "[re
           }
         }
       }
+    }
+  }
+}
+
+TEST_CASE("the morph's flat end is the flat board, reflected in rank", "[render]") {
+  // M18.6 deviation, pinned so it cannot drift silently. `formed = 0` is the flat board -
+  // every cell at the ordinary one-cell spacing - but embedded with the opposite
+  // handedness to the ordinary 3D board: files match, ranks reverse. That is the real
+  // reason the SHAPE morph cannot land exactly on the lattice board: joining two flat
+  // embeddings of opposite handedness needs a rank collapse (or changing the shipped
+  // shape, which the spec forbids), so the exact-landing sub-part is deferred. This test
+  // records the relationship rather than leaving it to an eyeball check.
+  for (const std::string& name : kShapes) {
+    CAPTURE(name);
+    const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
+    SurfacePose pose;
+    pose.formed = 0.0f;
+    const PlaySurface s = PlaySurface::build(v, pose);
+    REQUIRE_FALSE(s.empty());
+    const std::vector<view::Placement> flat =
+        view::layout(v.dims, view::ViewConfig::forBoard(v.dims));
+    REQUIRE(flat.size() == s.seats().size());
+
+    const auto seatFor = [&](CellId c) -> const SurfaceSeat* {
+      for (const SurfaceSeat& t : s.seats()) {
+        if (t.cell == c) return &t;
+      }
+      return nullptr;
+    };
+    view::Vec3 sc{0, 0, 0};
+    for (const SurfaceSeat& t : s.seats()) sc = sc + t.centre;
+    sc = sc * (1.0f / static_cast<float>(s.seats().size()));
+    view::Vec3 fc{0, 0, 0};
+    for (const view::Placement& p : flat) fc = fc + view::Vec3{p.x, p.y, p.z};
+    fc = fc * (1.0f / static_cast<float>(flat.size()));
+
+    // The surface's own per-cell steps; the layout's are 1. Normalising by them makes the
+    // comparison about the *arrangement* rather than about the Moebius ribbon's stretch,
+    // which deliberately spends area on the twist.
+    const SurfaceSeat* s00 = seatFor(v.dims.toCell(Coord::of({0, 0})));
+    const SurfaceSeat* s10 = seatFor(v.dims.toCell(Coord::of({1, 0})));
+    const SurfaceSeat* s01 = seatFor(v.dims.toCell(Coord::of({0, 1})));
+    REQUIRE(s00 != nullptr);
+    REQUIRE(s10 != nullptr);
+    REQUIRE(s01 != nullptr);
+    const float sx = s10->centre.x - s00->centre.x;
+    const float sy = s01->centre.y - s00->centre.y;
+    REQUIRE(std::abs(sx) > 1e-3f);
+    REQUIRE(std::abs(sy) > 1e-3f);
+    // The ordinary board runs files +X and ranks +Y; the surface's flat embedding keeps
+    // the files and reverses the ranks. That sign is the whole story.
+    CHECK(sx > 0.0f);
+    CHECK(sy < 0.0f);
+
+    for (const view::Placement& p : flat) {
+      const SurfaceSeat* t = seatFor(p.cell);
+      REQUIRE(t != nullptr);
+      const view::Vec3 want{p.x - fc.x, p.y - fc.y, p.z - fc.z};
+      const view::Vec3 got = t->centre - sc;
+      CAPTURE(p.cell, want.x, want.y, want.z, got.x, got.y, got.z, sx, sy);
+      // Files and ranks land on the same lattice points once the surface's own steps are
+      // divided out, and the board is flat. The rank sign above is what a continuous morph
+      // cannot reproduce against the ordinary board.
+      CHECK_THAT(got.x / sx, WithinAbs(want.x, 1e-3f));
+      CHECK_THAT(got.y / sy, WithinAbs(want.y, 1e-3f));
+      CHECK_THAT(got.z, WithinAbs(want.z, 1e-3f));
+    }
+  }
+}
+
+TEST_CASE("formed one is the shipped surface, bit for bit", "[render]") {
+  // M18.6 backward compatibility: the new `formed` defaults to 1, so every existing
+  // caller and every golden capture must be reproduced exactly. Any value that is not
+  // the formed surface is the new behaviour; 1.0f is the one that is not allowed to move.
+  for (const std::string& name : kShapes) {
+    CAPTURE(name);
+    const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
+    const PlaySurface a = PlaySurface::build(v);  // default pose: formed == 1
+    SurfacePose one;
+    one.formed = 1.0f;
+    const PlaySurface b = PlaySurface::build(v, one);
+    REQUIRE(a.seats().size() == b.seats().size());
+    for (std::size_t i = 0; i < a.seats().size(); ++i) {
+      CHECK(dist(a.seats()[i].centre, b.seats()[i].centre) == 0.0f);
+      CHECK(dist(a.seats()[i].normal, b.seats()[i].normal) == 0.0f);
+    }
+  }
+}
+
+TEST_CASE("the flat-to-shape morph is continuous and never degenerate", "[render]") {
+  // M18.6: `--formed 0.5` must be a recognisable mid-shape, not a half-built mesh. A
+  // fine sweep must move every seat by a bounded step and keep every seat a real, sized
+  // square at every point of the transition.
+  for (const char* name : {"torus", "klein", "mobius"}) {
+    CAPTURE(name);
+    const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
+    PlaySurface prev;
+    constexpr int kSteps = 100;
+    for (int i = 0; i <= kSteps; ++i) {
+      SurfacePose pose;
+      pose.formed = static_cast<float>(i) / static_cast<float>(kSteps);
+      const PlaySurface s = PlaySurface::build(v, pose);
+      REQUIRE(s.seats().size() == static_cast<std::size_t>(v.dims.cellCount()));
+      for (const SurfaceSeat& t : s.seats()) {
+        CHECK(std::isfinite(t.centre.x));
+        CHECK(std::isfinite(t.centre.y));
+        CHECK(std::isfinite(t.centre.z));
+        CHECK(t.stepU > 0.01f);
+        CHECK(t.stepV > 0.01f);
+      }
+      if (i > 0) {
+        for (std::size_t c = 0; c < s.seats().size(); ++c) {
+          CAPTURE(i, c, pose.formed);
+          // A hundredth of the morph moves a seat well under a cell: the transition is a
+          // continuous roll, not a snap to some other board.
+          CHECK(dist(s.seats()[c].centre, prev.seats()[c].centre) < 1.5f);
+        }
+      }
+      prev = s;
     }
   }
 }

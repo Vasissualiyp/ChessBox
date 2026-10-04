@@ -163,6 +163,13 @@ struct SurfacePose {
   /// value at rank 1, so the square lines spiral round the tube rather than the whole
   /// cylinder turning rigidly. This is not the half-turn twist. 0 is the shipped shape.
   float collapsePhase{0.0f};
+  /// How far the surface has formed, 0 to 1 (M18.6): 0 is the surface flat, 1 is the
+  /// fully-formed shipped shape. It scales the underlying surface functions' own roll
+  /// parameters (`th`/`ph` and the Klein pinch), which are 0 at the flat board - so a
+  /// morph is sampling the same functions the overtures already animate, not a second
+  /// embedding blended in. Default 1, so every existing caller that does not set it keeps
+  /// today's always-fully-formed behaviour and every captured frame is unchanged.
+  float formed{1.0f};
 };
 
 /// Where a lattice point lands on a derived overture's fully-formed surface, keyed by the

@@ -148,6 +148,8 @@ tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID 
 ./build/dev/src/gui/chessbox_gui torus --shot o.ppm --geometry --evert 1  # ...turned inside out
 ./build/dev/src/gui/chessbox_gui torus --shot o.ppm --geometry --slide 2.5  # ...slid round it
 ./build/dev/src/gui/chessbox_gui torus --shot o.ppm --geometry --ghost 0.4  # ...translucent, you see through it
+./build/dev/src/gui/chessbox_gui torus --shot o.ppm --geometry --formed 0.5  # ...half-way formed
+./build/dev/src/gui/chessbox_gui torus --shot o.ppm --flat             # the 2D token view
 ```
 
 **A build directory remembers which shell configured it.** One configured under

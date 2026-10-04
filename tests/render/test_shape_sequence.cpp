@@ -99,4 +99,15 @@ TEST_CASE("the shape choreography is the same state at the same elapsed time",
   }
 }
 
+TEST_CASE("the surface pose carries the live morph amount", "[render]") {
+  // M18.6: `geometryFormed` is the live, eased amount; the pose has to read it or the
+  // morph and `--formed` would be inert. The default is the fully-formed shape, so an
+  // unset settings value cannot move an existing capture.
+  const VariantSpec v = test::loadVariant("torus");
+  app::Settings s;
+  s.geometryFormed = 0.4f;
+  CHECK(render::surfacePose(s, v).formed == 0.4f);
+  CHECK(render::surfacePose(app::Settings{}, v).formed == 1.0f);
+}
+
 #endif  // CB_HAVE_IMGUI
