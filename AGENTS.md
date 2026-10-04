@@ -215,6 +215,7 @@ Each layer is a CMake target linking only to lower layers, so a violation is a
 | L100 | `src/render` | Vulkan, offscreen target, instanced renderer, piece meshes, ImGui panels, variant overtures |
 | L105 | `src/net` | the multiplayer front end: framed protocol, in-process and TCP transports, fault injector, authoritative server, thin client |
 | L95 | `src/app` | screens, settings, interaction: actions in, snapshot out |
+| L93 | `src/audio` | SDL3 sound: procedurally synthesised SFX and a device stream, silent when no device is present (M18.5) |
 | L90 | `src/io` | variant TOML loader, notation, FEN-N, ASCII board, replay |
 | L80 | `src/game` | history, undo, adjudication, repetition, clocks |
 | L70 | `src/temporal` | turn/timeline axes, present, branching (M6) |
@@ -248,6 +249,7 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | New rule mechanic | `src/rules/` opcode + tests + docs table | `cb-new-effect` |
 | A piece's look | `variants/*.toml` `shape` / `height` (data only) | `cb-new-piece` |
 | UI colours | `src/view/theme.hpp` - two themes, one struct, no renderer changes | |
+| A sound effect | `src/audio/audio.hpp` - add a `Sound` and its synthesis, then one `audio::play` at the event site | |
 | A flat piece icon | `src/render/piece_icon.cpp` - polygon tables, two styles | |
 | An authored piece body or icon | `src/assets/piece_model.cpp`; the designers are `src/render/ui_designer.cpp` | |
 | A menu's decorative object | `src/render/deco.cpp` + `decoForScreen` | |
@@ -365,6 +367,13 @@ These are the ones that have actually cost time here, not hypotheticals.
   `src/render/CMakeLists.txt`. Chakra Petch is not in nixpkgs and is fetched by hash at
   a pinned commit. A missing font is never fatal - the interface falls back and looks
   plainer.
+- **Audio is interactive only, and a missing device is never fatal.** `audio::Mixer::create`
+  is called solely by the interactive `main` (M18.5); `--shot`/`--clip` never reach it, so a
+  capture cannot require an audio device - and `audio::play` with no sink installed is a
+  no-op, which is the state every unit test runs in. The mixer logs and returns null when
+  SDL has no device, and the game plays on in silence. Off really is off: a gain of zero
+  skips the buffer rather than scaling it, and the synthesis normalises each effect to a
+  fixed peak so nothing clips.
 - **Every hardcoded pixel size in the interface goes through `Ui::px()`.** A missed one
   scales the text and leaves the panel behind. `widgets::menuEntry` takes its scale as a
   required argument for exactly this reason - a default let four menu rows draw at the

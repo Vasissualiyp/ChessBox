@@ -210,4 +210,15 @@ if(TARGET chessbox_gui)
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(gui-default-resolution PROPERTIES LABELS "render;gui" TIMEOUT 120
     ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  # M18.5: a capture must not need an audio device. The capture path never initialises
+  # audio, and the interactive mixer degrades to silence when a device is missing; this
+  # runs with an audio driver that does not exist, so a regression that made a capture open
+  # a device - or that made a failed open fatal - would fail here rather than in CI.
+  add_test(NAME gui-capture-no-audio
+    COMMAND chessbox_gui standard
+            --shot ${CMAKE_BINARY_DIR}/render-captures/gui-capture-no-audio.ppm
+            --script "click e2"
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(gui-capture-no-audio PROPERTIES LABELS "render;gui" TIMEOUT 120
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIODRIVER=chessbox-does-not-exist")
 endif()

@@ -23,6 +23,7 @@
 
 #include "app/game_runner.hpp"
 #include "app/shell.hpp"
+#include "audio/audio.hpp"
 #include "io/game_file.hpp"
 #include "io/variant_toml.hpp"
 #include "render/board_renderer.hpp"
@@ -195,8 +196,8 @@ render::BoardOptions optionsFor(const app::Shell& shell) {
   // (M18.6). Flat 2D wins if both are set: the renderer also refuses the surface under
   // `options.flat`, but stating it here keeps the camera and the draw agreeing.
   const bool wantSurface = (s.geometryView || s.geometryFormed > 1e-4f) && !s.flatView;
-  o.surface = wantSurface && session != nullptr &&
-              render::hasPlaySurface(session->variant());
+  o.surface =
+      wantSurface && session != nullptr && render::hasPlaySurface(session->variant());
 #else
   (void)shell;
 #endif
@@ -971,6 +972,16 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "cannot open a window: %s\n", window.error().format().c_str());
     return 1;
   }
+  // Sound is an interactive-only concern (M18.5): the capture branch above returns before
+  // this point, so `--shot`/`--clip` and every headless test reach the board with no
+  // audio device touched. A machine with no device (CI has none) is not fatal - `create`
+  // logs and returns null, `play` stays a no-op, and the game is simply silent. Created
+  // after the window so SDL is already up when the audio subsystem is initialised.
+  auto mixer = audio::Mixer::create();
+  if (mixer) {
+    mixer->setVolumes(shell->settings().volumeMaster, shell->settings().volumeEffects);
+    audio::setSink(mixer.get());
+  }
   auto renderer = render::BoardRenderer::create(window->context(), window->colorFormat());
   if (!renderer.has_value()) {
     std::fprintf(stderr, "cannot create the renderer: %s\n",
@@ -1272,10 +1283,10 @@ int main(int argc, char** argv) {
       } else if (st.geometryEvert > target) {
         st.geometryEvert = std::max(target, st.geometryEvert - step);
       }
-      // And the flat<->shape morph the same way (M18.6): SHAPE toggles `geometryView`, and
-      // this eases the live `geometryFormed` toward it. The surface path stays on while it
-      // is not yet flat, so toggling SHAPE off morphs back to the ordinary board instead
-      // of snapping - see `optionsFor`.
+      // And the flat<->shape morph the same way (M18.6): SHAPE toggles `geometryView`,
+      // and this eases the live `geometryFormed` toward it. The surface path stays on
+      // while it is not yet flat, so toggling SHAPE off morphs back to the ordinary board
+      // instead of snapping - see `optionsFor`.
       const float formTarget = st.geometryView ? 1.0f : 0.0f;
       if (st.geometryFormed < formTarget) {
         st.geometryFormed = std::min(formTarget, st.geometryFormed + step);
@@ -1325,6 +1336,10 @@ int main(int argc, char** argv) {
     }
     if (request.settingsChanged) {
       shell->applySettings();
+      if (mixer) {
+        mixer->setVolumes(shell->settings().volumeMaster,
+                          shell->settings().volumeEffects);
+      }
       renderer->setOptions(optionsFor(*shell));
       (*ui)->setIconStyle(render::iconStyleFromName(shell->settings().pieceIcons));
       const view::Theme theme = view::themeFromName(shell->settings().theme);

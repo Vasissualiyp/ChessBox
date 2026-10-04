@@ -572,6 +572,60 @@ and a follow-up with authored sounds (once sourced) replacing the procedural one
 and fine; record that distinction in the status note so a later pass knows which sounds are
 placeholders.
 
+### Status: M18.5 built (2026-10-04, opencode)
+
+Sound effects are in: a move, a capture, a check and a UI navigation action each play a
+short procedurally synthesised tone, scaled by the two volume sliders - and the game is
+silent, never fatal, when no audio device is present.
+
+- **New layer `src/audio` (L93).** A `cb_layer` target between `io` and `app`, depending
+  only on `base`; `app`, `render` and `gui` all link it, and the layer is added to AGENTS.md's
+  map in the same change (rule 8). SDL3 is linked **privately**, so no SDL header reaches
+  `app`/`render` - the public surface is the `Sound` enum, the pure synthesis functions and a
+  `Sink`/`play` pair. A build without SDL3 (the `nix flake check` package) compiles the layer
+  with `CB_HAVE_SDL_AUDIO` undefined and `Mixer::create` then returns null: silence, not a
+  build error. Verified by compiling `chessbox_audio`/`chessbox_app` in a no-SDL tree.
+- **The sounds.** Four buffers, 40-190 ms, generated once at startup and cached: `Click` (a
+  soft 1.4 kHz blip), `Move` (a 300 Hz body with a short noise knock), `Capture` (170 Hz plus
+  more noise - lower and sharper than a landing), `Check` (two rising notes, 700 then
+  1050 Hz). Each is normalised to a fixed intended peak (0.28-0.70 of full scale) so no sum
+  of components can clip, and the noise comes from a fixed-seed `base::Rng`, so a buffer is
+  the same bytes on every run and machine. These are **placeholders**; a later pass with
+  sourced or composed sounds is expected to replace them.
+- **Hook points, no new plumbing.** `Session::playChecked` - the one path a move is applied
+  through - plays `Capture`/`Move` from `Move::isCapture()` and, if `game_->inCheck()`
+  afterwards, `Check`. `render::widgets::rowControl` is the single chokepoint every menu row,
+  button and cycling setting already passes through, so the navigation click is one call
+  there; a disabled control reports no press and stays silent.
+- **Mixing.** `audio::effectsGain(master, effects)` is the only gain. A gain of zero skips the
+  buffer outright rather than scaling it to a near-zero noise floor, and `applyGain` returns
+  literal zeros (the test proves it). `volumeMusic` is read by the settings screen and has
+  nothing to multiply yet - the stated no-music scope cut, wired so a loop is one more factor
+  later.
+- **Settings screen.** The AUDIO sliders are enabled for Master and Effects; only Music stays
+  greyed, and the caption now reads "sound effects play; music is not in this build yet".
+  `Settings`' own audio comment is updated to match.
+- **Headless/capture safety.** `audio::Mixer::create` is called by the interactive `main`
+  alone; the capture branch returns before it, so `--shot`/`--clip` and every headless test
+  never touch SDL audio. When there *is* a device it is opened, but `create` logs and returns
+  null on any failure (no device, no stream, no resume) and `play` with no sink is a no-op -
+  the state every unit test runs in. A new `gui-capture-no-audio` CTest runs a capture with
+  `SDL_AUDIODRIVER=chessbox-does-not-exist` as the regression guard.
+- **Tests.** Five `[unit][audio]` cases: the four buffers are correctly sized (< 200 ms),
+  non-silent and below full scale, deterministic and pairwise distinct; `effectsGain` and
+  `applyGain` make either slider at zero literal silence while full gain is identity and half
+  is half; `play` forwards to an installed recorder and is a safe no-op without one; and a
+  `Session` driven through a move, a capture and a checking move announces `Move`, `Capture`
+  and `Move`+`Check` respectively. `tools/test.sh --build render` green (109 cases);
+  `--build app unit` green (279 cases); `ctest --preset dev -R gui-` 31/31 (the 30 existing
+  captures plus the new one); `tools/precommit.sh` green (format, build, arch, unit,
+  property).
+- **Not listened to.** Nobody - and no machine - heard this output in the pass that wrote it,
+  and could not: the build environment has no audio device. It ships as correct-by-construction
+  and unit-tested code (deterministic samples, correct sizes, no clipping, zero means silence,
+  no device means silence) whose actual audio quality is **unjudged**. The manual listening
+  acceptance calls for is still outstanding.
+
 ## M18.6 A morph between the flat board and its shape, and view controls that cannot
 ## contradict each other
 

@@ -1064,14 +1064,17 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::Dummy(ImVec2(0, px(8)));
 
   heading("AUDIO", t, small);
-  ImGui::BeginDisabled();
   ImGui::SliderFloat("Master", &s.volumeMaster, 0.0f, 1.0f, "%.2f");
+  // Music is deliberately not in this build (M18.5): there is no sourced loop to play, so
+  // its slider stays visible but inert rather than hidden, and the screen keeps its shape
+  // for when one arrives.
+  ImGui::BeginDisabled();
   ImGui::SliderFloat("Music", &s.volumeMusic, 0.0f, 1.0f, "%.2f");
-  ImGui::SliderFloat("Effects", &s.volumeEffects, 0.0f, 1.0f, "%.2f");
   ImGui::EndDisabled();
+  ImGui::SliderFloat("Effects", &s.volumeEffects, 0.0f, 1.0f, "%.2f");
   ImGui::PushFont(small);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
-  ImGui::TextUnformatted("the game has no sound yet; these are kept for when it does");
+  ImGui::TextUnformatted("sound effects play; music is not in this build yet");
   ImGui::PopStyleColor();
   ImGui::PopFont();
   ImGui::Dummy(ImVec2(0, px(8)));

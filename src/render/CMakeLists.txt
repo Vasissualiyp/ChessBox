@@ -61,7 +61,7 @@ endif()
 
 cb_layer(chessbox_render LEVEL 100
   SOURCES ${CB_RENDER_SOURCES}
-  DEPS chessbox_view chessbox_app chessbox_assets
+  DEPS chessbox_view chessbox_app chessbox_assets chessbox_audio
   SYSTEM_DEPS Vulkan::Vulkan)
 target_include_directories(chessbox_render PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/generated)
 if(SDL3_FOUND)

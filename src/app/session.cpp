@@ -5,6 +5,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "audio/audio.hpp"
 #include "io/fen.hpp"
 #include "io/game_file.hpp"
 #include "io/notation.hpp"
@@ -382,6 +383,12 @@ Result<void> Session::playChecked(const Move& m) {
   if (auto ok = game_->play(chosen); !ok.has_value()) {
     return fail(ok.error().code, ok.error().message);
   }
+  // One sound for the move that landed - a capture is a sharper, lower version of it -
+  // and a second, distinct one the moment the new side to move is in check (M18.5). The
+  // whole call is a no-op when no sink is installed, which is every capture and every
+  // test: playing a sound must never require a device.
+  audio::play(chosen.isCapture() ? audio::Sound::Capture : audio::Sound::Move);
+  if (game_->inCheck()) audio::play(audio::Sound::Check);
   if (animating) {
     anim_.start(viewCfg_, placements_, seams_, theme_, path, animSeconds_);
     // The camera reads the same route the animation draws, so the two cannot disagree

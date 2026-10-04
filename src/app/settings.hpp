@@ -158,8 +158,10 @@ struct Settings {
   bool seenWelcome{false};
 
   // ---- audio --------------------------------------------------------------
-  // The game has no sound yet. These are stored and shown disabled rather than hidden,
-  // so the settings screen does not silently change shape when sound arrives.
+  // Sound effects are generated in code at startup and played through SDL3 (M18.5);
+  // `volumeMaster * volumeEffects` scales every one. There is no music in this build yet,
+  // so `volumeMusic` is stored and read by the settings screen but multiplies nothing -
+  // wiring a loop in later means feeding it to the mixer as one more factor.
   float volumeMaster{0.8f};
   float volumeMusic{0.6f};
   float volumeEffects{0.9f};

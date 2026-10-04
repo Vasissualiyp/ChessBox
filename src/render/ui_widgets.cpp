@@ -7,6 +7,8 @@
 #include <map>
 #include <vector>
 
+#include "audio/audio.hpp"
+
 namespace cb::render::widgets {
 namespace {
 
@@ -175,6 +177,10 @@ bool rowControl(const char* id, const char* label, const view::Theme& theme, ImF
           upper(tail).c_str());
     }
   }
+  // One chokepoint for every control the shell draws: a menu row, a button and a cycling
+  // setting all pass through here, so this is the single place a navigation click is
+  // announced (M18.5). A disabled control reports no press, so it stays silent.
+  if (pressed && enabled) audio::play(audio::Sound::Click);
   return pressed && enabled;
 }
 
