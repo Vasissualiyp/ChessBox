@@ -110,4 +110,39 @@ TEST_CASE("the surface pose carries the live morph amount", "[render]") {
   CHECK(render::surfacePose(app::Settings{}, v).formed == 1.0f);
 }
 
+TEST_CASE("the surface pose carries the tesseract's 4-D rotation", "[render]") {
+  // M17.12 part B: `geometryHyperSpinU`/`geometryHyperSpinV` have to reach the pose, or
+  // the middle-drag would turn nothing. The defaults reproduce the library's fixed spin,
+  // so an unset settings value cannot move the opening shot.
+  const VariantSpec v = test::loadVariant("hyper4");
+  app::Settings s;
+  s.geometryHyperSpinU = 1.7f;
+  s.geometryHyperSpinV = -0.4f;
+  CHECK(render::surfacePose(s, v).hyperSpinU == 1.7f);
+  CHECK(render::surfacePose(s, v).hyperSpinV == -0.4f);
+  CHECK(render::surfacePose(app::Settings{}, v).hyperSpinU == 0.9f);
+  CHECK(render::surfacePose(app::Settings{}, v).hyperSpinV == 0.0f);
+}
+
+TEST_CASE("the surface cache keys on the tesseract's 4-D rotation", "[render]") {
+  // The cache memoises `PlaySurface::build` for the shape-follow evaluator. If the two
+  // live spin angles are missing from its key, a drag that turns the board while the
+  // camera follows a move would hand back the previous pose's surface and the camera
+  // would target the wrong shape. Assert two poses that differ only by the spin are
+  // cached apart, and that asking for the first again still returns the first.
+  const VariantSpec v = test::loadVariant("hyper4");
+  render::SurfaceCache cache;
+  render::SurfacePose a;
+  render::SurfacePose b;
+  b.hyperSpinU = a.hyperSpinU + 0.5f;
+  const auto sa = cache.get(v, a);
+  const auto sb = cache.get(v, b);
+  REQUIRE(sa != nullptr);
+  REQUIRE(sb != nullptr);
+  CHECK(sa != sb);
+  CHECK(cache.size() == 2);
+  CHECK(cache.get(v, a) == sa);
+  CHECK(cache.size() == 2);
+}
+
 #endif  // CB_HAVE_IMGUI

@@ -161,10 +161,10 @@ SlideOffset alignOffsetFor(const app::Shell& shell, CellId followed,
 
 std::shared_ptr<const PlaySurface> SurfaceCache::get(const VariantSpec& v,
                                                      const SurfacePose& pose) {
-  const Key key{&v,           pose.slideU,    pose.slideV,
-                pose.evert,   pose.twist,     pose.openness,
-                pose.stretch, pose.thickness, pose.collapsePhase,
-                pose.formed};
+  const Key key{&v,           pose.slideU,     pose.slideV,
+                pose.evert,   pose.twist,      pose.openness,
+                pose.stretch, pose.thickness,  pose.collapsePhase,
+                pose.formed,  pose.hyperSpinU, pose.hyperSpinV};
   for (auto& [k, surf] : entries_) {
     if (k == key) return surf;
   }
