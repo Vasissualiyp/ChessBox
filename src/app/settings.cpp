@@ -243,7 +243,7 @@ void Settings::sanitize() {
   kleinTwist = std::clamp(kleinTwist, 0.0f, 6.0f);
   geometryWidth = std::clamp(geometryWidth, 0.4f, 4.0f);
   geometryThickness = std::clamp(geometryThickness, 0.2f, 3.0f);
-  kleinShift = std::clamp(kleinShift, 0.0f, 16.0f);
+  kleinShift = std::clamp(kleinShift, -7.0f, 7.0f);
   // The slide is not wrapped here: its period is two laps of the *board*, which this
   // layer does not know. `PlaySurface` wraps it against the board's own extent (M17.9).
   animationSpeed = std::clamp(animationSpeed, 0.05f, 4.0f);

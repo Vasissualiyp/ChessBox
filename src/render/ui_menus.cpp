@@ -1094,7 +1094,9 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::SliderFloat("Tube width", &s.geometryThickness, 0.3f, 2.5f, "%.2fx");
   // Rotate one rank end of the cylinder relative to the other (one square = 360/nx
   // degrees) before the figure-eight collapse, so the square lines spiral round the tube.
-  ImGui::SliderFloat("Klein square shift", &s.kleinShift, 0.0f, 7.0f, "%.0f");
+  // Signed: a negative value spirals the other way directly, rather than winding all the
+  // way round through the positive values to reach the same square the short way.
+  ImGui::SliderFloat("Klein square shift", &s.kleinShift, -7.0f, 7.0f, "%.0f");
   ImGui::Dummy(ImVec2(0, px(8)));
 
   heading("CAMERA", t, small);

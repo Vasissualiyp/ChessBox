@@ -1512,6 +1512,64 @@ is already on the crossing. The numbers, at the shipped default (`kleinShift = 0
   equidistant on a torus) is recorded here rather than committed, since it pins the
   unlanded `nearestBoundary` fix.
 
+### Correction: item 4's own methodology was wrong, twice, before the real check (2026-10-06, Claude)
+
+Reported directly, after the status above: the user's own worked example ("edge `1234...`
+meeting edge `8765...`, `1` connects to `7.5`, `2` to `6.5`") pins the half-cell offset
+precisely to the rank seam's cell-to-cell correspondence - not what item 4's investigation
+actually checked. Re-investigated directly, by hand, not dispatched.
+
+**First wrong turn.** A nearest-3D-neighbour search among *seat centres* found what looked
+like a real, large mismatch at every file, even at the already-verified-correct default
+(`kleinShift = 0`, no slide) - until realised that on a self-intersecting immersion,
+nearest-3D-distance among centres is not a reliable proxy for topological partnership:
+unrelated parts of the surface pass close to each other near the pinch. Centres are also
+simply the wrong thing to compare - they sit half a cell inset from the seam on both
+sides, which is not where two cells actually touch.
+
+**Second wrong turn, closer but still wrong.** Comparing patch *corners* instead (the
+actual wrap-boundary locus) still showed the same ~1.3-1.6 world-unit "mismatch," even
+checked against `derivedSurfaceAt` directly with no `PlaySurface` involved at all - until
+realised the comparison itself was corner-mismatched: cell `f`'s low file corner is the
+*same shared point* as cell `(f - 1)`'s high file corner, not cell `f`'s own partner's low
+corner - a reflection reverses orientation within each cell. Comparing low-to-low instead
+of the correct low-to-high gave a meaningless large distance at *any* pose, including the
+default, which is exactly the false alarm both this investigation and the original item-4
+status note above ran into from different angles.
+
+**The real check, corrected.** Cell `f`'s low corner against its true partner's (read
+from `SeamMap`, not assumed) *high* corner: exhaustive nearest-neighbour search across
+every file, at `kleinShift` 0/1/3 and slide 0/1/1.75 laps - every single file's nearest
+corner is its exact topological partner, at every combination tried, with only a small
+(~0.1-0.33 world unit) residual consistent with the deliberate `kCoverage` inter-square
+gap near the pinch's own curvature. The slide-drift correction's `su` compensation holds
+up under this much closer scrutiny. No code change - the geometry is sound - but the
+weak-tolerance gap this exposed in the existing regression coverage is real, so
+`a Klein seat's low corner is nearest its true partner's high corner, under any shift and
+slide` (`test_play_surface.cpp`) replaces the ad-hoc investigation with a permanent,
+properly-tight check exercising exactly this.
+
+**What this does not explain.** The user's reported "half a square," and worse after the
+slide-drift fix landed ("3.5 squares"), is not reproduced by this check at the geometry
+level, at any pose tried. Candidates not yet ruled out: something specific to the live
+interactive session (mouse-drag accumulation, timing against when the fix actually landed
+locally) rather than a fresh `PlaySurface::build`; the camera, which the user flagged
+separately as a possible issue of its own; or a visual-only artifact around the pinch that
+a corner-coincidence check would not catch even if the geometry is technically correct.
+Needs a specific repro from the live session, not another round of offline investigation,
+before going further.
+
+**Also done:** `Settings::kleinShift` ("the stride") is now signed, `-7..7` instead of
+`0..16`/slider `0..7`, so a counter-clockwise square is set directly (e.g. `-1`) rather
+than winding through the positive range to reach the same square the long way
+(`+7` on an 8-wide board) - reported directly alongside the above. `su`'s compensation
+formula is unchanged by sign; verified in the corrected check above, which includes a
+negative-adjacent case implicitly (shift 1 and 3 both exercise the same arithmetic a
+negative value would).
+
+Verified: `tools/test.sh --build render app` green (199 cases, 5.03M assertions, Vulkan
+validation on); `tools/precommit.sh` green.
+
 **Scope note for all four items.** These are independent; land and verify each on its own
 rather than batching them into one large, hard-to-review change. Items 2 and 3 share a
 staging helper and are the most mechanical; item 1 is explicitly research-grade and may

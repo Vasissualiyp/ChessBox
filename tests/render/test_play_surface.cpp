@@ -2249,6 +2249,72 @@ TEST_CASE("the Klein morph is three legible stages", "[render]") {
   }
 }
 
+TEST_CASE(
+    "a Klein seat's low corner is nearest its true partner's high corner, under "
+    "any shift and slide",
+    "[render]") {
+  // Tighter than "the surface closes the seams the variant declares" above: that test
+  // compares seat CENTRES against a tolerance of `1.1 * widestV`, the single worst
+  // adjacent-rank gap anywhere on the board - which on a Klein bottle's own pinch can be
+  // large enough to make the tolerance nearly meaningless. This compares the actual
+  // wrap-boundary CORNERS (the real seam locus) against every other file's corner, by
+  // exhaustive nearest-neighbour search, so a real mismatch cannot hide behind a loose
+  // bound. Ground truth for "which file is file f's true rank-seam partner" is read
+  // straight from `SeamMap` (the topology engine), not assumed.
+  //
+  // The key subtlety a from-scratch version of this check gets wrong easily (this one
+  // did, before being corrected): cell f's LOW file corner (i = 0) is the shared point
+  // with cell (f - 1)'s HIGH file corner, not with cell f's own partner's low corner - a
+  // reflection reverses orientation within each cell. Comparing low-to-low instead of
+  // low-to-high gives a meaningless ~1.3-1.6 world-unit "mismatch" even at the default,
+  // already-correct pose, which is exactly the false alarm that happened while deriving
+  // this test.
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("klein"));
+  const view::ViewConfig cfg = view::ViewConfig::forBoard(v.dims);
+  const view::SeamMap seams = view::SeamMap::build(v, cfg, view::Theme{});
+  const int nx = static_cast<int>(v.dims.extent(0));
+  const int nz = static_cast<int>(v.dims.extent(1));
+
+  std::map<int, int> truePartner;
+  for (int f = 0; f < nx; ++f) {
+    const CellId c = v.dims.toCell(Coord::of({f, 0}));
+    for (const view::SeamFace& face : seams.at(c)) {
+      if (face.side == Side::Min && face.screenAxis == 1) {
+        truePartner[f] = v.dims.toCoord(face.partner)[0];
+      }
+    }
+  }
+  REQUIRE(static_cast<int>(truePartner.size()) == nx);
+
+  for (const float shift : {0.0f, 1.0f, 3.0f}) {
+    for (const float lapsSlide : {0.0f, 1.0f, 1.75f}) {
+      CAPTURE(shift, lapsSlide);
+      SurfacePose pose;
+      pose.collapsePhase = shift / static_cast<float>(nx);
+      pose.slideV = lapsSlide * static_cast<float>(nz);
+      const PlaySurface s = PlaySurface::build(v, pose);
+      for (int f = 0; f < nx; ++f) {
+        CAPTURE(f);
+        const view::Vec3 a = cornerOf(patchAt(s, v, f, 0), 0, 0);
+        float best = 1e9f;
+        int bestF = -1;
+        for (int f2 = 0; f2 < nx; ++f2) {
+          const float d = dist(
+              a, cornerOf(patchAt(s, v, f2, nz - 1), kSurfaceSubdiv, kSurfaceSubdiv));
+          if (d < best) {
+            best = d;
+            bestF = f2;
+          }
+        }
+        CHECK(bestF == truePartner[f]);
+        // Generous: the deliberate kCoverage gap near the pinch's own curvature, not a
+        // tight bound - the nearest-neighbour check above is the real assertion.
+        CHECK(best < 0.5f);
+      }
+    }
+  }
+}
+
 TEST_CASE("the Klein morph never jumps more than a cell", "[render]") {
   // M18 revision, item 3. The three stages must not make a seat disappear and reappear:
   // between adjacent samples of `formed`, no seat moves further than its own neighbour

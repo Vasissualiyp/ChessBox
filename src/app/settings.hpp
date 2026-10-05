@@ -107,7 +107,9 @@ struct Settings {
   /// For the Klein bottle: how many board squares the cylinder is rotated about its own
   /// axis before it is collapsed into the figure-eight (one square = 360/nx degrees).
   /// This moves which file lands where on the figure-eight, to line the squares up at the
-  /// seam.
+  /// seam. Signed, so a counter-clockwise square can be dialled in directly rather than
+  /// winding the long way round (e.g. -1 instead of +7 on an 8-wide board) - a debug
+  /// tuning knob, not a shipped control.
   float kleinShift{0.0f};
   /// Turn the ring so the piece a followed move travels on presents its outer face to the
   /// camera, rather than the camera clipping through the tube wall to see it (M17.17).

@@ -406,12 +406,27 @@ TEST_CASE("settings are clamped to usable values", "[unit][app]") {
   REQUIRE(s.kleinTwist <= 6.0f);
   REQUIRE(s.geometryWidth <= 4.0f);
   REQUIRE(s.geometryThickness <= 3.0f);
-  REQUIRE(s.kleinShift <= 16.0f);
+  REQUIRE(s.kleinShift <= 7.0f);
   // A zero would freeze the morph mid-roll with no way back, so it clamps up (M18.6).
   REQUIRE(s.geometryFormSpeed >= 0.25f);
   REQUIRE(s.animationSpeed >= 0.05f);
   REQUIRE(s.shapeFollow == "chase");
   REQUIRE_FALSE(s.lastVariant.empty());
+}
+
+TEST_CASE("the Klein square shift can be negative, within its own range", "[unit][app]") {
+  // Signed, so a counter-clockwise square is set directly (e.g. -1) rather than winding
+  // the long way round through the positive values (+7 on an 8-wide board) to land on
+  // the same square - a debug tuning knob's own ergonomics, not a shipped control.
+  Settings over;
+  over.kleinShift = -99.0f;
+  over.sanitize();
+  REQUIRE(over.kleinShift >= -7.0f);
+
+  Settings fine;
+  fine.kleinShift = -3.0f;
+  fine.sanitize();
+  REQUIRE(fine.kleinShift == -3.0f);
 }
 
 TEST_CASE("a missing settings file means defaults, not an error", "[unit][app]") {
