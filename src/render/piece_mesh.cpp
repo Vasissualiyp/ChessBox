@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <vector>
+
+#include "render/piece_icon.hpp"
 
 namespace cb::render {
 namespace {
@@ -266,6 +269,162 @@ void addTriPrism(MeshLibrary& m, std::int32_t base, float hx, float hy, float hz
   (void)totalHeight;
 }
 
+/// Twice the signed area of a triangle, in the icon's own plane.
+float cross2Icon(const IconPoint& o, const IconPoint& a, const IconPoint& b) {
+  return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+}
+
+/// Ear-clip a simple polygon into triangles, indices into `pts`. The same algorithm as
+/// `widgets::triangulate`, but on `IconPoint` so the mesh library keeps no ImGui
+/// dependency. A fan from the first vertex is *not* enough here: the Primitive set is
+/// mostly convex but not entirely - the crown's body and its zig-zag teeth are concave -
+/// and a fan would fill their valleys and leave a flange where the rim does not.
+std::vector<int> earClipIcon(const std::vector<IconPoint>& pts) {
+  const int n = static_cast<int>(pts.size());
+  std::vector<int> out;
+  if (n < 3) return out;
+  std::vector<int> poly(static_cast<std::size_t>(n));
+  for (int i = 0; i < n; ++i) poly[static_cast<std::size_t>(i)] = i;
+  // Work anticlockwise whichever way the outline was wound; an outline is a shape, not a
+  // direction, and both windings have to fill the same - and the cap's own triangle
+  // winding takes its normal from that choice.
+  float area2 = 0.0f;
+  for (int i = 0; i < n; ++i) {
+    const IconPoint& a = pts[static_cast<std::size_t>(i)];
+    const IconPoint& b = pts[static_cast<std::size_t>((i + 1) % n)];
+    area2 += a.x * b.y - b.x * a.y;
+  }
+  if (area2 < 0.0f) std::reverse(poly.begin(), poly.end());
+
+  out.reserve(static_cast<std::size_t>(n - 2) * 3);
+  int guard = n * n;  // a self-intersecting outline has no ear; stop rather than spin
+  while (poly.size() > 3 && guard-- > 0) {
+    bool clipped = false;
+    const int m = static_cast<int>(poly.size());
+    for (int i = 0; i < m; ++i) {
+      const int ia = poly[static_cast<std::size_t>((i + m - 1) % m)];
+      const int ib = poly[static_cast<std::size_t>(i)];
+      const int ic = poly[static_cast<std::size_t>((i + 1) % m)];
+      if (cross2Icon(pts[static_cast<std::size_t>(ia)], pts[static_cast<std::size_t>(ib)],
+                     pts[static_cast<std::size_t>(ic)]) <= 0.0f) {
+        continue;  // a reflex corner is not an ear
+      }
+      bool contains = false;
+      for (const int j : poly) {
+        if (j == ia || j == ib || j == ic) continue;
+        const float d1 = cross2Icon(pts[static_cast<std::size_t>(ia)],
+                                    pts[static_cast<std::size_t>(ib)],
+                                    pts[static_cast<std::size_t>(j)]);
+        const float d2 = cross2Icon(pts[static_cast<std::size_t>(ib)],
+                                    pts[static_cast<std::size_t>(ic)],
+                                    pts[static_cast<std::size_t>(j)]);
+        const float d3 = cross2Icon(pts[static_cast<std::size_t>(ic)],
+                                    pts[static_cast<std::size_t>(ia)],
+                                    pts[static_cast<std::size_t>(j)]);
+        if (!((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0))) {
+          contains = true;
+          break;
+        }
+      }
+      if (contains) continue;
+      out.push_back(ia);
+      out.push_back(ib);
+      out.push_back(ic);
+      poly.erase(poly.begin() + i);
+      clipped = true;
+      break;
+    }
+    if (!clipped) {
+      out.clear();  // no ear anywhere: not a simple polygon
+      return out;
+    }
+  }
+  if (poly.size() == 3) {
+    out.push_back(poly[0]);
+    out.push_back(poly[1]);
+    out.push_back(poly[2]);
+  }
+  return out;
+}
+
+/// Extrude one `PieceIcon` into a two-sided puck (M17.25). Each sub-polygon becomes a
+/// thin prism: the *same* outline stamped on both caps, so a flipped seat still reads as
+/// the same piece, with a rim between them. The icon is the flat board's Primitive set,
+/// whose outlines have no cut-outs - a hole-free outline extrudes as a solid without a
+/// polygon-with-holes triangulator.
+void addIconCylinder(MeshLibrary& m, std::int32_t base, const PieceIcon& icon) {
+  float cx = 0.0f;
+  float cy = 0.0f;
+  std::size_t count = 0;
+  for (const IconPoly& poly : icon.fills) {
+    for (const IconPoint& p : poly) {
+      cx += p.x;
+      cy += p.y;
+      ++count;
+    }
+  }
+  if (count == 0) return;
+  cx /= static_cast<float>(count);
+  cy /= static_cast<float>(count);
+
+  const float s = kCylinderIconScale;
+  const float h = kCylinderHalfThick;
+  const auto off = static_cast<std::uint32_t>(base);
+  // The icon is authored x-right, y-down; local +y is up, so the glyph is not upside
+  // down on a seat. Recentred on its own centroid and scaled into local units.
+  const auto local = [&](const IconPoint& p) {
+    return IconPoint{(p.x - cx) * s, (cy - p.y) * s};
+  };
+
+  for (const IconPoly& poly : icon.fills) {
+    std::vector<IconPoint> pts;
+    pts.reserve(poly.size());
+    for (const IconPoint& p : poly) pts.push_back(local(p));
+    if (pts.size() < 3) continue;
+    const std::vector<int> tris = earClipIcon(pts);
+    if (tris.empty()) continue;
+
+    // Both caps carry the same points in the same order; the bottom is the top pushed
+    // down, never a mirror. Separate vertices per cap so each face has a flat normal and
+    // a hard edge against the rim.
+    std::vector<std::uint32_t> top(pts.size());
+    std::vector<std::uint32_t> bottom(pts.size());
+    for (std::size_t i = 0; i < pts.size(); ++i) {
+      top[i] = pushVertex(m, pts[i].x, pts[i].y, h, 0.0f, 0.0f, 1.0f, 1.0f) - off;
+      bottom[i] = pushVertex(m, pts[i].x, pts[i].y, -h, 0.0f, 0.0f, -1.0f, 1.0f) - off;
+    }
+    for (std::size_t t = 0; t + 2 < tris.size(); t += 3) {
+      const auto a = static_cast<std::uint32_t>(tris[t]);
+      const auto b = static_cast<std::uint32_t>(tris[t + 1]);
+      const auto c = static_cast<std::uint32_t>(tris[t + 2]);
+      pushTri(m, top[a], top[b], top[c]);           // anticlockwise in xy: +z
+      pushTri(m, bottom[a], bottom[c], bottom[b]);  // reversed: -z
+    }
+    // The side wall. For an anticlockwise outline the outward normal of edge i->j is
+    // (dy, -dx); each quad its own vertices, so the wall keeps a crisp silhouette rather
+    // than smearing the face's shading round the corner.
+    for (std::size_t i = 0; i < pts.size(); ++i) {
+      const std::size_t j = (i + 1) % pts.size();
+      const float dx = pts[j].x - pts[i].x;
+      const float dy = pts[j].y - pts[i].y;
+      const float len = std::sqrt(dx * dx + dy * dy);
+      if (len < 1e-9f) continue;
+      const float nx = dy / len;
+      const float ny = -dx / len;
+      const std::uint32_t a =
+          pushVertex(m, pts[i].x, pts[i].y, h, nx, ny, 0.0f, 1.0f) - off;
+      const std::uint32_t b =
+          pushVertex(m, pts[j].x, pts[j].y, h, nx, ny, 0.0f, 1.0f) - off;
+      const std::uint32_t c =
+          pushVertex(m, pts[j].x, pts[j].y, -h, nx, ny, 0.0f, 1.0f) - off;
+      const std::uint32_t d =
+          pushVertex(m, pts[i].x, pts[i].y, -h, nx, ny, 0.0f, 1.0f) - off;
+      pushTri(m, a, c, b);
+      pushTri(m, a, d, c);
+    }
+  }
+}
+
 /// Every piece stands on the same foot, which is what makes an army look like a set.
 void addFoot(MeshLibrary& m, std::int32_t base, float totalHeight) {
   addCone(m, base, 0.00f, 0.09f, 0.34f, 0.30f, totalHeight, false);
@@ -501,6 +660,18 @@ MeshLibrary MeshLibrary::build() {
     buildArchetype(m, static_cast<Archetype>(i), base);
     range.indexCount = static_cast<std::uint32_t>(m.indices.size()) - range.firstIndex;
     m.ranges[i] = range;
+  }
+  // The shape view's icon-faced pucks (M17.25), appended into the same buffers so the
+  // draw loop is unchanged apart from which range it reads. Archetypes that are not
+  // pieces have an empty icon and therefore an empty range.
+  for (std::size_t i = 0; i < static_cast<std::size_t>(Archetype::Count); ++i) {
+    const auto base = static_cast<std::int32_t>(m.vertices.size());
+    MeshRange range;
+    range.firstIndex = static_cast<std::uint32_t>(m.indices.size());
+    range.vertexOffset = base;
+    addIconCylinder(m, base, pieceIcon(IconStyle::Primitive, static_cast<Archetype>(i)));
+    range.indexCount = static_cast<std::uint32_t>(m.indices.size()) - range.firstIndex;
+    m.cylinderRanges[i] = range;
   }
   return m;
 }

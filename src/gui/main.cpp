@@ -222,6 +222,7 @@ render::BoardOptions optionsFrom(const app::Settings& s) {
   o.surfaceThickness = s.geometryThickness;
   o.surfaceCollapseSquares = s.kleinShift;
   o.surfaceFormed = s.geometryFormed;
+  o.shapePieceCylinders = s.shapePieceCylinders;
   return o;
 }
 
@@ -423,7 +424,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
                  bool geometry, float evert, float formed, bool flatCapture, float slideU,
                  float slideV, float ghost, const std::string& playFile, float dwell,
                  int fps, float playAt, bool framesGiven, int width, int height,
-                 const std::string& watchName) {
+                 const std::string& watchName, bool pieceCylinders) {
   // Captures use default settings, never the person's own. A screenshot that changes
   // because whoever ran it likes a larger interface is not a screenshot of the game -
   // and `ctest -R gui-` would then pass or fail by whose machine it ran on.
@@ -470,6 +471,9 @@ int captureFrame(const std::string& variantName, const std::string& path,
     shell->settings().geometryView = true;
     shell->settings().geometryFormed = formed;
   }
+  // The shape view's icon-faced pucks (M17.25), so a capture can review them the way
+  // every other state is reviewable. Only meaningful with the shape; ignored otherwise.
+  shell->settings().shapePieceCylinders = pieceCylinders;
   if (flatCapture) {
     shell->settings().flatView = true;
     if (shell->session() != nullptr) shell->session()->setFlatView(true);
@@ -914,6 +918,7 @@ int main(int argc, char** argv) {
   float slideU = 0.0f;
   float slideV = 0.0f;
   float ghost = 1.0f;
+  bool pieceCylinders = false;
   std::string playFile;
   float dwell = app::kDefaultDwellSeconds;
   int captureFps = 30;
@@ -950,6 +955,8 @@ int main(int argc, char** argv) {
           "and --evert 0..1 turns that shape through itself - a torus inside out,\n"
           "while --slide and --slide-v move the board round the shape, in cells, and\n"
           "--ghost 0.35..1 makes it translucent so the far side shows through.\n"
+          "--piece-cylinders draws the shape view's pieces as icon-faced pucks (M17.25)\n"
+          "instead of the sculptural meshes, so a flipped seat still reads.\n"
           "--formed 0..1 states how far that shape has formed (0 the flat board), and\n"
           "--flat draws the ordinary 2D token view instead of the shape.\n"
           "--play FILE plays a saved game (M12.7) move by move: with --clip it exports\n"
@@ -999,6 +1006,8 @@ int main(int argc, char** argv) {
       slideV = std::strtof(argv[++i], nullptr);
     else if (arg == "--ghost" && i + 1 < argc)
       ghost = std::strtof(argv[++i], nullptr);
+    else if (arg == "--piece-cylinders")
+      pieceCylinders = true;
     else if (arg == "--play" && i + 1 < argc)
       playFile = argv[++i];
     else if (arg == "--watch" && i + 1 < argc)
@@ -1033,7 +1042,7 @@ int main(int argc, char** argv) {
                         clipFrames, clipT0, clipT1, cinema, followMode, shapeFollow,
                         moveT, benchFrames, geometry || formedGiven, evert, formed,
                         flatCapture, slideU, slideV, ghost, playFile, dwell, captureFps,
-                        playAt, framesGiven, width, height, watchName);
+                        playAt, framesGiven, width, height, watchName, pieceCylinders);
   }
 
   auto shell = makeShell();

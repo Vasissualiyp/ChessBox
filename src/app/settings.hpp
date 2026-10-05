@@ -84,6 +84,13 @@ struct Settings {
   /// a ghost, so the far side of the shape and the pieces on it show through. The pieces
   /// stay opaque; the point is to see them (M17.10).
   float geometryGhost{1.0f};
+  /// Draw the shape view's pieces as icon-faced pucks instead of the sculptural meshes
+  /// (M17.25). The tangent-field walk must put one unavoidable flip on a non-orientable
+  /// shape, and a sculptural piece across that line faces the wrong way; a flat icon
+  /// reads as the piece it is from either side. The 2D/3D button switches this while
+  /// SHAPE is on. Only meaningful in the geometry view, which is the only place the
+  /// button offers it.
+  bool shapePieceCylinders{false};
   /// How many half-turns the Klein bottle's ring twists over one lap: 1 is the shipped
   /// surface and reverses the file coordinate (a Klein bottle); an even count does not
   /// reverse it (an orientable double twist). The figure-eight cross-section only closes

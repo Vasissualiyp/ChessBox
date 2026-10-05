@@ -9,17 +9,22 @@
 #ifdef CB_HAVE_VULKAN
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <numbers>
+#include <utility>
+#include <vector>
 
 #include "app/session.hpp"
 #include "app/shell.hpp"
 #include "io/fen.hpp"
 #include "render/board_renderer.hpp"
 #include "render/offscreen_target.hpp"
+#include "render/piece_icon.hpp"
 #include "render/vulkan_context.hpp"
 #ifdef CB_HAVE_IMGUI
 #include <SDL3/SDL.h>
@@ -356,8 +361,9 @@ TEST_CASE("a shaped board shadows every occupied seat", "[render]") {
 TEST_CASE("flat 2D wins over the shape when both are set", "[render]") {
   // M18.6: a settings-file edit (or a script) can set `flatView` and `geometryView` at
   // once, even though the interface greys each control out in the other's state. The
-  // resolution is flat - a shape has no 2D rendering - so the renderer refuses the surface
-  // under `options.flat` rather than drawing a donut the 2D control cannot describe.
+  // resolution is flat - a shape has no 2D rendering - so the renderer refuses the
+  // surface under `options.flat` rather than drawing a donut the 2D control cannot
+  // describe.
   BoardRenderer renderer;
   const VariantSpec v = test::loadVariant("torus");
   const Position p = Position::startPosition(v);
@@ -496,6 +502,143 @@ TEST_CASE("every archetype produces a usable mesh", "[render]") {
       maxIndex = std::max(maxIndex, lib.indices[r.firstIndex + k]);
     }
     REQUIRE(static_cast<std::size_t>(r.vertexOffset) + maxIndex < lib.vertices.size());
+  }
+
+  // M17.25: every archetype that is a piece also builds a valid icon-faced cylinder,
+  // and every archetype that is *not* a piece has an empty range rather than a stray
+  // mesh. Same buffer, so the same index-bounds check applies.
+  for (std::size_t i = 0; i < static_cast<std::size_t>(Archetype::Count); ++i) {
+    CAPTURE(archetypeName(static_cast<Archetype>(i)));
+    const PieceIcon icon = pieceIcon(IconStyle::Primitive, static_cast<Archetype>(i));
+    const MeshRange& r = lib.cylinderRanges[i];
+    if (icon.fills.empty()) {
+      CHECK(r.indexCount == 0);
+      continue;
+    }
+    REQUIRE(r.indexCount > 0);
+    REQUIRE(r.indexCount % 3 == 0);
+    std::uint16_t maxIndex = 0;
+    for (std::uint32_t k = 0; k < r.indexCount; ++k) {
+      maxIndex = std::max(maxIndex, lib.indices[r.firstIndex + k]);
+    }
+    REQUIRE(static_cast<std::size_t>(r.vertexOffset) + maxIndex < lib.vertices.size());
+  }
+}
+
+TEST_CASE("an icon-faced cylinder is a closed double-sided puck", "[render]") {
+  // The puck is a union of one prism per icon sub-polygon, so it is a watertight solid:
+  // every *geometric* edge is shared by an even number of triangles, with no crack
+  // between a cap and its rim or between two rim quads. Two is the clean count; four is
+  // two sub-polygons meeting at a shared corner. Edges are matched by position, not by
+  // vertex index, because a hard edge deliberately duplicates vertices for its own normal
+  // - the same thing `addBox` does for every face of an ordinary mesh.
+  const MeshLibrary lib = MeshLibrary::build();
+  constexpr Archetype kPieces[] = {
+      Archetype::Dome,  Archetype::Tower,    Archetype::Wedge, Archetype::Spire,
+      Archetype::Crown, Archetype::Monolith, Archetype::Horn};
+  using Key = std::array<int, 3>;
+  using Edge = std::pair<Key, Key>;
+  const auto key = [](float x, float y, float z) {
+    return Key{static_cast<int>(std::lround(x * 10000.0f)),
+               static_cast<int>(std::lround(y * 10000.0f)),
+               static_cast<int>(std::lround(z * 10000.0f))};
+  };
+  for (const Archetype a : kPieces) {
+    const auto i = static_cast<std::size_t>(a);
+    const MeshRange& r = lib.cylinderRanges[i];
+    REQUIRE(r.indexCount > 0);
+    std::map<Edge, int> edges;
+    for (std::uint32_t k = 0; k + 2 < r.indexCount; k += 3) {
+      Key tri[3];
+      for (int c = 0; c < 3; ++c) {
+        const std::uint16_t local =
+            lib.indices[r.firstIndex + k + static_cast<std::uint32_t>(c)];
+        const MeshVertex& v =
+            lib.vertices[static_cast<std::size_t>(r.vertexOffset) + local];
+        tri[c] = key(v.pos[0], v.pos[1], v.pos[2]);
+      }
+      for (int c = 0; c < 3; ++c) {
+        Edge e{tri[c], tri[(c + 1) % 3]};
+        if (e.second < e.first) std::swap(e.first, e.second);
+        edges[e] += 1;
+      }
+    }
+    CAPTURE(archetypeName(a));
+    for (const auto& [edge, uses] : edges) {
+      INFO("edge (" << edge.first[0] << "," << edge.first[1] << "," << edge.first[2]
+                    << ")-(" << edge.second[0] << "," << edge.second[1] << ","
+                    << edge.second[2] << ")");
+      // Two is the clean count; four is two sub-polygons whose shared corner each
+      // contribute their own rim wall. What is forbidden is *one* - a dangling edge, a
+      // crack between a cap and its rim or between two rim quads.
+      CHECK(uses >= 2);
+      CHECK(uses % 2 == 0);
+    }
+  }
+}
+
+TEST_CASE("the puck stamps the same icon on both faces", "[render]") {
+  // A flipped seat is a seat the tangent-field walk has turned about-face (M17.18). The
+  // whole point of the puck is that a piece reads the same from either side, so both caps
+  // must carry the *same* outline - the identical polygon, not a mirrored or reversed
+  // pair. A mirrored pair would still pass a naive silhouette/congruence test for a
+  // symmetric glyph, so this compares the two caps point-for-point in buffer order, and
+  // against the Primitive icon itself.
+  const MeshLibrary lib = MeshLibrary::build();
+  constexpr Archetype kPieces[] = {
+      Archetype::Dome,  Archetype::Tower,    Archetype::Wedge, Archetype::Spire,
+      Archetype::Crown, Archetype::Monolith, Archetype::Horn};
+  for (const Archetype a : kPieces) {
+    CAPTURE(archetypeName(a));
+    const auto i = static_cast<std::size_t>(a);
+    const PieceIcon icon = pieceIcon(IconStyle::Primitive, a);
+    std::vector<IconPoint> flat;
+    for (const IconPoly& poly : icon.fills) {
+      for (const IconPoint& p : poly) flat.push_back(p);
+    }
+
+    // The archetype's own vertex span in the shared buffer: contiguous, in build order.
+    const std::size_t begin =
+        static_cast<std::size_t>(lib.cylinderRanges[i].vertexOffset);
+    const std::size_t end =
+        i + 1 < static_cast<std::size_t>(Archetype::Count)
+            ? static_cast<std::size_t>(lib.cylinderRanges[i + 1].vertexOffset)
+            : lib.vertices.size();
+    std::vector<MeshVertex> top;
+    std::vector<MeshVertex> bottom;
+    for (std::size_t v = begin; v < end; ++v) {
+      if (lib.vertices[v].normal[2] > 0.9f) {
+        top.push_back(lib.vertices[v]);
+      } else if (lib.vertices[v].normal[2] < -0.9f) {
+        bottom.push_back(lib.vertices[v]);
+      }
+    }
+
+    REQUIRE(top.size() == flat.size());
+    REQUIRE(bottom.size() == flat.size());
+
+    // Recentring: the icon's own centroid, exactly as `addIconCylinder` does.
+    float cx = 0.0f;
+    float cy = 0.0f;
+    for (const IconPoint& p : flat) {
+      cx += p.x;
+      cy += p.y;
+    }
+    cx /= static_cast<float>(flat.size());
+    cy /= static_cast<float>(flat.size());
+
+    const auto near = [](float x, float y) { return std::abs(x - y) < 1e-5f; };
+    for (std::size_t k = 0; k < flat.size(); ++k) {
+      const float ex = (flat[k].x - cx) * kCylinderIconScale;
+      const float ey = (cy - flat[k].y) * kCylinderIconScale;
+      // The top cap is the icon, the bottom cap is the *same* polygon pushed down.
+      CHECK(near(top[k].pos[0], ex));
+      CHECK(near(top[k].pos[1], ey));
+      CHECK(near(top[k].pos[2], kCylinderHalfThick));
+      CHECK(near(bottom[k].pos[0], ex));
+      CHECK(near(bottom[k].pos[1], ey));
+      CHECK(near(bottom[k].pos[2], -kCylinderHalfThick));
+    }
   }
 }
 

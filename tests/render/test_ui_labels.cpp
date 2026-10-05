@@ -10,6 +10,8 @@
 
 #ifdef CB_HAVE_IMGUI
 
+#include <string>
+
 #include "app/session.hpp"
 #include "render/ui.hpp"
 #include "support/variants.hpp"
@@ -44,6 +46,65 @@ TEST_CASE("coordinate labels are drawn only in the flat 2-D view", "[render]") {
   REQUIRE(cube.has_value());
   (**cube).setFlatView(true);
   CHECK_FALSE(coordinateLabelsShown(settings, **cube));
+}
+
+TEST_CASE("the 2D/3D button is re-purposed on the shape view", "[render]") {
+  // Off the shape view it is the original flat/solid board toggle, with its original
+  // enabled state - exactly as before M17.25. On a shape that actually exists the old
+  // flat meaning is dead (a shape has no 2D board), so the button becomes live again and
+  // names the piece style instead. A board with `geometryView` but no surface must not
+  // move.
+  app::Settings settings;
+
+  settings.geometryView = false;
+  settings.flatView = true;
+  {
+    const ViewModeButton b = viewModeButton(settings, true, false);
+    CHECK(std::string(b.label) == "2D");
+    CHECK(b.enabled);
+    CHECK_FALSE(b.pieceStyle);
+  }
+  settings.flatView = false;
+  {
+    const ViewModeButton b = viewModeButton(settings, false, false);
+    CHECK(std::string(b.label) == "3D");
+    CHECK(b.enabled);
+    CHECK_FALSE(b.pieceStyle);
+  }
+
+  // `geometryView` set on a variant with no surface (e.g. standard) is the old behaviour
+  // exactly: the board toggle, greyed out - not the new piece-style meaning.
+  settings.geometryView = true;
+  {
+    const ViewModeButton b = viewModeButton(settings, false, false);
+    CHECK(std::string(b.label) == "3D");
+    CHECK_FALSE(b.enabled);
+    CHECK_FALSE(b.pieceStyle);
+  }
+
+  // The real shape view: live, and naming the piece style.
+  settings.shapePieceCylinders = false;
+  {
+    const ViewModeButton b = viewModeButton(settings, false, true);
+    CHECK(std::string(b.label) == "3D");
+    CHECK(b.enabled);  // live on the shape view, where it used to be greyed out
+    CHECK(b.pieceStyle);
+  }
+  settings.shapePieceCylinders = true;
+  {
+    const ViewModeButton b = viewModeButton(settings, false, true);
+    CHECK(std::string(b.label) == "2D");
+    CHECK(b.enabled);
+    CHECK(b.pieceStyle);
+  }
+  // Flat wins over the shape, so there the board toggle is in charge - and greyed, as
+  // when SHAPE is on.
+  {
+    const ViewModeButton b = viewModeButton(settings, true, true);
+    CHECK(std::string(b.label) == "2D");
+    CHECK_FALSE(b.enabled);
+    CHECK_FALSE(b.pieceStyle);
+  }
 }
 
 #endif  // CB_HAVE_IMGUI

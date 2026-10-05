@@ -106,6 +106,8 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.geometryInvert = asBool(value);
     else if (key == "geometry_ghost")
       s.geometryGhost = asFloat(value, s.geometryGhost);
+    else if (key == "shape_piece_cylinders")
+      s.shapePieceCylinders = asBool(value);
     else if (key == "klein_twist")
       s.kleinTwist = asFloat(value, s.kleinTwist);
     else if (key == "geometry_width")
@@ -196,6 +198,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "geometry_evert = " << geometryEvert << '\n';
   out << "geometry_invert = " << boolText(geometryInvert) << '\n';
   out << "geometry_ghost = " << geometryGhost << '\n';
+  out << "shape_piece_cylinders = " << boolText(shapePieceCylinders) << '\n';
   out << "klein_twist = " << kleinTwist << '\n';
   out << "geometry_width = " << geometryWidth << '\n';
   out << "geometry_thickness = " << geometryThickness << '\n';

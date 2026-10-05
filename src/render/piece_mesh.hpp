@@ -31,6 +31,17 @@ struct MeshRange {
   std::int32_t vertexOffset{0};
 };
 
+/// How the shape view's icon-faced cylinder pieces are built (M17.25).
+///
+/// A `PieceIcon`'s outlines are in a 100x100, y-down box; the puck recentres them on the
+/// icon's own centroid and scales by this much into the mesh's local units. The icon's
+/// widest base (about 50 units) then lands near a sculptural piece's foot (about 0.34),
+/// so the same `fit` scale sizes the two the same way. The extruded half-thickness is in
+/// the same local units. Public so the property test can state the exact map rather than
+/// a loose "up to scale".
+inline constexpr float kCylinderIconScale = 0.0135f;
+inline constexpr float kCylinderHalfThick = 0.11f;
+
 /// The shapes a piece can be given.
 ///
 /// Pieces cannot ship as model files: a variant may declare a piece nobody anticipated,
@@ -77,6 +88,12 @@ struct MeshLibrary {
   std::vector<MeshVertex> vertices;
   std::vector<std::uint16_t> indices;
   MeshRange ranges[static_cast<std::size_t>(Archetype::Count)];
+  /// The shape view's alternate piece mesh (M17.25): each archetype's **Primitive** icon
+  /// extruded into a two-sided puck, the same outline on both faces. Empty for the
+  /// archetypes that are not pieces - Cell, Portal, Arrow, Fillet and Disc. Lives in the
+  /// same vertex and index buffers as `ranges`, so the draw loop binds one buffer either
+  /// way and only the range changes.
+  MeshRange cylinderRanges[static_cast<std::size_t>(Archetype::Count)];
 
   static MeshLibrary build();
 };

@@ -2527,3 +2527,91 @@ directly addresses the actual confusion rather than something adjacent to it.
 - Not offered outside the shape view: a flat or ordinary 3-D board has no non-orientable
   seam to be confusing about, so the button's repurposed meaning only exists while SHAPE is
   already on.
+
+### Status: M17.25 built (2026-10-04, opencode + Claude)
+
+Built as specified, with four deviations recorded below.
+
+- **Setting and button.** `Settings::shapePieceCylinders` (bool, default `false`,
+  `shape_piece_cylinders` in the settings file) and `BoardOptions::shapePieceCylinders`,
+  plumbed through `optionsFrom`. `viewModeButton(settings, flatView, surfaceAvailable)`
+  (new free function in `src/render/ui.{hpp,cpp}`, unit-tested with no device) states the
+  branch; the HUD button now uses its `label`/`enabled` and, on press, toggles
+  `shapePieceCylinders` when `pieceStyle` and the board otherwise.
+- **Mesh.** `MeshLibrary::cylinderRanges[Archetype::Count]`, appended into the same
+  vertex/index buffers in `MeshLibrary::build()`. `addIconCylinder` extrudes each
+  `pieceIcon(IconStyle::Primitive, archetype)` sub-polygon into a thin prism: the *same*
+  outline (recentred on the icon's own centroid, `kCylinderIconScale`) on both caps, a rim
+  of outward quads between them. `kCylinderIconScale`/`kCylinderHalfThick` are public so
+  the property test states the exact map.
+- **Placement and draw.** `emitSurfacePiece` puts a puck's centre *on* the surface
+  (`lift = 0` vs `kHalf`) when the option is set; everything else about the instance is
+  unchanged. `record` picks `cylinderRanges` for the frame's piece and flourish batches
+  when `shapePieceCylinders && surface && !flat && surfaceIndices` is non-empty - one
+  option, and gated on the surface path so flat/ordinary boards cannot see it.
+- **CLI.** Added `--piece-cylinders` (help text + `AGENTS.md`) so the state is reviewable
+  with `--shot`/`--clip`; the capture path uses fixed default settings and had no other way
+  to reach it.
+
+Deviations from the spec:
+
+1. **Ear clipping, not a fan.** The spec says "fan-triangulate from the first vertex"
+   because Primitive is "convex shapes each" - but it is not: `kPCrownBody` and
+   `kPCrownTeeth` are concave, and a fan from `p0` genuinely overflows their outlines
+   (checked numerically: 1 and 6 of their fan triangles' centroids fall outside the
+   polygon). A fan would
+   fill the crown's valleys and leave an unsupported cap flange beyond the rim. I used an
+   ear clipper (the same algorithm as `widgets::triangulate`, copied onto `IconPoint` so
+   `piece_mesh.cpp` keeps no ImGui dependency). This is required to satisfy the spec's own
+   "silhouette matches the IconPoly outline" test, which a fan would fail.
+2. **`surfaceAvailable` in the branch.** The spec says branch on `geometryView`; I branch
+   on `geometryView && a play surface exists && !flatView`. `geometryView` is sticky across
+   a variant load, so raw `geometryView` on `standard` (which has no surface) would have
+   given the button the new meaning with no shape on screen. With `surfaceAvailable` the
+   else-branch is *exactly* the old control and its old `enabled = !geometryView`; the only
+   behaviour change is a real shape view. (This is why the default path's board pixels are
+   untouched.)
+3. **The flourish switches too.** The spec names only the main batch loop; the capture
+   flourish draws through the same `emitSurfacePiece`, so leaving it on `ranges` would draw
+   a shrinking sculpt at the puck's centre. Both loops use `cylinderRanges`; the shadow
+   loop stays on `ranges` (Disc has no puck).
+4. **"Closed rim" test allows even edge counts.** A puck is a union of prisms and two
+   sub-polygons that share a corner (e.g. the tower body and a merlon) each contribute a
+   coincident rim wall there, so a geometric edge can be shared by 4 triangles, not 2. The
+   test canonicalises edges by position and forbids odd counts (a crack), rather than
+   demanding exactly 2.
+
+Tests and results:
+
+- `every archetype produces a usable mesh` extended: every piece archetype has a
+  non-empty, in-bounds `cylinderRanges`, every non-piece an empty one.
+- New "an icon-faced cylinder is a closed double-sided puck" (no cracks) and "the puck
+  stamps the same icon on both faces" (caps point-for-point identical in buffer order and
+  equal to the Primitive outline up to the recentring/scale - a mirrored pair fails it).
+- `settings survive a restart` round-trips `shapePieceCylinders`; the defaults test pins
+  it `false`. New UI test pins the four button states (off/shape/degenerate/flat-wins).
+- `tools/test.sh --build render app`: 189 test cases, 4,962,659 assertions, green
+  (RADV RENOIR, validation on). `tools/precommit.sh`: OK, including the ~278 s property
+  sweep. `nix flake check` not run (release gate, out of the inner loop).
+
+Visual captures (`build/m1725/`, converted with ImageMagick) - looked at closely, not just
+"the shot ran":
+
+- `klein --geometry` with it on: pucks with clean, upright Primitive icons (a pawn, a rook,
+  a king) around the figure-eight; the button reads `2D` and is live.
+- The crossing crop (`cmp_cross.png`, on left / off right): with the setting off the
+  sculptural king at the flip locus lies almost flat on its side and the pawn sits skewed -
+  the reported confusion; with it on the same seats are legible icons the right way up.
+- `torus --geometry` with it on works the same way.
+- Scoping: `standard`, `cube5`, `klein` (ordinary 3-D) and `standard --geometry` each
+  render byte-identical with `--piece-cylinders` on and off.
+- The default: a `klein --geometry` capture with the setting off is byte-identical to a
+  pre-change build (stash/rebuild/capture) **except** an 18x10 px region at `(212,931)` -
+  the `3D` glyph itself, now drawn live (Acceptance 1) where it used to be greyed. Every
+  board, piece and panel pixel is unchanged.
+
+One tension to name: the spec's Tests paragraph asks for the setting-off capture to be
+"pixel-identical to today's", while Acceptance 1 asks the button to be live while SHAPE is
+on - the button's own paint is the difference, and this build follows Acceptance 1. The
+board and the pieces are pixel-identical; `shapePieceCylinders` off is still a no-op
+everywhere outside that one label.

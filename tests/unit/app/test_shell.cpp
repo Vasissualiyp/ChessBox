@@ -334,6 +334,7 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
     shell->settings().geometryThickness = 1.25f;
     shell->settings().kleinShift = 3.0f;
     shell->settings().geometryFormSpeed = 2.5f;
+    shell->settings().shapePieceCylinders = true;
     shell->settings().frameCap = 60;
     REQUIRE(shell->startGame("klein").has_value());  // also records the last variant
     shell->applySettings();
@@ -358,6 +359,8 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
     REQUIRE(shell->settings().geometryThickness == 1.25f);
     REQUIRE(shell->settings().kleinShift == 3.0f);
     REQUIRE(shell->settings().geometryFormSpeed == 2.5f);
+    // The shape view's piece style round-trips with the other geometry settings (M17.25).
+    REQUIRE(shell->settings().shapePieceCylinders);
     REQUIRE(shell->settings().frameCap == 60);
   }
 }
@@ -415,6 +418,9 @@ TEST_CASE("a missing settings file means defaults, not an error", "[unit][app]")
   const Settings s = Settings::load("/nonexistent/path/settings.conf");
   REQUIRE(s.guiScale == 1.0f);
   REQUIRE(s.lastVariant == "standard");
+  // The shape view keeps its sculptural pieces until the player asks for the pucks
+  // (M17.25): the default must move nothing.
+  REQUIRE_FALSE(s.shapePieceCylinders);
 }
 
 TEST_CASE("the editor opens the current variant and saves it back", "[unit][app]") {

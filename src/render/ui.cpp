@@ -36,6 +36,20 @@ bool coordinateLabelsShown(const app::Settings& settings,
          session.flatView();
 }
 
+ViewModeButton viewModeButton(const app::Settings& settings, bool flatView,
+                              bool surfaceAvailable) noexcept {
+  // The shape view is a board that actually is its surface: a variant with one, SHAPE
+  // lit, and not overridden by the flat view. Only there does the old board meaning die
+  // and the piece-style meaning take its place, live in the same 2D/3D words - "2D" is
+  // the flat icon puck, "3D" the sculptural mesh.
+  if (settings.geometryView && surfaceAvailable && !flatView) {
+    return {settings.shapePieceCylinders ? "2D" : "3D", true, true};
+  }
+  // Everywhere else it is exactly the board's own flat/solid toggle it always was,
+  // including its enabled state: greyed while SHAPE is on but has no surface to become.
+  return {flatView ? "2D" : "3D", !settings.geometryView, false};
+}
+
 namespace {
 
 std::filesystem::path findFont(const char* name) {
@@ -1517,20 +1531,28 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     ImGui::SameLine();
     // View mode travels with the player: a flat board is easier to read, a solid one
     // easier to understand. Cold, because it is a view of the geometry, not a move.
-    // Greyed out while SHAPE is on (M18.6): a shape has no 2D rendering to fall back to,
-    // so the one state that would contradict SHAPE cannot be entered from here. It stays
-    // visible rather than hidden - a control that disappears is the worse surprise.
-    if (button(session.flatView() ? "2D" : "3D", t, px(64), false, true,
-               !shell.settings().geometryView, display)) {
-      const bool flat = !session.flatView();
-      session.setFlatView(flat);
-      shell.settings().flatView = flat;
+    // While SHAPE is on the same button is re-purposed (M17.25): a shape has no 2D board
+    // to fall back to, but the shape's pieces can be flat icons or sculptural meshes, so
+    // the control names that instead - the same 2D/3D language, a second, independent
+    // meaning, and live where it used to be greyed out (M18.6). `viewModeButton` states
+    // the branch so it can be tested with no device.
+    const bool surfaceAvailable = hasPlaySurface(session.variant());
+    const ViewModeButton mode =
+        viewModeButton(shell.settings(), session.flatView(), surfaceAvailable);
+    if (button(mode.label, t, px(64), false, true, mode.enabled, display)) {
+      if (mode.pieceStyle) {
+        shell.settings().shapePieceCylinders = !shell.settings().shapePieceCylinders;
+      } else {
+        const bool flat = !session.flatView();
+        session.setFlatView(flat);
+        shell.settings().flatView = flat;
+      }
       request.settingsChanged = true;
     }
     // Turn the board into the shape its geometry describes (M17). Offered only where
     // there is a surface to become: a glued two-dimensional variant names one, and
     // nothing else does - so `standard` never shows a control that could not act.
-    if (hasPlaySurface(session.variant())) {
+    if (surfaceAvailable) {
       ImGui::SameLine();
       const bool on = shell.settings().geometryView;
       // Greyed out in 2D (M18.6): a donut has no 2D rendering, so SHAPE is refused there

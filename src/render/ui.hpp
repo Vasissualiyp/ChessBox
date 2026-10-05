@@ -59,6 +59,27 @@ struct UiRequest {
 [[nodiscard]] bool coordinateLabelsShown(const app::Settings& settings,
                                          const app::Session& session) noexcept;
 
+/// What the board's 2D/3D button means in the current state (M17.25).
+///
+/// Off the shape view it is the original flat/solid board toggle, with its original
+/// enabled state. On the shape view - a variant with a surface, SHAPE lit, not flat - it
+/// is re-purposed and re-enabled to switch the pieces between the sculptural meshes and
+/// the icon-faced cylinder pucks, keeping the same 2D/3D name the player already knows. A
+/// free function so the branch is testable with no device, like `coordinateLabelsShown`.
+struct ViewModeButton {
+  /// "2D" or "3D".
+  const char* label;
+  /// Live on the shape view (where the old flat meaning is dead) and wherever the
+  /// original board toggle was live; greyed out exactly where the board toggle always
+  /// was.
+  bool enabled;
+  /// True when pressing it toggles `shapePieceCylinders`; false when it toggles
+  /// `flatView`.
+  bool pieceStyle;
+};
+[[nodiscard]] ViewModeButton viewModeButton(const app::Settings& settings, bool flatView,
+                                            bool surfaceAvailable) noexcept;
+
 /// The game's interface: rails, ledger, status, promotion, library.
 ///
 /// Drawn with Dear ImGui, restyled until it stops looking like Dear ImGui - the

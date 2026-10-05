@@ -829,10 +829,13 @@ InstanceSet BoardRenderer::buildInstances(
           piece.colorOf() == Color::White ? theme_.whitePiece : theme_.blackPiece;
       if (options_.showCheck && inCheck) pc = mix(pc, theme_.blood, 0.65f);
       Instance body{};
-      // Standing on the square, not in it: the piece's foot is its own local z = 0.
-      body.center[0] = centre.x + normal.x * kHalf;
-      body.center[1] = centre.y + normal.y * kHalf;
-      body.center[2] = centre.z + normal.z * kHalf;
+      // Standing on the square, not in it: the piece's foot is its own local z = 0. The
+      // icon-faced puck (M17.25) is the exception - it is centred *on* the surface so it
+      // protrudes on both sides, which is what lets a flipped seat show the same icon.
+      const float lift = options_.shapePieceCylinders ? 0.0f : kHalf;
+      body.center[0] = centre.x + normal.x * lift;
+      body.center[1] = centre.y + normal.y * lift;
+      body.center[2] = centre.z + normal.z * lift;
       const float hgt = 1.0f + (height[piece.type] - 1.0f) * options_.pieceHeightScale;
       // Never bigger than the flat board's piece, and smaller where the square is. The
       // measure is the square's mean side rather than its shorter one: an embedding
@@ -1718,6 +1721,11 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     vkCmdSetViewport(cmd, 0, 1, &boardViewport);
     vkCmdSetScissor(cmd, 0, 1, &boardScissor);
 
+    // The shape view's icon-faced pucks (M17.25): one option for the whole frame, because
+    // every surface piece switches together. Scoped to the surface path - the flat board
+    // and the ordinary solid board keep the sculptural meshes whatever the setting says.
+    const bool cylinderPieces = options_.shapePieceCylinders && options_.surface &&
+                                !options_.flat && !set.surfaceIndices.empty();
     if (!set.instances.empty()) {
       vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
       vkCmdPushConstants(cmd, layout_,
@@ -1731,7 +1739,8 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
       for (std::size_t s = 0; s < set.batches.size(); ++s) {
         const auto& batch = set.batches[s];
         if (batch.count == 0) continue;
-        const MeshRange& range = meshes_.ranges[s];
+        const MeshRange& range =
+            cylinderPieces ? meshes_.cylinderRanges[s] : meshes_.ranges[s];
         vkCmdDrawIndexed(cmd, range.indexCount, batch.count, range.firstIndex,
                          range.vertexOffset, batch.first);
       }
@@ -1786,7 +1795,10 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
       for (std::size_t s = 0; s < set.flourishBatches.size(); ++s) {
         const auto& batch = set.flourishBatches[s];
         if (batch.count == 0) continue;
-        const MeshRange& range = meshes_.ranges[s];
+        // The captured piece flourishes in whatever style the board is drawn in, so on a
+        // puck board it is a shrinking puck (M17.25) rather than a mismatched sculpt.
+        const MeshRange& range =
+            cylinderPieces ? meshes_.cylinderRanges[s] : meshes_.ranges[s];
         vkCmdDrawIndexed(cmd, range.indexCount, batch.count, range.firstIndex,
                          range.vertexOffset, base + batch.first);
       }

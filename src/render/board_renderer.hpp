@@ -93,6 +93,11 @@ struct BoardOptions {
   /// The board mesh's alpha, 1 opaque down to a translucent ghost so the far side of the
   /// shape and the pieces on it show through (M17.10). The pieces stay opaque.
   float surfaceGhost{1.0f};
+  /// Draw the shape view's pieces as icon-faced pucks rather than the sculptural meshes
+  /// (M17.25), so a seat the tangent-field walk has turned about-face still reads as the
+  /// piece it is. Only meaningful for the surface path; `buildInstances` ignores it for
+  /// the flat board and the ordinary solid board.
+  bool shapePieceCylinders{false};
 };
 
 /// Instances grouped by the shape that draws them - one draw call per shape.
