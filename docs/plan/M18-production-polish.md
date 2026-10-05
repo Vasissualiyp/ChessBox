@@ -703,6 +703,102 @@ from the clutter; the field is back to five shapes.
 - **Open.** None; this restores the pre-M18-round `decoForScreen` behaviour with the
   five-shape field from the first M18.4 pass.
 
+### Correction: the in-game ambient field draws in front of the board, not behind it (2026-10-05)
+
+Reported directly: "clutter is also drawn on top of chessboard in-game." Confirmed by
+reading the actual render-pass order, not just the UI code - the comment that introduced
+`boardField_` in M18.4 ("A quieter field for behind the board") was never true at the
+Vulkan level, and the bug has been there since that commit.
+
+**Root cause.** `BoardRenderer::record` (`src/render/board_renderer.cpp`) does the 3-D
+board in one `vkCmdBeginRendering`/`vkCmdEndRendering` block (instances, shadows,
+flourish - all opaque or depth-tested), then, *after* that block ends, opens a second one
+purely for `overlay(cmd)` - see the comment right above it, "The interface is drawn last
+and never blurred." `overlay` is `Ui::record`, which calls
+`ImGui_ImplVulkan_RenderDrawData` on the *whole* frame's `ImGui::GetDrawData()` - every
+ImGui draw list built during `Ui::build`, menus and HUD and both ambient fields alike.
+`ImGui::GetBackgroundDrawList()` only means "behind other ImGui windows"; it says nothing
+about the already-rendered 3-D board, which sits in a wholly separate, earlier pass this
+one knows nothing about and composites over unconditionally. On the main menu this is
+invisible because there is no 3-D board pass to be behind - the quintic centrepiece and
+the menu's own field (`field_`) are the only thing in frame. In `Game`, `boardField_` has
+real board pixels under it, and whatever wireframe bodies happen to drift across the
+board's on-screen footprint paint straight over it, because nothing establishes "behind"
+as anything other than a comment.
+
+**Fix shape.** Give `boardField_` an actual early position in the frame, inside the *same*
+render pass the board itself uses, before the board's own draw calls - true painter's-
+algorithm "behind," not a clip-rect approximation (the board's on-screen footprint moves
+with camera framing and shape, so a fixed exclusion region would be chasing a moving
+target and would still break on some camera angle or shape).
+
+1. `BoardRenderer::render`/`record` (`src/render/board_renderer.hpp/.cpp`) gain one more
+   callback parameter alongside the existing `overlay`, call it `background` - same
+   signature, `const std::function<void(VkCommandBuffer)>& background = {}`. Invoke it
+   right after the first pass's `vkCmdBeginRendering(cmd, &ri)` and *before* the board's
+   own `vkCmdSetViewport`/`vkCmdSetScissor`/instance draws - with its own full-frame
+   viewport/scissor set first (the same `full`/`fullScissor` the late overlay pass
+   already computes further down - hoist that computation, or compute it twice, whichever
+   reads cleaner), then restore the board's own viewport/scissor afterward exactly as now
+   before the instance draws proceed. The board's opaque/depth-tested draws then simply
+   overwrite whatever the background pass put down where the board actually sits - no new
+   depth or stencil logic needed, ordinary painter's algorithm within one render pass.
+   Default-constructed (empty) `background` must change nothing about existing callers
+   that don't pass one.
+
+2. The background callback has to carry *only* `boardField_`'s content - not the rest of
+   the frame's ImGui draw data, which must stay on the existing late `overlay` path
+   unchanged (the HUD, panels, and - importantly - the coordinate-label strokes drawn via
+   `ImGui::GetBackgroundDrawList()` in `buildGameHud`, which belong *on top* of the board,
+   labelling it, not behind it). `ImGui::GetBackgroundDrawList()` is shared frame-wide, so
+   it cannot be the vehicle for this split: both the field and the coordinate labels write
+   into it today, in that order, with no way to submit "only the first part of this list,
+   early." Instead, give `Ui` a second, dedicated `ImDrawList` that exists only to carry
+   `boardField_`'s strokes - built with `ImGui::GetDrawListSharedData()` (the standard way
+   to own an `ImDrawList` outside a window), filled by calling `boardField_.draw(...)`
+   against *that* list instead of `ImGui::GetBackgroundDrawList()` when building the Game
+   screen's HUD, and cleared/rebuilt once per frame like any other per-frame draw state.
+   Check whichever exact Dear ImGui version this repo has vendored/pinned (grep the Nix
+   dev shell's imgui package, or search the build's include path under `nix develop .#gfx`
+   - do not guess the `ImDrawData`/`ImDrawList` field names from memory) for the right way
+   to wrap one standalone `ImDrawList` in a minimal `ImDrawData` and hand it to
+   `ImGui_ImplVulkan_RenderDrawData` directly - this is a documented, supported pattern for
+   multi-pass ImGui rendering, not a hack, but the exact struct shape is version-specific.
+   Add a small `Ui::recordBackground(VkCommandBuffer cmd)` (alongside the existing
+   `Ui::record`) that does this wrapping and gets passed to `BoardRenderer::render`'s new
+   `background` parameter from `src/gui/main.cpp`'s `renderFrame` lambda, next to where
+   `drawUi`/`overlay` is already passed.
+3. `field_` (the main menu/library's own field) is **not** part of this fix and must not
+   move - it stays exactly as it is, on `ImGui::GetBackgroundDrawList()`, in the existing
+   late overlay path. Nothing about the menu's already-verified-correct quintic/clutter
+   look should change. This correction is scoped to `boardField_` or on the `Game` screen
+   only.
+
+**Tests.** This is exactly the kind of thing the existing `[render][gpu]` tests in
+`tests/render/test_offscreen_render.cpp` are built for - real `OffscreenTarget` +
+`BoardRenderer::render` + `readPixels()`, no synthetic mocking of the Vulkan pass. Write a
+test red first: render a frame with a normal opaque board (any variant already used
+elsewhere in that file is fine) and a `background` callback that fills the *entire* frame
+with one solid, saturated colour nothing else in the scene produces (e.g. pure magenta,
+`AddRectFilled` over the whole viewport). Read back a pixel known to sit inside the
+board's opaque footprint (reuse however nearby tests in the same file pick a known-good
+board pixel) and assert it is the board's own colour, not blended with the fill - today,
+before the fix, that assertion is false because there is no `background` hook at all yet
+(won't compile until the parameter exists) and, once it exists but is wired to the old
+late-only path, the pixel would come back magenta-tinted. Then a pixel clearly outside the
+board's footprint (a frame corner) should show the fill colour, confirming the callback
+did run, just in the right order. Add a second, narrower test that actually drives
+`Ui`/`boardField_` (build a `Game`-screen frame through the normal `Ui::build` +
+`recordBackground` + `record` path, the way the GUI really calls it) and checks the same
+ordering holds for the real field, not just a synthetic fill - a unit test only on the
+synthetic callback would leave the real `Ui` wiring unverified.
+
+**Acceptance.** `--shot --screen game` (or interactively watching a game) never shows a
+wireframe body painted over the board's own pixels, at any camera angle or shape, because
+it no longer can - the board draws after and over the field within the same pass, not
+because any body happens to miss it. `field_`/the main menu is pixel-for-pixel unchanged.
+`tools/test.sh --build render` green.
+
 ## M18.5 Audio v1
 
 **Want.** The game is completely silent. `Settings` already carries `volumeMaster`/
