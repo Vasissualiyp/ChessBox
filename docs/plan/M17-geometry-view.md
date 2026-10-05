@@ -2052,7 +2052,65 @@ not touched.
   the nonzero-shift spiral is pinned by the property test rather than a capture; `--slide-v`
   alone uses the default shift and is unchanged.
 
-Spec'd in full in
+### Correction: the rank wrap wasn't the bug - the seam itself drifts while sliding (2026-10-05, Claude)
+
+Reported directly, from actual play: dragging a Klein bottle with `kleinShift` set still
+visibly pulls the seam's two sides apart mid-drag - "if I rotate the shape so the squares
+are aligned, after half a rotation I get a misalignment of 1 square" - even though the
+fix just above only ever addressed *when the slide resets*, not whether the seam stays
+shut while sliding between resets. It does not. Found and fixed by direct numerical
+investigation (a throwaway differential test against `derivedSurfaceAt`, not a guess),
+not dispatched to opencode - the user asked for this round to be done directly.
+
+**Root cause.** `kleinSurf` samples `lemniscateAngle(u + collapsePhase * v)` for the
+pinch, and `v` is *the same* slid coordinate (`vv + sv`) the ring position uses - nothing
+distinguishes "which rank this cell is" from "how far the whole board has been dragged."
+A differential sweep (`derivedSurfaceAt(Klein, u, 0 + sv, pose)` against
+`derivedSurfaceAt(Klein, 1 - u, 1 + sv, pose)`, every file, several `kleinShift` values,
+several `sv`) showed the naive partner `(1 - u, 1)` - what `SeamMap` and the rest of the
+renderer assume - is only the *true* geometric partner when
+`collapsePhase * (v_lo + v_hi) == 0`, where `v_lo = sv` and `v_hi = 1 + sv` are the two
+absolute `v` values the seam's two sides actually land on once the board has slid by `sv`
+laps. The true partner is `(1 - u - collapsePhase * (v_lo + v_hi), 1)` - confirmed to
+machine precision, not approximately. Two consequences:
+
+1. Even at rest (`sv = 0`), a nonzero `kleinShift` leaves the seam open by exactly
+   `collapsePhase` of a file-width - `kleinShift`'s own intent ("line the squares up at
+   the seam") was never fully realised; a player could only get it to *look* aligned by
+   manually dragging to cancel the residual, which is exactly the "rotate the shape so
+   the squares are aligned" step in the report.
+2. From there, every additional lap of drag opens it further by `2 * collapsePhase`,
+   which is the actual bug: the seam does not stay shut between the (correctly-timed, per
+   the fix above) resets - it drifts continuously within each cycle.
+
+**The fix.** `PlaySurface::build` now subtracts `collapsePhase * (0.5 + sv)` from `su` -
+the one knob that shifts every sample's `u` together - whenever the surface is Klein with
+a nonzero shift. The algebra: the pinch argument becomes
+`(u - collapsePhase * (0.5 + sv)) + collapsePhase * (vv + sv)`, and the two `sv` terms
+cancel exactly, for every cell, leaving the spiral pattern completely independent of how
+far the board has slid. One consequence worth calling out on its own: this also made the
+*previous* fix's widened rank-wrap window (`2 * fnz * fnx`, reasoned as "the spiral needs
+that many laps to close") unnecessary - if the spiral never depends on the slide amount
+in the first place, there is nothing left for a wider window to protect, so the window
+was reverted to the plain `2 * fnz` every other warp already uses. Simpler is correct
+here, not just simpler.
+
+**Tests.** New `a Klein bottle's seam stays closed under a square shift and a slide`
+(`test_play_surface.cpp`) - a differential check through the real `PlaySurface::build`
+path (not the throwaway investigation), several shifts, several slide amounts including
+multiple whole laps, red before the fix (two genuine failures at `shift=1,
+slideVLaps=1` and `shift=3, slideVLaps=0`) and green after. The existing
+`a Klein bottle's rank slide period scales with its square shift` test is renamed and its
+expectation corrected (`k % nx == 0` → `k % 2 == 0`, matching the now-simpler window) with
+the reasoning above recorded in its own comment, rather than left stale and misleading
+next to code that no longer matches it.
+
+**Verification.** `tools/test.sh --build render app` green (192 cases, 4.97M assertions,
+Vulkan validation on); `tools/precommit.sh` green (format, build, arch, unit, the ~276s
+property sweep). No visual capture - there is still no headless way to set `kleinShift` -
+but the fix is proven to float precision across every file position, three shift values
+and four slide amounts including six full laps, which is a tighter check than a screenshot
+would give.
 [`M17.12-shapes-above-two-dimensions.md`](M17.12-shapes-above-two-dimensions.md): slide and
 invert for `torus3d`/`hyper4` (currently ignored by `buildStacked`), a ghost-based answer to
 the hidden-sheet problem (reusing the existing GHOST pipeline rather than inventing one),

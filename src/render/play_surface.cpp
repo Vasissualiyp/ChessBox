@@ -220,20 +220,36 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
   // the pose and folded into every sample, so nothing below this line knows about it.
   // Two laps is `2 * nx` cells along the files and `2 * nz` along the ranks, so a full
   // drag carries a1 all the way round and home rather than snapping after two squares.
-  const float su = wrapSlide(pose.slideU, 2.0f * fnx) / fnx;
-  // The rank window is two laps for every warp whose rank seam only reverses a coordinate
-  // (its twist closes after one or two). A Klein bottle with a nonzero square shift is
-  // the exception: `kleinSurf` samples `lemniscateAngle(u + collapsePhase * v)`, an
-  // independent spiral that only closes after `nx / gcd(nx, shift)` laps, so the old
-  // two-lap window snapped the raw slide back while the spiral was still open (M17.22
-  // revision). Widen it to the conservative `2 * nz * nx` - a multiple of the true period
-  // for any integer twist or shift, so no gcd is needed - but only where the shift is
-  // really there, so the shipped `kleinShift = 0` board keeps its exact old window. The
-  // file slide needs no change: `lemniscateAngle` is one-lap periodic in `u + phase * v`,
-  // and sliding `u` at fixed `v` moves that argument by exactly what `u` moves.
-  float rankWrap = 2.0f * fnz;
-  if (kind == app::SurfaceKind::Klein && pose.collapsePhase != 0.0f) rankWrap *= fnx;
-  const float sv = slidesAlongRanks(v) ? wrapSlide(pose.slideV, rankWrap) / fnz : 0.0f;
+  float su = wrapSlide(pose.slideU, 2.0f * fnx) / fnx;
+  // The rank window is two laps for every warp whose rank seam only reverses a
+  // coordinate (its twist closes after one or two) - including Klein with a nonzero
+  // square shift, once the compensation just below cancels the shift's own
+  // v-dependence. An earlier revision widened this window to `2 * nz * nx` for a
+  // nonzero shift, reasoning that `kleinSurf`'s spiral (`lemniscateAngle(u +
+  // collapsePhase * v)`) needed that many laps to close; it does, on its own, but the
+  // compensation below makes the *rendered* pattern never depend on the slide amount in
+  // the first place, so there is no longer a longer period to protect against. Reverted
+  // to the plain two laps every other warp already uses.
+  const float sv = slidesAlongRanks(v) ? wrapSlide(pose.slideV, 2.0f * fnz) / fnz : 0.0f;
+  // A nonzero square shift only lines the rank seam up at `sv == 0` by itself:
+  // `kleinSurf` samples `lemniscateAngle(u + collapsePhase * v)`, and the seam's true
+  // partner of `(u, rank 0)` is `(1 - u - collapsePhase * (v_lo + v_hi), rank nz - 1)`
+  // for whatever two absolute v values the seam's two sides land on - `v_lo = sv`,
+  // `v_hi = 1 + sv`, since every sample adds the same `sv` to its own lattice `v`. The
+  // naive `(1 - u, 1)` partner `SeamMap`/the ring maths otherwise assume is only exactly
+  // right at `collapsePhase * (v_lo + v_hi) == 0`; everywhere else the two sides drift
+  // apart by exactly that many file-widths, which is the "purple edge touches the pink
+  // edge" seam misalignment while dragging a Klein bottle with a square shift set.
+  // Subtracting that same amount from `su` - the one knob that moves every sample's `u`
+  // together - cancels it: proven by a differential sweep across every file, every
+  // shift and every slide amount, down to float noise. It also happens to make `su`'s
+  // own `phase * sv` term exactly cancel the sample's own `phase * v`'s `sv` term (the
+  // algebra: `(u - phase * (0.5 + sv)) + phase * (vv + sv)` has no `sv` left in it) - the
+  // whole spiral pattern stops moving with the slide at all, which is why the wider
+  // window above is no longer needed.
+  if (kind == app::SurfaceKind::Klein && pose.collapsePhase != 0.0f) {
+    su -= pose.collapsePhase * (0.5f + sv);
+  }
   pose.slideU = 0.0f;
   pose.slideV = 0.0f;
   s.kind_ = kind;

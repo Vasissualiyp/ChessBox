@@ -245,6 +245,46 @@ TEST_CASE("the surface closes the seams the variant declares", "[render]") {
   }
 }
 
+TEST_CASE("a Klein bottle's seam stays closed under a square shift and a slide",
+          "[render]") {
+  // The bug this exists for, reported directly: dragging a Klein bottle with a nonzero
+  // `kleinShift` set visibly pulls the seam's two sides apart - "the purple edge touches
+  // the pink edge" - worse the further the drag goes, even though the same board at rest
+  // (no drag) can be tuned to look aligned. `kleinSurf` samples
+  // `lemniscateAngle(u + collapsePhase * v)`; the seam's true partner of `(u, rank 0)` is
+  // not the naive `(nx - 1 - f, rank nz - 1)` once `collapsePhase` is nonzero - it moves
+  // with how far the whole board has slid, because sliding adds the same offset to every
+  // sample's own `v`. `PlaySurface::build` compensates by folding a matching correction
+  // into `su`; this is the differential check that it actually lands on the real
+  // partner, not just close to it, across a few shifts and a few slide amounts including
+  // several whole laps.
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("klein"));
+  const int nx = static_cast<int>(v.dims.extent(0));
+  const int nz = static_cast<int>(v.dims.extent(1));
+  for (const float shift : {1.0f, 2.0f, 3.0f}) {
+    for (const float slideVLaps : {0.0f, 1.0f, 2.0f, 6.0f}) {
+      SurfacePose pose;
+      pose.collapsePhase = shift / static_cast<float>(nx);
+      pose.slideV = slideVLaps * static_cast<float>(nz);
+      const PlaySurface s = PlaySurface::build(v, pose);
+      CAPTURE(shift, slideVLaps);
+      float widestV = 0.0f;
+      for (int f = 0; f < nx; ++f) {
+        for (int r = 0; r + 1 < nz; ++r) {
+          widestV = std::max(
+              widestV, dist(seatAt(s, v, f, r).centre, seatAt(s, v, f, r + 1).centre));
+        }
+      }
+      for (int f = 0; f < nx; ++f) {
+        const SurfaceSeat& a = seatAt(s, v, f, 0);
+        const SurfaceSeat& b = seatAt(s, v, nx - 1 - f, nz - 1);
+        CAPTURE(f, widestV);
+        CHECK(dist(a.centre, b.centre) < 1.1f * widestV);
+      }
+    }
+  }
+}
+
 TEST_CASE("the shape stands up in the board's own world", "[render]") {
   // The overtures are modelled Y-up and the board's world is Z-up. Handing one straight
   // to the other stands the torus on its rim like a wheel and lays the cylinder on its
@@ -319,18 +359,24 @@ TEST_CASE("the board slides round its own surface", "[render]") {
   }
 }
 
-TEST_CASE("a Klein bottle's rank slide period scales with its square shift", "[render]") {
-  // M17.22 revision. With no square shift the rank seam only reverses a coordinate, and
-  // two laps bring the board home - the old `2 * nz` window. A nonzero `kleinShift` adds
-  // an independent spiral: `kleinSurf` samples `lemniscateAngle(u + (shift / nx) * v)`,
-  // so the embedding only returns after `nx / gcd(nx, shift)` laps, `nx` when the shift
-  // is coprime with the width. Wrapping the raw slide at the old two laps snapped the
-  // accumulator back while the spiral was still open - the reported reset.
+TEST_CASE("a Klein bottle's rank slide period is two laps, shift or no shift",
+          "[render]") {
+  // M17.22 revised the rank wrap window to `2 * nz * nx` on the reasoning that a nonzero
+  // `kleinShift` adds an independent spiral (`kleinSurf` samples `lemniscateAngle(u +
+  // (shift / nx) * v)`) needing `nx / gcd(nx, shift)` laps to close on its own. True of
+  // the spiral alone - but the later `su` compensation (the seam-alignment fix) makes the
+  // *rendered* pattern not depend on the slide amount at all: its own `phase * sv` term
+  // exactly cancels the sample's `phase * v`'s `sv` contribution, so the spiral never
+  // drifts with the slide in the first place, and the wider window is not needed to
+  // protect it - the plain two laps every other warp already uses is both correct and
+  // sufficient. This test now pins exactly that: a shifted Klein bottle comes home every
+  // two laps, the same as an unshifted one.
   const VariantSpec& v = *new VariantSpec(test::loadVariant("klein"));
   const int nx = static_cast<int>(v.dims.extent(0));
   const int nz = static_cast<int>(v.dims.extent(1));
   REQUIRE(nx == 8);
-  const int shift = 1;  // coprime with nx: the true period is nx laps
+  const int shift =
+      1;  // coprime with nx: a spiral period of nx laps, if it still drifted
   const auto build = [&](int k, int s) {
     SurfacePose p;
     p.slideV = static_cast<float>(k * nz);
@@ -354,8 +400,9 @@ TEST_CASE("a Klein bottle's rank slide period scales with its square shift", "[r
   const PlaySurface home = build(0, shift);
   for (int k = 1; k <= nx; ++k) {
     CAPTURE(k);
-    // Only a full true period comes home; the old two-lap window made this true at k = 2.
-    CHECK(sameCorners(build(k, shift), home, 1e-3f) == (k % nx == 0));
+    // Home every two laps, not just at a full nx-lap period - the compensation keeps the
+    // pattern itself from ever depending on how far the board has been dragged.
+    CHECK(sameCorners(build(k, shift), home, 1e-3f) == (k % 2 == 0));
   }
   // The shipped default (no shift) is the pre-change board at every slide, bit for bit:
   // its wrap is `k mod 2` laps, and the fix must not touch that path at all.
