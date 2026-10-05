@@ -2930,3 +2930,97 @@ settings, so `geometryView` starts false and cannot itself reproduce the stuck-t
 scenario a capture can't simulate) shows the button live and unaffected in the common
 case; the stuck-state scenario itself is pure settings logic, covered directly by the
 corrected unit test.
+
+## M17.27 Click the piece, not just the square it stands on
+
+Requested directly: "instead of choosing the 'square' to move from, also allow the
+player to choose the piece. And if the ghost mode is enabled, the choice can bypass
+through the squares" - with a concrete case where this is not a nicety but a real gap:
+"right now I cannot choose any piece in the 'shape' mode on 3d torus for instance."
+
+**Root cause, read from both picking paths.** Every click in this engine resolves to a
+*tile*, never a piece, and the piece selected is whatever happens to occupy that tile:
+
+- The ordinary 3-D board (`Session::clickPixel`, `src/app/session.cpp:786`) tests
+  `view::pickBox` against a thin box at the *square's own plane* -
+  `view::Vec3{0.45f, 0.45f, 0.06f}` half-extent, `src/view/camera.cpp:352` - 0.12 units
+  tall, centred on the board, regardless of how tall the piece standing there actually is.
+- The shape view (`PlaySurface::pick`, `src/render/play_surface.cpp:1129`) is worse: it
+  tests the surface *patch* triangles directly - zero thickness, the bare tile plane, no
+  height tolerance at all (M17.12 part A's sub-grid patches replaced a single flat quad
+  with several, but none of them ever had height).
+
+A piece's own mesh stands *above* this plane, along the seat's normal
+(`emitSurfacePiece`, `src/render/board_renderer.cpp:829` onward: foot at
+`centre + normal * kHalf`, rising to roughly `centre + normal * (kHalf + 0.8 * fit *
+hgt)` where `hgt` already folds in `heightFor`/`pieceHeightScale`). On a flat board,
+under a roughly top-down camera, a piece's screen footprint mostly overlaps its own
+tile's, so the gap is rarely felt. On a curved or stacked shape it is not: a piece stands
+along the *surface's own normal*, which on `torus3d`'s small nested shells can point in
+almost any direction relative to the camera, so the piece's visible silhouette can sit
+well outside its tile's own screen-space footprint - a click lands on the piece, misses
+the zero-height tile plane entirely, and nothing is selected. This is the reported "I
+cannot choose any piece," and it is a direct, explicable consequence of "click tests the
+tile, not the piece" - not a regression in the picking math itself.
+
+**The fix.** Give both picking paths a piece-shaped hit candidate, not just a tile-shaped
+one, derived from the same geometry `emitSurfacePiece` already draws from (read that
+function for the exact placement/scale math - the bounding volume below has to track it,
+not approximate it independently and drift out of sync as pieces are retuned):
+
+1. **Shape view (`PlaySurface::pick`).** Needs to know which seats are occupied, which it
+   currently has no way to - thread the position in (a `view::PositionView`/equivalent,
+   however the call site in `src/gui/main.cpp` around line 1172 already has access to
+   `session->session()`'s own position - check what is already in scope there before
+   adding a new parameter type). For each occupied seat, test a capsule (or a simple
+   cylinder - a capsule only matters if a grazing ray near the top/bottom cap is a real
+   miss worth avoiding, judge by trying both) along the seat's normal, from the surface up
+   to the piece's own top, radius matched to its footprint (`fit`-scaled, same as the
+   render path). Merge these into the *same* sorted-by-distance, ghost-alpha-accumulated
+   hit list `pick` already builds for tile patches (the spec for M17.22's ghost picking,
+   further up this file, is the pattern: nearest hit wins outright when opaque, otherwise
+   walk the sorted hits accumulating `1 - alpha` per ghosted tile until the running
+   visibility crosses the threshold). A piece is always opaque (`options_.pieceHeightScale`
+   does not ghost pieces, and nothing in this codebase does - "the pieces stay opaque" is
+   stated everywhere GHOST is mentioned), so a piece hit should behave like an opaque tile
+   hit in the same sort - it wins as soon as the ray reaches it, *unless* a ghosted tile in
+   front of it has not yet accumulated enough visibility to be seen through. This is
+   exactly the behaviour requested: "if ghost mode is enabled, the choice can bypass
+   through the squares" - a translucent tile in front of a piece should not block the
+   click from reaching it, the same way it already does not block the click from reaching
+   the tile behind it.
+2. **Ordinary 3-D board (`Session::clickPixel`/`view::pickBox`).** Lower priority - the
+   report is specifically about shape mode - but the same gap exists in kind, just less
+   often felt. Either extend `pickBox`'s per-placement extent to the piece's own height
+   when a cell is occupied (simplest: a taller box only for occupied cells, still axis-
+   aligned to the board plane rather than the piece's true orientation, which is fine here
+   since the ordinary board's pieces stand straight up), or add a second pass the same
+   shape as the shape-view fix. No ghosting exists on the ordinary board (`geometryGhost`
+   is a shape-view-only concept), so this half has none of the alpha-accumulation
+   complexity - purely "a taller hit box where a piece stands."
+
+**Tests.** A property/unit test building a `PlaySurface` for `torus3d` (the reported
+case), occupying a seat whose normal points away from a simple top-down projection (the
+whole point of the bug), and confirming a pick ray aimed at the piece's rendered position
+(not the tile centre) resolves to that cell - red before the fix (misses, returns
+`kInvalidCell`), green after. A ghost-specific case: a piece on a far seat, a nearer
+seat's tile ghosted translucent and directly in the ray's path, confirms the pick still
+resolves to the far piece once the nearer tile's accumulated opacity crosses the
+visibility threshold - and that it does *not* resolve there when the nearer tile is fully
+opaque (the existing M17.22 behaviour, unchanged). A flat-board/ordinary-3-D regression
+check that an ordinary click still resolves the same cells it always did (no behaviour
+change for the common case, only a enlarged hit volume where a piece actually is).
+
+**Acceptance.** On `torus3d --geometry`, clicking directly on a piece's visible body
+selects it, from camera angles where the old tile-only pick would miss. With GHOST
+enabled and a piece on a hidden/inner shell, clicking through the now-translucent outer
+shell selects the piece behind it, the same way it already reaches the tile behind it.
+Clicking empty space, or a tile with no piece, behaves exactly as before - this adds a
+hit candidate, it does not remove or change the existing tile-click behaviour.
+
+**Risks and non-goals.** Keep the bounding volume a simple capsule/cylinder, not a true
+mesh hit-test against each archetype's actual triangles - correctness here is "did the
+player's intended click land near the piece's visible silhouette," not pixel-perfect mesh
+picking, and a tight analytic shape is cheap and good enough. Do not let this touch move
+legality, `VariantId`, or anything beyond which `CellId` a click resolves to - same
+contract `ClickCell` already has.
