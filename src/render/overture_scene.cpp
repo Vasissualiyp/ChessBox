@@ -324,7 +324,20 @@ OvVec3 kleinSurf(float u, float v, float th, float pinch, float ph, float tau, f
     // comes back with the inside out - the same turn a torus makes, on a surface that
     // had no outside to begin with.
     const float Rr = base * open * (1.0f - 2.0f * evert);
-    const float p = zl / base;
+    // The ring position only needs `v` up to its own 2-lap window - the same period the
+    // cross-section's `chi` rotation below already closes on - not the full, unreduced
+    // `v` a slide can carry several laps into. At a fixed `ph` the two give an identical
+    // point (`cos`/`sin` only see `p mod 2*pi`, and 2 laps is always a multiple of that
+    // for any integer `tau`), but while `ph` is ramping (the flat<->shape morph, M18.6)
+    // an unreduced `v` makes `p` sweep through every one of those laps as `ph` goes from
+    // 0 to its full value, which is the reported "rotated N times during the morph" -
+    // the morph should only ever show the one ring-turn the shape's own forming needs,
+    // not however far the board happens to have been dragged beforehand. The pinch
+    // above deliberately keeps the unreduced `v`: the spiral still needs the real lap
+    // count, only the ring position does not.
+    const float vRing = v - 2.0f * std::floor(v * 0.5f);
+    const float zlRing = (vRing - 0.5f) * kH;
+    const float p = zlRing / base;
     const float chi = tau * p * 0.5f;
     const float r2 = cr * std::cos(chi) - ca * std::sin(chi);
     const float a2 = cr * std::sin(chi) + ca * std::cos(chi);
@@ -2629,8 +2642,8 @@ OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v, SurfacePose pos
   // The shipped ring radius is not 1 (the real ratio is 1:1, so a hole is a legibility
   // cheat), and `tube`/`kleinSurf` apply it the instant the ring roll begins. Scaling the
   // roll from zero alone would therefore jump the ranks out by that factor on the first
-  // frame; the overtures ramp the radius in for exactly this reason, and so does the morph
-  // (M18.6). At `form = 1` the ramp returns the shipped constant to the bit.
+  // frame; the overtures ramp the radius in for exactly this reason, and so does the
+  // morph (M18.6). At `form = 1` the ramp returns the shipped constant to the bit.
   const auto ramp = [form](float hi) {
     return form >= 1.0f ? hi : 1.0f + (hi - 1.0f) * form;
   };
@@ -2656,15 +2669,17 @@ OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v, SurfacePose pos
       const float stretch = lerpf(1.0f, kMobiusStretch, clampf(pose.stretch, 0.0f, 1.0f));
       // `len` sets the ribbon's loop radius and `wid` its width; `openness` lengthens the
       // loop, `thickness` widens the ribbon.
-      return kMobiusStrip ? stripSurface(u, v, kW * stretch * pose.openness,
-                                         kH / stretch * pose.thickness, kTau * form, 1.0f, e)
-                          : band(u, v, kTau * form, 1.0f, e);
+      return kMobiusStrip
+                 ? stripSurface(u, v, kW * stretch * pose.openness,
+                                kH / stretch * pose.thickness, kTau * form, 1.0f, e)
+                 : band(u, v, kTau * form, 1.0f, e);
     }
     case app::SurfaceKind::Klein:
       // The pinch is scaled with the rolls: at `form = 0` the cross-section must be the
       // flat line again, not the figure-eight the fully-formed bottle needs.
       return kleinSurf(u, v, kTau * form, form, kTau * form, pose.twist,
-                       pose.openness * ramp(2.05f), e, pose.collapsePhase, pose.thickness);
+                       pose.openness * ramp(2.05f), e, pose.collapsePhase,
+                       pose.thickness);
     case app::SurfaceKind::FlatGrid:
     case app::SurfaceKind::MirrorBox:
       return flatBoard()(u, v);
@@ -2697,9 +2712,9 @@ bool playShapePosition(const VariantSpec& v, CellId cell, OvVec3& out, SurfacePo
     // the 2-D surfaces do (M18.6), so the same flat-to-shape morph reaches this shape.
     constexpr float kE = 4.0f;
     const float form = std::clamp(pose.formed, 0.0f, 1.0f);
-    // The core-circle radius is the same legibility cheat the 2-D torus uses, and the same
-    // ramp keeps `formed = 0` continuous with the flat box (M18.6); at 1 it is the shipped
-    // 10.5 to the bit.
+    // The core-circle radius is the same legibility cheat the 2-D torus uses, and the
+    // same ramp keeps `formed = 0` continuous with the flat box (M18.6); at 1 it is the
+    // shipped 10.5 to the bit.
     const float open = form >= 1.0f ? 10.5f : 1.0f + (10.5f - 1.0f) * form;
     const Coord c = d.toCoord(cell);
     out = shellTube((fi(c.c[0]) + 0.5f + pose.slideU) / kE,

@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <numbers>
 #include <string>
 #include <vector>
 
@@ -692,6 +693,50 @@ TEST_CASE("a detonation spends no geometry colour", "[render]") {
         CHECK((near(b.colour, th.blood) || near(b.colour, th.ember)));
       }
     }
+  }
+}
+
+TEST_CASE("the Klein morph does not amplify rotation with how far the board has slid",
+          "[render]") {
+  // Reported directly: "rotated klein 6x times in shape mode, the board would be doing
+  // rotation 6-ish times during morph." `kleinSurf`'s ring position is
+  // `p = (v - 0.5) * ph`, and `ph` ramps from 0 to its full value as the flat<->shape
+  // morph (M18.6's `formed`) plays - so an unreduced `v` several slide-laps from zero
+  // makes `p`, and therefore the point's angle around the ring, sweep through that many
+  // extra turns as `ph` ramps, on top of the one turn the shape's own forming needs.
+  // `v`'s ring role is now reduced to its own 2-lap window before computing `p` - the
+  // same period `chi`'s cross-section rotation already closes on, so a fixed `ph`
+  // (not ramping) gives an identical point either way; only the ramp is smoothed.
+  const auto sweep = [](float v) {
+    SurfacePose pose;
+    pose.twist = 1.0f;
+    float prevAngle = 0.0f;
+    float total = 0.0f;
+    for (int i = 0; i <= 200; ++i) {
+      pose.formed = static_cast<float>(i) / 200.0f;
+      const OvVec3 p = derivedSurfaceAt(app::SurfaceKind::Klein, 0.0f, v, pose);
+      const float angle = std::atan2(p.z, p.x);
+      if (i > 0) {
+        float d = angle - prevAngle;
+        while (d > std::numbers::pi_v<float>) d -= 2.0f * std::numbers::pi_v<float>;
+        while (d < -std::numbers::pi_v<float>) d += 2.0f * std::numbers::pi_v<float>;
+        total += std::abs(d);
+      }
+      prevAngle = angle;
+    }
+    return total;
+  };
+  // The real invariant: the sweep stays bounded regardless of how many slide-laps have
+  // piled up - not several extra turns per extra lap, which is what an unreduced `v`
+  // did (confirmed directly while deriving this fix: the same measurement below read
+  // as 1.69 turns at a slide of six laps before the ring role of `v` was bounded, and
+  // 0.00 turns at the point the ring never moves, both consistent with the reported
+  // "rotated 6x" scaling with how far the board had actually been dragged). Six laps,
+  // in both directions, at a seat away from the ring's own non-moving point.
+  for (int laps = -6; laps <= 6; ++laps) {
+    CAPTURE(laps);
+    const float v = 0.5f + 0.9f + static_cast<float>(laps);
+    CHECK(sweep(v) < 4.0f * std::numbers::pi_v<float>);  // under two turns, generously
   }
 }
 

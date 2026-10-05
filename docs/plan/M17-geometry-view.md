@@ -2111,6 +2111,54 @@ property sweep). No visual capture - there is still no headless way to set `klei
 but the fix is proven to float precision across every file position, three shift values
 and four slide amounts including six full laps, which is a tighter check than a screenshot
 would give.
+
+### Correction: the flat<->shape morph spun through every slide-lap, not just one (2026-10-05, Claude)
+
+Reported directly, a third and separate issue in the same area: "if I have rotated klein
+6x times in shape mode, the square board would be doing rotation 6-ish times during
+morph" - toggling SHAPE (M18.6's `geometryFormed` easing from 0 to 1) visibly spun the
+board through as many turns as the board had been dragged beforehand, instead of just
+forming in place. Found and fixed directly, test-first, same session as the seam-drift
+correction above and for the same underlying reason: `v` was carrying more information
+than any one part of `kleinSurf` actually needed.
+
+**Root cause.** `derivedSurfaceAt`'s Klein case scales `ph = kTau * form` - the ring's
+angular span grows from 0 (flat) to a full turn as `form` eases from 0 to 1. Inside
+`kleinSurf`, the ring position is `p = (v - 0.5) * ph` (`zl` scaled by `ph` via `base`),
+and `v` is `vv + sv` - the cell's own lattice fraction plus however far the board has
+slid, unreduced, several laps for a long drag. So `p`'s total range as `ph` sweeps its
+full span is proportional to `v`'s own magnitude: at `sv` near its wrap ceiling (6 laps,
+before the correction above narrowed that ceiling to 2), `p` swept through roughly six
+extra ring-turns over the course of the morph, on top of the one turn the shape's own
+forming needs - exactly the reported scaling. The correction above already narrows the
+*worst case* (the wrap ceiling dropped from up to `nx` laps to a plain 2), which alone
+cut the worst measured sweep from 1.69 turns to 0.31 at the new ceiling - but the
+dependency on slide position was still there in miniature, and at some slide positions
+within the (now smaller) window the sweep was still measurably larger than at rest.
+
+**The fix.** `kleinSurf`'s ring position now reduces `v` to its own 2-lap window before
+computing `p` - the same period its cross-section's `chi` rotation already closes on, so
+at a fixed `ph` (not ramping - every already-tested steady-state capture) the reduced and
+unreduced `v` give an identical point: `cos`/`sin` only see `p mod 2*pi`, and 2 laps is
+always a multiple of that for any integer `kleinTwist`. Only while `ph` is ramping does
+the reduction matter, which is exactly where it is wanted. The pinch/spiral term just
+above keeps the unreduced `v` untouched - it still needs the real lap count, and the
+seam-drift correction's own compensation already makes it slide-independent regardless.
+
+**Tests.** New `the Klein morph does not amplify rotation with how far the board has
+slid` (`test_overture_scene.cpp`): measures the total unwrapped angular sweep of a fixed
+lattice point as `form` sweeps 0 to 1, at slide positions from six laps negative to six
+positive. Confirmed red first by disabling the reduction: the same measurement read 5.9
+turns at six laps - matching "rotated 6x" almost exactly - and green after restoring it,
+every case under two turns.
+
+**Verification.** `tools/test.sh --build render app` green (193 cases, 4.97M assertions,
+Vulkan validation on); `tools/precommit.sh` green. No visual capture - same reason as
+above, no headless way to drive a live multi-lap drag plus a morph - but the red/green
+swing (5.9 turns to under 2, confirmed by disabling and restoring the one-line reduction)
+is as direct a demonstration of the fix as a recording would be.
+
+Spec'd in full in
 [`M17.12-shapes-above-two-dimensions.md`](M17.12-shapes-above-two-dimensions.md): slide and
 invert for `torus3d`/`hyper4` (currently ignored by `buildStacked`), a ghost-based answer to
 the hidden-sheet problem (reusing the existing GHOST pipeline rather than inventing one),
