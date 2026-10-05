@@ -42,6 +42,19 @@ struct MeshRange {
 inline constexpr float kCylinderIconScale = 0.0135f;
 inline constexpr float kCylinderHalfThick = 0.11f;
 
+/// The token disc the icon decal sits on (M17.26). A true circular puck - round caps and
+/// a round wall - sized so its radius is the old icon puck's own footprint, so the icon
+/// shrinks into it rather than the token growing around it. Its half-thickness is a hair
+/// less than the icon's so the decal's caps sit just proud of the disc instead of
+/// z-fighting it at the same plane.
+inline constexpr float kCylinderDiscHalfThick = 0.10f;
+
+/// The flat view draws its glyph at 0.82 of the token circle's radius; the icon decal is
+/// `kCylinderIconScale` shrunk by exactly that, so the shape view's disc-plus-figure is
+/// the flat view's circle-plus-figure carried into a solid.
+inline constexpr float kCylinderDecalRatio = 0.82f;
+inline constexpr float kCylinderDecalScale = kCylinderIconScale * kCylinderDecalRatio;
+
 /// The shapes a piece can be given.
 ///
 /// Pieces cannot ship as model files: a variant may declare a piece nobody anticipated,
@@ -94,6 +107,11 @@ struct MeshLibrary {
   /// same vertex and index buffers as `ranges`, so the draw loop binds one buffer either
   /// way and only the range changes.
   MeshRange cylinderRanges[static_cast<std::size_t>(Archetype::Count)];
+  /// The shape view's token discs (M17.26): a plain white circular puck under each icon
+  /// decal, one per archetype, in the same buffers. The disc's colour is the *instance's*
+  /// - read live off `theme_.pieceToken` every build - never baked here, exactly like the
+  /// icon mesh. Empty for the archetypes that are not pieces.
+  MeshRange discRanges[static_cast<std::size_t>(Archetype::Count)];
 
   static MeshLibrary build();
 };

@@ -13,6 +13,11 @@ namespace {
 
 constexpr int kSegments = 14;  // smooth enough at board scale, cheap enough to be free
 
+/// The flat view draws its token circles with 24 segments; the shape view's token discs
+/// use the same count so the two read as the same round object at the same angle
+/// (M17.26).
+constexpr int kDiscSegments = 24;
+
 void pushTri(MeshLibrary& m, std::uint32_t a, std::uint32_t b, std::uint32_t c) {
   m.indices.push_back(static_cast<std::uint16_t>(a));
   m.indices.push_back(static_cast<std::uint16_t>(b));
@@ -347,27 +352,54 @@ std::vector<int> earClipIcon(const std::vector<IconPoint>& pts) {
   return out;
 }
 
+/// The icon's own centroid and its furthest point from it, in icon units (0..100). The
+/// puck recentres on the centroid and the disc is sized to that same centroid, so the two
+/// stay concentric whichever way an outline is authored.
+struct IconExtent {
+  float cx{0.0f};
+  float cy{0.0f};
+  float radius{0.0f};  // furthest outline point from the centroid; 0 for an empty icon
+};
+
+IconExtent iconExtent(const PieceIcon& icon) {
+  IconExtent e;
+  std::size_t count = 0;
+  for (const IconPoly& poly : icon.fills) {
+    for (const IconPoint& p : poly) {
+      e.cx += p.x;
+      e.cy += p.y;
+      ++count;
+    }
+  }
+  if (count == 0) return e;
+  e.cx /= static_cast<float>(count);
+  e.cy /= static_cast<float>(count);
+  float maxR2 = 0.0f;
+  for (const IconPoly& poly : icon.fills) {
+    for (const IconPoint& p : poly) {
+      const float dx = p.x - e.cx;
+      const float dy = p.y - e.cy;
+      maxR2 = std::max(maxR2, dx * dx + dy * dy);
+    }
+  }
+  e.radius = std::sqrt(maxR2);
+  return e;
+}
+
 /// Extrude one `PieceIcon` into a two-sided puck (M17.25). Each sub-polygon becomes a
 /// thin prism: the *same* outline stamped on both caps, so a flipped seat still reads as
 /// the same piece, with a rim between them. The icon is the flat board's Primitive set,
 /// whose outlines have no cut-outs - a hole-free outline extrudes as a solid without a
-/// polygon-with-holes triangulator.
+/// polygon-with-holes triangulator. Since M17.26 this is the *decal* on the token disc:
+/// its footprint is shrunk by the flat view's glyph-to-circle ratio, and it stays a hair
+/// thicker than the disc so its caps sit just proud of it.
 void addIconCylinder(MeshLibrary& m, std::int32_t base, const PieceIcon& icon) {
-  float cx = 0.0f;
-  float cy = 0.0f;
-  std::size_t count = 0;
-  for (const IconPoly& poly : icon.fills) {
-    for (const IconPoint& p : poly) {
-      cx += p.x;
-      cy += p.y;
-      ++count;
-    }
-  }
-  if (count == 0) return;
-  cx /= static_cast<float>(count);
-  cy /= static_cast<float>(count);
+  const IconExtent e = iconExtent(icon);
+  if (e.radius <= 0.0f) return;
+  const float cx = e.cx;
+  const float cy = e.cy;
 
-  const float s = kCylinderIconScale;
+  const float s = kCylinderDecalScale;
   const float h = kCylinderHalfThick;
   const auto off = static_cast<std::uint32_t>(base);
   // The icon is authored x-right, y-down; local +y is up, so the glyph is not upside
@@ -422,6 +454,49 @@ void addIconCylinder(MeshLibrary& m, std::int32_t base, const PieceIcon& icon) {
       pushTri(m, a, c, b);
       pushTri(m, a, d, c);
     }
+  }
+}
+
+/// The flat view's token circle as a solid (M17.26): a real cylinder - two round caps and
+/// a round side wall - plain white (1,1,1,1) vertices exactly like the icon mesh's. Its
+/// radius is the icon's own old footprint (`kCylinderIconScale`), so the shrunk decal
+/// sits inside it at the flat view's glyph-to-circle ratio. Height is 1 on every vertex,
+/// the same as the icon decal's, so the disc shades flat like the flat view's circle
+/// instead of darkening toward its foot.
+void addIconDisc(MeshLibrary& m, std::int32_t base, const PieceIcon& icon) {
+  const IconExtent e = iconExtent(icon);
+  if (e.radius <= 0.0f) return;
+  const float r = e.radius * kCylinderIconScale;
+  const float h = kCylinderDiscHalfThick;
+  const auto off = static_cast<std::uint32_t>(base);
+  const float tau = 2.0f * std::numbers::pi_v<float>;
+
+  const std::uint32_t top = pushVertex(m, 0, 0, h, 0, 0, 1, 1.0f) - off;
+  const std::uint32_t bottom = pushVertex(m, 0, 0, -h, 0, 0, -1, 1.0f) - off;
+  for (int i = 0; i < kDiscSegments; ++i) {
+    const float a0 = tau * static_cast<float>(i) / kDiscSegments;
+    const float a1 = tau * static_cast<float>(i + 1) / kDiscSegments;
+    const float c0 = std::cos(a0);
+    const float s0 = std::sin(a0);
+    const float c1 = std::cos(a1);
+    const float s1 = std::sin(a1);
+
+    const std::uint32_t t0 = pushVertex(m, c0 * r, s0 * r, h, 0, 0, 1, 1.0f) - off;
+    const std::uint32_t t1 = pushVertex(m, c1 * r, s1 * r, h, 0, 0, 1, 1.0f) - off;
+    pushTri(m, top, t0, t1);
+
+    const std::uint32_t b0 = pushVertex(m, c0 * r, s0 * r, -h, 0, 0, -1, 1.0f) - off;
+    const std::uint32_t b1 = pushVertex(m, c1 * r, s1 * r, -h, 0, 0, -1, 1.0f) - off;
+    pushTri(m, bottom, b1, b0);
+
+    // The wall, its own vertices per segment so its normals are radial and it keeps a
+    // crisp silhouette against the caps' hard edge.
+    const std::uint32_t w0 = pushVertex(m, c0 * r, s0 * r, h, c0, s0, 0, 1.0f) - off;
+    const std::uint32_t w1 = pushVertex(m, c1 * r, s1 * r, h, c1, s1, 0, 1.0f) - off;
+    const std::uint32_t w2 = pushVertex(m, c1 * r, s1 * r, -h, c1, s1, 0, 1.0f) - off;
+    const std::uint32_t w3 = pushVertex(m, c0 * r, s0 * r, -h, c0, s0, 0, 1.0f) - off;
+    pushTri(m, w0, w3, w2);
+    pushTri(m, w0, w2, w1);
   }
 }
 
@@ -672,6 +747,18 @@ MeshLibrary MeshLibrary::build() {
     addIconCylinder(m, base, pieceIcon(IconStyle::Primitive, static_cast<Archetype>(i)));
     range.indexCount = static_cast<std::uint32_t>(m.indices.size()) - range.firstIndex;
     m.cylinderRanges[i] = range;
+  }
+  // The token discs (M17.26), each built from its own archetype's icon footprint, in the
+  // same buffers again. Plain white, so the draw loop is unchanged apart from which range
+  // it reads and which instance colour the shader multiplies in.
+  for (std::size_t i = 0; i < static_cast<std::size_t>(Archetype::Count); ++i) {
+    const auto base = static_cast<std::int32_t>(m.vertices.size());
+    MeshRange range;
+    range.firstIndex = static_cast<std::uint32_t>(m.indices.size());
+    range.vertexOffset = base;
+    addIconDisc(m, base, pieceIcon(IconStyle::Primitive, static_cast<Archetype>(i)));
+    range.indexCount = static_cast<std::uint32_t>(m.indices.size()) - range.firstIndex;
+    m.discRanges[i] = range;
   }
   return m;
 }

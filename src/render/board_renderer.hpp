@@ -108,6 +108,12 @@ struct InstanceSet {
     std::uint32_t count{0};
   };
   std::array<Batch, static_cast<std::size_t>(Archetype::Count)> batches{};
+  /// M17.26: how many of `batches[s]` are token discs rather than icon decals. The shape
+  /// view emits the disc first and the icon second for each piece, both in this one
+  /// batch; the first `discCounts[s]` draw from `discRanges[s]` and the rest from
+  /// `cylinderRanges[s]`. Zero on every board that is not the shape view's puck board, so
+  /// the ordinary per-shape draw is unchanged.
+  std::array<std::uint32_t, static_cast<std::size_t>(Archetype::Count)> discCounts{};
 
   /// The geometry view's board, as one mesh (M17). A square on a curved surface is a
   /// patch of that surface, not a slab turned to face it, so it cannot be an instance of
@@ -125,6 +131,10 @@ struct InstanceSet {
   /// rather than in the per-shape batches, which write depth and do not blend.
   std::vector<Instance> flourish;
   std::array<Batch, static_cast<std::size_t>(Archetype::Count)> flourishBatches{};
+  /// M17.26: the flourish's token discs, ahead of its icon decals in the same batch -
+  /// `flourishBatches[s]`'s first `flourishDiscCounts[s]` draw from `discRanges[s]`.
+  std::array<std::uint32_t, static_cast<std::size_t>(Archetype::Count)>
+      flourishDiscCounts{};
 
   /// The contact shadows (M18.2): one soft, dark decal under each occupied cell, flat or
   /// on a shape. Kept apart from `instances` for the same reason as the flourish - their

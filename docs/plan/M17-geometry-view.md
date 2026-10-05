@@ -2715,3 +2715,79 @@ recognisably the same composition as the flat 2D view's pieces, carried into a s
 not an icon-profile prism in one flat colour. Everything else M17.25 already established
 (button wiring, scoping to the surface path, GHOST/check behaviour on the figure, the
 original "no regression with the setting off" guarantees) is unchanged and must still hold.
+
+### Status: M17.26 - the true token disc built (2026-10-05, opencode)
+
+Built as specified. The shape view's piece is now two meshes: the unchanged icon
+(`cylinderRanges`) shrunk into a decal, on a new plain white circular disc
+(`discRanges`).
+
+- **Mesh.** `addIconDisc` (`piece_mesh.cpp`) builds a real cylinder - two round caps, a
+  round side wall, 24 segments like the flat view's circles - from the icon's own
+  footprint. `MeshLibrary::discRanges[Archetype::Count]` is built in the same shared
+  buffers as `ranges`/`cylinderRanges`, one range per archetype. Every vertex is plain
+  white (1,1,1,1) and height 1, exactly like the icon mesh's. `addIconCylinder` is now
+  the decal: `kCylinderDecalScale = kCylinderIconScale * 0.82` (the flat view's
+  glyph-to-circle ratio), with a new `kCylinderDiscHalfThick = 0.10` against the icon's
+  unchanged `kCylinderHalfThick = 0.11`, so the decal's caps sit just proud.
+- **Instances.** `emitSurfacePiece` emits the disc first and the icon second per surface
+  piece when `shapePieceCylinders` is on, sharing the one `centre/normal/quat/fit`
+  transform. The disc carries `theme_.pieceToken` read live (no check tint) and the
+  flourish/GHOST `alpha`; the icon is untouched. `InstanceSet::discCounts` /
+  `flourishDiscCounts` record how many of each batch are discs, so both stay in one
+  contiguous span and one buffer.
+- **Draw.** `record`'s opaque and flourish loops draw the disc prefix from `discRanges`
+  and the remainder from `cylinderRanges` when `cylinderPieces` is on; a batch with no
+  discs (the flourish's blood-flash Cell) falls back to `ranges`, so that flash draws
+  again instead of vanishing on a puck board.
+
+Deviations:
+
+1. **Per-archetype disc radius, from the icon's own extent.** `addIconDisc` derives its
+   radius from the icon's furthest outline point from the centroid (`iconExtent`, the same
+   recentring `addIconCylinder` uses) times `kCylinderIconScale`. That is "today's puck
+   footprint" for each archetype; it keeps the 0.82 ratio exact for every figure rather
+   than picking one shared radius the icons would not all fill.
+2. **The disc shares the icon's instance transform including its height-scaled Z.** Giving
+   the disc a different Z scale would make the decal's proud step grow with piece height;
+   sharing it keeps the decal centred and equally proud on every archetype.
+3. **One batch, a disc prefix, not a second `InstanceSet` vector.** The disc and icon are
+   two ranges of one contiguous batch and one uploaded buffer, which is why
+   `discCounts`/`flourishDiscCounts` exist; a separate vector would have meant a second
+   upload path in `record` for no testable gain.
+4. **The disc uses only the flourish fade as alpha.** There is no per-piece GHOST alpha in
+   the code (GHOST is the board mesh's vertex alpha); the only piece alpha is the capture
+   fade, and the disc carries it so a fading piece fades as one object.
+
+Tests and results:
+
+- `every archetype produces a usable mesh` extended to `discRanges` (non-empty and
+  in-bounds for pieces, empty for non-pieces).
+- New "a token disc is a closed, round, plain-white solid": every vertex is (1,1,1,1),
+  every rim vertex is one radius (round, unlike the icon outline), caps at +/-, and the
+  position-canonicalised edge check finds no odd edge (a crack).
+- "the puck stamps the same icon on both faces" now states the decal scale
+  (`kCylinderDecalScale`); it still compares the caps point-for-point in buffer order.
+- New "the disc instance carries the token colour live from the theme": 32 discs (one per
+  surface piece), each reading `theme_.pieceToken` with alpha 1, the icons after them
+  keeping the piece colour, and a `setTheme` switch repainting the next build's discs with
+  no mesh rebuild - the test that would fail if the token were baked into the mesh.
+- `tools/test.sh --build render app`: 191 test cases, 4,973,101 assertions, green
+  (RADV RENOIR, validation on). `tools/precommit.sh`: OK, including the ~283 s property
+  sweep.
+
+Visual captures (`build/m1726/`, cropped/upscaled with ImageMagick) - looked at closely:
+
+- `klein --geometry --piece-cylinders`, cropped on three pieces: each is a shaded round
+  disc (an ellipse under the camera, as a puck on a surface should be) in the neutral
+  token colour, with the piece's own white or black figure centred on it - a white king
+  and a black pawn read exactly as the flat view's circle-plus-figure, and the flip-locus
+  black piece on the inner sheet stays legible.
+- `klein --flat` (with its interface, which is what draws the tokens) side by side: the
+  flat token is the same composition - neutral circle, own-coloured figure inside at
+  roughly 0.82 - so the two views now speak one visual language.
+- Non-regression: `klein --geometry` without `--piece-cylinders` is still the sculptural
+  pieces (a black king lying on its side at the flip locus, as before), and
+  `standard --geometry --piece-cylinders` is still the ordinary 3-D board with sculptural
+  pieces (`standard` has no play surface, so the setting is ignored). The default path's
+  draw is unchanged: `discCounts` is zero wherever the surface path is not.

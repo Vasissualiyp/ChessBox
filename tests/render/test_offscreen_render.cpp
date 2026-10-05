@@ -523,6 +523,171 @@ TEST_CASE("every archetype produces a usable mesh", "[render]") {
     }
     REQUIRE(static_cast<std::size_t>(r.vertexOffset) + maxIndex < lib.vertices.size());
   }
+
+  // M17.26: every archetype that is a piece also builds a valid token disc, with the
+  // same buffer/index-bounds contract; a non-piece has an empty range.
+  for (std::size_t i = 0; i < static_cast<std::size_t>(Archetype::Count); ++i) {
+    CAPTURE(archetypeName(static_cast<Archetype>(i)));
+    const PieceIcon icon = pieceIcon(IconStyle::Primitive, static_cast<Archetype>(i));
+    const MeshRange& r = lib.discRanges[i];
+    if (icon.fills.empty()) {
+      CHECK(r.indexCount == 0);
+      continue;
+    }
+    REQUIRE(r.indexCount > 0);
+    REQUIRE(r.indexCount % 3 == 0);
+    std::uint16_t maxIndex = 0;
+    for (std::uint32_t k = 0; k < r.indexCount; ++k) {
+      maxIndex = std::max(maxIndex, lib.indices[r.firstIndex + k]);
+    }
+    REQUIRE(static_cast<std::size_t>(r.vertexOffset) + maxIndex < lib.vertices.size());
+  }
+}
+
+TEST_CASE("a token disc is a closed, round, plain-white solid", "[render]") {
+  // M17.26. The disc is the flat view's token circle carried into the shape view: a real
+  // cylinder - two round caps and a round wall - not the icon's own outline stamped into
+  // a slab. Its vertices are plain white, exactly like the icon mesh's, because the token
+  // colour is the *instance's* and is read fresh off the theme every frame; baking it
+  // here would freeze the disc to whichever theme was live when the mesh was built.
+  const MeshLibrary lib = MeshLibrary::build();
+  constexpr Archetype kPieces[] = {
+      Archetype::Dome,  Archetype::Tower,    Archetype::Wedge, Archetype::Spire,
+      Archetype::Crown, Archetype::Monolith, Archetype::Horn};
+  using Key = std::array<int, 3>;
+  using Edge = std::pair<Key, Key>;
+  const auto key = [](float x, float y, float z) {
+    return Key{static_cast<int>(std::lround(x * 10000.0f)),
+               static_cast<int>(std::lround(y * 10000.0f)),
+               static_cast<int>(std::lround(z * 10000.0f))};
+  };
+  for (const Archetype a : kPieces) {
+    CAPTURE(archetypeName(a));
+    const auto i = static_cast<std::size_t>(a);
+    const MeshRange& r = lib.discRanges[i];
+    REQUIRE(r.indexCount > 0);
+
+    float maxRadius = 0.0f;
+    float minPositiveRadius = 1e9f;
+    for (std::uint32_t k = 0; k < r.indexCount; ++k) {
+      const std::uint16_t local = lib.indices[r.firstIndex + k];
+      const MeshVertex& v =
+          lib.vertices[static_cast<std::size_t>(r.vertexOffset) + local];
+      // Colour lives in the instance, never the mesh. Full white, every vertex.
+      CHECK(v.color[0] == 1.0f);
+      CHECK(v.color[1] == 1.0f);
+      CHECK(v.color[2] == 1.0f);
+      CHECK(v.color[3] == 1.0f);
+      // The wall is a true circle: every *rim* vertex sits at one radius. Cap centres
+      // are at radius zero and are allowed to be the only ones there.
+      const float radius = std::sqrt(v.pos[0] * v.pos[0] + v.pos[1] * v.pos[1]);
+      if (radius > 1e-4f) {
+        maxRadius = std::max(maxRadius, radius);
+        minPositiveRadius = std::min(minPositiveRadius, radius);
+      }
+    }
+    // Round, not the icon's outline: all rim vertices share the disc's radius.
+    CHECK(std::abs(maxRadius - minPositiveRadius) < 1e-4f);
+    CHECK(maxRadius > 0.05f);
+  }
+  // The surface is closed: every geometric edge is shared by an even number of
+  // triangles, so the caps and wall really meet rather than leaving a crack.
+  for (const Archetype a : kPieces) {
+    CAPTURE(archetypeName(a));
+    const auto i = static_cast<std::size_t>(a);
+    const MeshRange& r = lib.discRanges[i];
+    std::map<Edge, int> edges;
+    for (std::uint32_t k = 0; k + 2 < r.indexCount; k += 3) {
+      Key tri[3];
+      for (int c = 0; c < 3; ++c) {
+        const std::uint16_t local =
+            lib.indices[r.firstIndex + k + static_cast<std::uint32_t>(c)];
+        const MeshVertex& v =
+            lib.vertices[static_cast<std::size_t>(r.vertexOffset) + local];
+        tri[c] = key(v.pos[0], v.pos[1], v.pos[2]);
+      }
+      for (int c = 0; c < 3; ++c) {
+        Edge e{tri[c], tri[(c + 1) % 3]};
+        if (e.second < e.first) std::swap(e.first, e.second);
+        edges[e] += 1;
+      }
+    }
+    for (const auto& [edge, uses] : edges) {
+      INFO("edge (" << edge.first[0] << "," << edge.first[1] << "," << edge.first[2]
+                    << ")-(" << edge.second[0] << "," << edge.second[1] << ","
+                    << edge.second[2] << ")");
+      CHECK(uses >= 2);
+      CHECK(uses % 2 == 0);
+    }
+  }
+}
+
+TEST_CASE("the disc instance carries the token colour live from the theme", "[render]") {
+  // M17.26. The token colour must come from the disc *instance*, read off the current
+  // theme each time instances are built - the same way the icon instance reads
+  // whitePiece/blackPiece - so a palette switch repaints the disc with no mesh rebuild.
+  // Baking theme_.pieceToken into the mesh would have failed this: MeshLibrary::build()
+  // runs once and setTheme never reruns it.
+  BoardRenderer renderer;
+  const VariantSpec v = test::loadVariant("torus");
+  const Position p = Position::startPosition(v);
+  const view::ViewConfig cfg = view::ViewConfig::forBoard(v.dims);
+  BoardOptions options = renderer.options();
+  options.surface = true;
+  options.shapePieceCylinders = true;
+  renderer.setOptions(options);
+
+  const auto near = [](float x, float y) { return std::abs(x - y) < 1e-5f; };
+  const auto countsDiscs = [&](const InstanceSet& set) {
+    std::size_t discs = 0;
+    for (std::size_t sh = 0; sh < static_cast<std::size_t>(Archetype::Count); ++sh) {
+      CHECK(set.discCounts[sh] <= set.batches[sh].count);
+      discs += set.discCounts[sh];
+    }
+    return discs;
+  };
+
+  const view::Theme firstTheme = renderer.theme();
+  const InstanceSet first = renderer.buildInstances(view::PositionView::capture(p), cfg);
+  REQUIRE(countsDiscs(first) == 32);  // one disc per surface piece
+  for (std::size_t sh = 0; sh < static_cast<std::size_t>(Archetype::Count); ++sh) {
+    const auto& batch = first.batches[sh];
+    for (std::uint32_t k = 0; k < first.discCounts[sh]; ++k) {
+      const Instance& disc = first.instances[batch.first + k];
+      CHECK(near(disc.color[0], firstTheme.pieceToken.r));
+      CHECK(near(disc.color[1], firstTheme.pieceToken.g));
+      CHECK(near(disc.color[2], firstTheme.pieceToken.b));
+      CHECK(near(disc.color[3], 1.0f));
+      // No check tint on the disc: it is furniture, exactly as in the flat view.
+      const bool bloodTinted = near(disc.color[0], firstTheme.blood.r) &&
+                               near(disc.color[1], firstTheme.blood.g);
+      CHECK_FALSE(bloodTinted);
+    }
+    // The icon decal after the discs keeps the piece colour, not the token.
+    for (std::uint32_t k = first.discCounts[sh]; k < batch.count; ++k) {
+      const Instance& icon = first.instances[batch.first + k];
+      const bool tokenColoured = near(icon.color[0], firstTheme.pieceToken.r) &&
+                                 near(icon.color[1], firstTheme.pieceToken.g) &&
+                                 near(icon.color[2], firstTheme.pieceToken.b);
+      CHECK_FALSE(tokenColoured);
+    }
+  }
+
+  // Switching theme repaints the disc on the next build, with no mesh rebuild anywhere.
+  const view::Theme other = view::Theme::console();
+  REQUIRE_FALSE(near(other.pieceToken.r, firstTheme.pieceToken.r));
+  renderer.setTheme(other);
+  const InstanceSet second = renderer.buildInstances(view::PositionView::capture(p), cfg);
+  REQUIRE(countsDiscs(second) == 32);
+  for (std::size_t sh = 0; sh < static_cast<std::size_t>(Archetype::Count); ++sh) {
+    const auto& batch = second.batches[sh];
+    for (std::uint32_t k = 0; k < second.discCounts[sh]; ++k) {
+      const Instance& disc = second.instances[batch.first + k];
+      CHECK(near(disc.color[0], other.pieceToken.r));
+      CHECK(near(disc.color[1], other.pieceToken.g));
+      CHECK(near(disc.color[2], other.pieceToken.b));
+    }
+  }
 }
 
 TEST_CASE("an icon-faced cylinder is a closed double-sided puck", "[render]") {
@@ -629,8 +794,10 @@ TEST_CASE("the puck stamps the same icon on both faces", "[render]") {
 
     const auto near = [](float x, float y) { return std::abs(x - y) < 1e-5f; };
     for (std::size_t k = 0; k < flat.size(); ++k) {
-      const float ex = (flat[k].x - cx) * kCylinderIconScale;
-      const float ey = (cy - flat[k].y) * kCylinderIconScale;
+      // M17.26: the icon is now the decal on the token disc, shrunk to the flat view's
+      // glyph-to-circle ratio.
+      const float ex = (flat[k].x - cx) * kCylinderDecalScale;
+      const float ey = (cy - flat[k].y) * kCylinderDecalScale;
       // The top cap is the icon, the bottom cap is the *same* polygon pushed down.
       CHECK(near(top[k].pos[0], ex));
       CHECK(near(top[k].pos[1], ey));

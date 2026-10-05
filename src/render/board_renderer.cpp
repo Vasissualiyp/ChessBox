@@ -819,7 +819,13 @@ InstanceSet BoardRenderer::buildInstances(
 
     std::vector<std::vector<Instance>> byShape(
         static_cast<std::size_t>(Archetype::Count));
+    // The token discs (M17.26) live in their own groups and are concatenated ahead of the
+    // icons in each archetype's batch, so `record` draws the first `discCounts[s]` from
+    // the disc mesh and the rest from the icon mesh.
+    std::vector<std::vector<Instance>> byShapeDisc(
+        static_cast<std::size_t>(Archetype::Count));
     const auto emitSurfacePiece = [&](std::vector<std::vector<Instance>>& into,
+                                      std::vector<std::vector<Instance>>& discInto,
                                       const Piece& piece, const view::Vec3& centre,
                                       const view::Vec3& normal,
                                       const std::array<float, 4>& quat, float fit,
@@ -850,7 +856,20 @@ InstanceSet BoardRenderer::buildInstances(
       body.quat[3] = quat[3];
       toFloat4(pc, body.color);
       body.color[3] = alpha;
-      into[static_cast<std::size_t>(shape[piece.type])].push_back(body);
+      const std::size_t sh = static_cast<std::size_t>(shape[piece.type]);
+      // The disc is the token, in the theme's one shared furniture colour, read live so a
+      // palette switch repaints it the same frame it repaints everything else. It carries
+      // no check tint - only the figure does, exactly as in the flat view - but it does
+      // carry GHOST/fade alpha, so a ghosted or captured piece fades as one object, disc
+      // and figure together.
+      if (options_.shapePieceCylinders) {
+        Instance disc =
+            body;  // same centre/scale/quat, so it sits exactly under the icon
+        toFloat4(theme_.pieceToken, disc.color);
+        disc.color[3] = alpha;
+        discInto[sh].push_back(disc);
+      }
+      into[sh].push_back(body);
     };
     // M18.2: a soft decal under each occupied seat, lying on the surface and turned to
     // the seat's own frame, exactly where the piece stands. The travelling piece's shadow
@@ -883,8 +902,8 @@ InstanceSet BoardRenderer::buildInstances(
       if (anim != nullptr && anim->active() && seat.cell == anim->travellingTo())
         continue;
       const float fit = std::min(std::sqrt(seat.stepU * seat.stepV), 1.0f);
-      emitSurfacePiece(byShape, piece, seat.centre, seat.normal, seat.quat, fit,
-                       seat.cell == checkCell_);
+      emitSurfacePiece(byShape, byShapeDisc, piece, seat.centre, seat.normal, seat.quat,
+                       fit, seat.cell == checkCell_);
       emitSurfaceShadow(seat.centre, seat.normal, seat.quat, fit);
     }
     // The mover, part-way along the surface between its start and its end.
@@ -893,8 +912,8 @@ InstanceSet BoardRenderer::buildInstances(
       if (!moving.empty()) {
         const SurfaceMoveSample s =
             surfaceMoveSample(anim->path(), surf, anim->progress());
-        emitSurfacePiece(byShape, moving, s.position, s.normal, s.quat, s.fit,
-                         anim->travellingTo() == checkCell_);
+        emitSurfacePiece(byShape, byShapeDisc, moving, s.position, s.normal, s.quat,
+                         s.fit, anim->travellingTo() == checkCell_);
         emitSurfaceShadow(s.ground, s.normal, s.quat, s.fit);
       }
     }
@@ -902,6 +921,8 @@ InstanceSet BoardRenderer::buildInstances(
     // M18.1: the same capture flourish as the flat board, on its own square of the
     // surface - the captured piece shrinking and fading, and a blood flash at its foot.
     std::vector<std::vector<Instance>> byShapeFlourish(
+        static_cast<std::size_t>(Archetype::Count));
+    std::vector<std::vector<Instance>> byShapeFlourishDisc(
         static_cast<std::size_t>(Archetype::Count));
     if (anim != nullptr && anim->active() && anim->captures()) {
       const float t = anim->progress();
@@ -911,8 +932,8 @@ InstanceSet BoardRenderer::buildInstances(
         if (seat.cell != anim->captureCell()) continue;
         if (fade > 0.0f) {
           const float fit = std::min(std::sqrt(seat.stepU * seat.stepV), 1.0f);
-          emitSurfacePiece(byShapeFlourish, anim->capturedPiece(), seat.centre,
-                           seat.normal, seat.quat, fit, false, fade,
+          emitSurfacePiece(byShapeFlourish, byShapeFlourishDisc, anim->capturedPiece(),
+                           seat.centre, seat.normal, seat.quat, fit, false, fade,
                            0.35f + 0.65f * fade);
         }
         if (flash > 0.0f) {
@@ -938,18 +959,29 @@ InstanceSet BoardRenderer::buildInstances(
 
     std::size_t total = 0;
     for (const auto& group : byShape) total += group.size();
+    for (const auto& group : byShapeDisc) total += group.size();
     out.instances.reserve(total + 1);
     for (std::size_t sh = 0; sh < byShape.size(); ++sh) {
       out.batches[sh].first = static_cast<std::uint32_t>(out.instances.size());
-      out.batches[sh].count = static_cast<std::uint32_t>(byShape[sh].size());
+      // The disc goes down first, so the batch's first `discCounts[s]` entries are discs
+      // and the icons follow: two ranges, one contiguous span, one buffer (M17.26).
+      out.discCounts[sh] = static_cast<std::uint32_t>(byShapeDisc[sh].size());
+      out.instances.insert(out.instances.end(), byShapeDisc[sh].begin(),
+                           byShapeDisc[sh].end());
       out.instances.insert(out.instances.end(), byShape[sh].begin(), byShape[sh].end());
+      out.batches[sh].count =
+          static_cast<std::uint32_t>(byShapeDisc[sh].size() + byShape[sh].size());
     }
     for (std::size_t sh = 0; sh < byShapeFlourish.size(); ++sh) {
       out.flourishBatches[sh].first = static_cast<std::uint32_t>(out.flourish.size());
-      out.flourishBatches[sh].count =
-          static_cast<std::uint32_t>(byShapeFlourish[sh].size());
+      out.flourishDiscCounts[sh] =
+          static_cast<std::uint32_t>(byShapeFlourishDisc[sh].size());
+      out.flourish.insert(out.flourish.end(), byShapeFlourishDisc[sh].begin(),
+                          byShapeFlourishDisc[sh].end());
       out.flourish.insert(out.flourish.end(), byShapeFlourish[sh].begin(),
                           byShapeFlourish[sh].end());
+      out.flourishBatches[sh].count = static_cast<std::uint32_t>(
+          byShapeFlourishDisc[sh].size() + byShapeFlourish[sh].size());
     }
     for (std::size_t sh = 0; sh < byShapeShadow.size(); ++sh) {
       out.shadowBatches[sh].first = static_cast<std::uint32_t>(out.shadows.size());
@@ -1739,10 +1771,28 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
       for (std::size_t s = 0; s < set.batches.size(); ++s) {
         const auto& batch = set.batches[s];
         if (batch.count == 0) continue;
-        const MeshRange& range =
-            cylinderPieces ? meshes_.cylinderRanges[s] : meshes_.ranges[s];
-        vkCmdDrawIndexed(cmd, range.indexCount, batch.count, range.firstIndex,
-                         range.vertexOffset, batch.first);
+        // M17.26: the puck board is a token disc under an icon decal. The disc is the
+        // neutral furniture colour, drawn first from `discRanges`; the icon follows from
+        // `cylinderRanges`. Every other board has `discCounts` zero and stays exactly one
+        // draw with the sculptural mesh - which is what keeps the flourish's blood flash
+        // (a Cell, with no disc) on its ordinary mesh too.
+        const std::uint32_t discs =
+            cylinderPieces ? std::min(set.discCounts[s], batch.count) : 0u;
+        if (discs > 0) {
+          const MeshRange& dr = meshes_.discRanges[s];
+          if (dr.indexCount > 0) {
+            vkCmdDrawIndexed(cmd, dr.indexCount, discs, dr.firstIndex, dr.vertexOffset,
+                             batch.first);
+          }
+        }
+        const std::uint32_t icons = batch.count - discs;
+        if (icons > 0) {
+          const MeshRange& ir = discs > 0 ? meshes_.cylinderRanges[s] : meshes_.ranges[s];
+          if (ir.indexCount > 0) {
+            vkCmdDrawIndexed(cmd, ir.indexCount, icons, ir.firstIndex, ir.vertexOffset,
+                             batch.first + discs);
+          }
+        }
       }
       // And one more for the geometry view's board, which is a mesh rather than a shape
       // repeated: the same pipeline, a different vertex buffer, one identity instance.
@@ -1796,11 +1846,25 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
         const auto& batch = set.flourishBatches[s];
         if (batch.count == 0) continue;
         // The captured piece flourishes in whatever style the board is drawn in, so on a
-        // puck board it is a shrinking puck (M17.25) rather than a mismatched sculpt.
-        const MeshRange& range =
-            cylinderPieces ? meshes_.cylinderRanges[s] : meshes_.ranges[s];
-        vkCmdDrawIndexed(cmd, range.indexCount, batch.count, range.firstIndex,
-                         range.vertexOffset, base + batch.first);
+        // puck board it is a shrinking token disc under a shrinking icon decal (M17.25,
+        // M17.26) rather than a mismatched sculpt.
+        const std::uint32_t discs =
+            cylinderPieces ? std::min(set.flourishDiscCounts[s], batch.count) : 0u;
+        if (discs > 0) {
+          const MeshRange& dr = meshes_.discRanges[s];
+          if (dr.indexCount > 0) {
+            vkCmdDrawIndexed(cmd, dr.indexCount, discs, dr.firstIndex, dr.vertexOffset,
+                             base + batch.first);
+          }
+        }
+        const std::uint32_t icons = batch.count - discs;
+        if (icons > 0) {
+          const MeshRange& ir = discs > 0 ? meshes_.cylinderRanges[s] : meshes_.ranges[s];
+          if (ir.indexCount > 0) {
+            vkCmdDrawIndexed(cmd, ir.indexCount, icons, ir.firstIndex, ir.vertexOffset,
+                             base + batch.first + discs);
+          }
+        }
       }
     }
     vkCmdEndRendering(cmd);
