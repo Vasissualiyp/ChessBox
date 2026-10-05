@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -229,6 +230,20 @@ struct KleinMorph {
 /// return false, and the interface must offer no toggle for them - a setting that did
 /// nothing would be a lie.
 [[nodiscard]] bool hasPlaySurface(const VariantSpec& v) noexcept;
+
+/// Where a point given by fractional lattice coordinates lands on an authored D >= 3 play
+/// shape - the continuous sibling of `playShapePosition`, and the one place the
+/// `shellTube`/tesseract math is written. `axis[k]` is the coordinate along board axis
+/// `k` measured in cells, so an integer cell's centre sits at `axis[k] + 0.5`.
+/// `pose.slideU`/ `pose.slideV` shift the periodic axes before sampling (the same
+/// cells-unit offset the 2-D pose uses) and `pose.formed` scales the shape's own roll,
+/// exactly as the 2-D surfaces do. `playShapePosition` is this function at a whole cell;
+/// `PlaySurface:: buildStacked` samples it at a sub-grid to cut each tile from the same
+/// surface the cell centre comes from, rather than approximating it with a tangent quad.
+/// False for anything without an authored shape.
+[[nodiscard]] bool playShapeAt(const VariantSpec& v,
+                               const std::array<float, kMaxDims>& axis, OvVec3& out,
+                               SurfacePose pose = {});
 
 /// A cell of a three- or four-dimensional variant placed on its hand-authored play shape
 /// - the nested shells of `torus3d`, the tesseract of `hyper4` (M17.12) - in the same

@@ -15,6 +15,7 @@
 #ifdef CB_HAVE_IMGUI
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <map>
 #include <string>
@@ -643,6 +644,76 @@ TEST_CASE("a three- and four-dimensional variant plays on its own shape", "[rend
   CHECK(PlaySurface::build(test::loadVariant("cube5")).empty());
 }
 
+TEST_CASE("a stacked square is a patch of the surface, not a tangent quad", "[render]") {
+  // M17.12 part A. `buildStacked` used to place one flat quad per cell from the cell's
+  // centre plus a tangent-plane frame (`axisFrame`). Where the embedding curves, or is
+  // foreshortened by hyper4's perspective projection, that rectangle is not the cell's
+  // true image: on `torus3d` the shell turns a whole quarter-circle per cell, so a
+  // tangent quad is a visible facet; on `hyper4` a strongly foreshortened outer cell's
+  // tangent rectangle can miss the true surface by several world units, which is the
+  // "bunch of fans". The fix samples the shared continuous `playShapeAt` at a sub-grid,
+  // exactly as the 2-D path cuts its patches from its surface, so a tile is a patch *of*
+  // the manifold. The claim is the same one the 2-D test makes, in the form that holds
+  // for both a curving shell and a projective one: adjacent sub-grid samples step by less
+  // than the cell they sit in, and every patch corner is the continuous surface's own
+  // point at that lattice coordinate (a tangent quad fails the second).
+  for (const char* name : {"torus3d", "hyper4"}) {
+    CAPTURE(name);
+    const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
+    const PlaySurface s = PlaySurface::build(v);
+    const int side = kSurfaceSubdiv + 1;
+    // The same `playShapeAt` sample the board must have cut the patch from, in the
+    // board's own Z-up world.
+    const auto want = [&](const Coord& c, float du, float dv) {
+      std::array<float, kMaxDims> axis{};
+      for (int k = 0; k < v.dims.dims(); ++k) {
+        axis[static_cast<std::size_t>(k)] =
+            static_cast<float>(c.c[static_cast<std::size_t>(k)]) + 0.5f;
+      }
+      axis[0] += du;
+      axis[1] += dv;
+      OvVec3 p;
+      REQUIRE(playShapeAt(v, axis, p));
+      return view::Vec3{p.x, -p.z, p.y};
+    };
+    for (const SurfaceSeat& seat : s.seats()) {
+      const SurfacePatch* patch = nullptr;
+      for (const SurfacePatch& p : s.patches()) {
+        if (p.cell == seat.cell) {
+          patch = &p;
+          break;
+        }
+      }
+      REQUIRE(patch != nullptr);
+      const Coord c = v.dims.toCoord(seat.cell);
+      const float cell = std::max(seat.stepU, seat.stepV);
+      for (int i = 0; i < side; ++i) {
+        for (int j = 0; j < side; ++j) {
+          const float du =
+              (static_cast<float>(i) / kSurfaceSubdiv - 0.5f) * PlaySurface::kCoverage;
+          const float dv =
+              (static_cast<float>(j) / kSurfaceSubdiv - 0.5f) * PlaySurface::kCoverage;
+          // The corner is on the surface at its own fractional lattice coordinate.
+          CHECK_THAT(dist(cornerOf(*patch, i, j), want(c, du, dv)),
+                     WithinAbs(0.0f, 1e-4f));
+          if (i + 1 < side) {
+            const float d = dist(cornerOf(*patch, i, j), cornerOf(*patch, i + 1, j));
+            CAPTURE(seat.cell, i, j, d, cell);
+            CHECK(d > 0.0f);
+            CHECK(d < cell);
+          }
+          if (j + 1 < side) {
+            const float d = dist(cornerOf(*patch, i, j), cornerOf(*patch, i, j + 1));
+            CAPTURE(seat.cell, i, j, d, cell);
+            CHECK(d > 0.0f);
+            CHECK(d < cell);
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST_CASE("picking a three- and four-dimensional shape finds the tile", "[render]") {
   for (const char* name : {"torus3d", "hyper4"}) {
     CAPTURE(name);
@@ -672,11 +743,15 @@ TEST_CASE("picking a three- and four-dimensional shape finds the tile", "[render
       CHECK(std::hypot(gp.x - sp.x, gp.y - sp.y) < 120.0f);
     }
     CHECK(hits > 30);
+    CAPTURE(hits, agreed);
     // A self-intersecting shape genuinely hides cells behind nearer sheets - the
     // tesseract more than the nested shells - so a pick to the *front* cell is the
     // correct answer, not a miss. The property that matters is the one checked above:
-    // whatever comes back is under the pixel.
-    CHECK(agreed > hits / 5);
+    // whatever comes back is under the pixel. The bound is deliberately loose: once the
+    // tiles are cut from the real surface (M17.12 part A) the outer shells occlude the
+    // inner ones properly, so far fewer seat centres see their own cell than the old
+    // tangent tiles - which left gaps a ray could slip through - did.
+    CHECK(agreed > hits / 8);
     // A pixel off the shape is nothing.
     CHECK(s.pick(cam, w, h, 2.0f, 2.0f) == kInvalidCell);
   }

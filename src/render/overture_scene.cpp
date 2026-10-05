@@ -2727,7 +2727,8 @@ bool hasPlaySurface(const VariantSpec& v) noexcept {
   return playShapePosition(v, 0, ignored);
 }
 
-bool playShapePosition(const VariantSpec& v, CellId cell, OvVec3& out, SurfacePose pose) {
+bool playShapeAt(const VariantSpec& v, const std::array<float, kMaxDims>& axis,
+                 OvVec3& out, SurfacePose pose) {
   const DimSpec& d = v.dims;
   if (d.dims() == 3 && v.name == "torus3d") {
     // The nested shells, at the point the library screen has fully rolled: two of the
@@ -2742,22 +2743,26 @@ bool playShapePosition(const VariantSpec& v, CellId cell, OvVec3& out, SurfacePo
     // same ramp keeps `formed = 0` continuous with the flat box (M18.6); at 1 it is the
     // shipped 10.5 to the bit.
     const float open = form >= 1.0f ? 10.5f : 1.0f + (10.5f - 1.0f) * form;
-    const Coord c = d.toCoord(cell);
-    out = shellTube((fi(c.c[0]) + 0.5f + pose.slideU) / kE,
-                    (fi(c.c[1]) + 0.5f + pose.slideV) / kE, kTau * form, kTau * form,
-                    0.62f + fi(c.c[2]) * 0.82f, open);
+    // The level is a continuous coordinate too, so a sub-grid sample - or any future
+    // caller - gets a shell radius on the same scale rather than a step at each level:
+    // `axis[2] - 0.5` is the integer level at a cell centre, to the bit.
+    out = shellTube((axis[0] + pose.slideU) / kE, (axis[1] + pose.slideV) / kE,
+                    kTau * form, kTau * form, 0.62f + (axis[2] - 0.5f) * 0.82f, open);
     return true;
   }
   if (d.dims() == 4 && v.name == "hyper4") {
     // The tesseract: the 4-cube projected as two nested cubes joined corner to corner,
     // the aeon axis being the nesting. `spin` is fixed, so the play board does not turn
-    // under the player the way the library's does.
+    // under the player the way the library's does. The coordinates are the cell centres
+    // in the projected cube's own frame (`axis - 2` is the integer offset from 1.5),
+    // fractional within a cell so the patch is the projection's true image of the cell (a
+    // projective trapezoid, where a tangent rectangle is only its centre's
+    // approximation).
     constexpr float kSpin = 0.9f;
-    const Coord c = d.toCoord(cell);
-    const float cx = fi(c.c[0]) - 1.5f;
-    const float cy = fi(c.c[2]) - 1.5f;
-    const float cz = fi(c.c[1]) - 1.5f;
-    const float cw = fi(c.c[3]) - 1.5f;
+    const float cx = axis[0] - 2.0f;
+    const float cy = axis[2] - 2.0f;
+    const float cz = axis[1] - 2.0f;
+    const float cw = axis[3] - 2.0f;
     const float nx = cx * std::cos(kSpin) - cw * std::sin(kSpin);
     const float nw = cx * std::sin(kSpin) + cw * std::cos(kSpin);
     const float k = 2.35f / (3.5f - nw);
@@ -2765,6 +2770,16 @@ bool playShapePosition(const VariantSpec& v, CellId cell, OvVec3& out, SurfacePo
     return true;
   }
   return false;
+}
+
+bool playShapePosition(const VariantSpec& v, CellId cell, OvVec3& out, SurfacePose pose) {
+  const DimSpec& d = v.dims;
+  std::array<float, kMaxDims> axis{};
+  const Coord c = d.toCoord(cell);
+  for (std::size_t k = 0; k < static_cast<std::size_t>(d.dims()); ++k) {
+    axis[k] = fi(c.c[k]) + 0.5f;
+  }
+  return playShapeAt(v, axis, out, pose);
 }
 
 OvertureScene derivedOvertureScene(const VariantSpec& variant, float t,

@@ -1031,6 +1031,12 @@ void PlaySurface::buildStacked(const VariantSpec& v, SurfacePose pose) {
   };
 
   constexpr int kSide = kSubdiv + 1;
+  // The finite difference a patch corner's normal is read off, in *cells*: the same
+  // 0.2-cell step the 2-D path's `normalAt` uses. Deliberately unclamped - both authored
+  // embeddings are smooth functions of their coordinates well outside the board, so
+  // sampling past a bounded edge is the honest tangent, while clamping would halve it and
+  // tilt the rim (M17.12 part A).
+  constexpr float kNormalStep = 0.2f;
   const int total = static_cast<int>(d.cellCount());
   for (int id = 0; id < total; ++id) {
     const CellId cell = static_cast<CellId>(id);
@@ -1062,24 +1068,51 @@ void PlaySurface::buildStacked(const VariantSpec& v, SurfacePose pose) {
     seat.quat = quatOf(ex, ey, normal);
     seats_.push_back(seat);
 
+    // The tile is a patch of the continuous surface, sampled on the same sub-grid the 2-D
+    // path cuts its patches from: its corners are points *on* the shell/tesseract rather
+    // than a tangent plane extrapolated from the centre, so a cell reads as part of the
+    // curved manifold and two tiles either side of a cell edge come from the same curve
+    // (M17.12 part A). Sampling the shared `playShapeAt` rather than `shellTube`/the
+    // tesseract here is what keeps the patch and the seat's centre one derivation.
+    //
+    // `baseAxis` is the cell centre in fractional lattice coordinates: `+0.5` puts a cell
+    // centre on the half-integer the shape functions expect, and `du`/`dv` span the
+    // cell's own footprint in cells, inset by `kCoverage` so the line between squares is
+    // a real gap in the shape rather than a stripe painted on it.
+    std::array<float, kMaxDims> baseAxis{};
+    for (int a = 0; a < d.dims(); ++a) {
+      baseAxis[static_cast<std::size_t>(a)] =
+          static_cast<float>(c.c[static_cast<std::size_t>(a)]) + 0.5f;
+    }
+    const auto at = [&](float du, float dv) {
+      std::array<float, kMaxDims> a = baseAxis;
+      a[0] += du;
+      a[1] += dv;
+      OvVec3 p;
+      if (!playShapeAt(v, a, p, pose)) return centre;
+      return view::Vec3{p.x, -p.z, p.y};
+    };
     SurfacePatch patch;
     patch.cell = cell;
     for (int i = 0; i < kSide; ++i) {
       for (int j = 0; j < kSide; ++j) {
-        const float a = (static_cast<float>(i) / kSubdiv - 0.5f) * kCoverage * cellU;
-        const float bb = (static_cast<float>(j) / kSubdiv - 0.5f) * kCoverage * cellV;
+        const float du = (static_cast<float>(i) / kSubdiv - 0.5f) * kCoverage;
+        const float dv = (static_cast<float>(j) / kSubdiv - 0.5f) * kCoverage;
         const std::size_t k = static_cast<std::size_t>(i * kSide + j);
-        patch.pos[k] = centre + ex * a + ey * bb;
-        patch.normal[k] = normal;
+        patch.pos[k] = at(du, dv);
+        // The corner's own normal, from the surface's finite-difference tangents,
+        // rank-tangent by file-tangent in the same order as the seat's. Oriented to agree
+        // with the seat's normal so the patch shades on the side the piece stands; the
+        // order matches everywhere except across a fold, where the flip is the honest
+        // sign of the other sheet.
+        const view::Vec3 dU = at(du + kNormalStep, dv) - at(du - kNormalStep, dv);
+        const view::Vec3 dV = at(du, dv + kNormalStep) - at(du, dv - kNormalStep);
+        view::Vec3 n = view::cross(dV, dU);
+        if (view::dot(n, normal) < 0.0f) n = n * -1.0f;
+        patch.normal[k] = view::length(n) > 1e-6f ? view::normalize(n) : normal;
       }
     }
     patches_.push_back(patch);
-
-    const view::Vec3 hu = ex * (0.5f * kCoverage * cellU);
-    const view::Vec3 hv = ey * (0.5f * kCoverage * cellV);
-    quads_.push_back(
-        {centre - hu - hv, centre + hu - hv, centre + hu + hv, centre - hu + hv});
-    quadCells_.push_back(cell);
     eat(centre);
   }
 
@@ -1116,20 +1149,27 @@ CellId PlaySurface::pick(const view::OrbitCamera& camera, float width, float hei
     return t > 1e-4f;
   };
 
-  // A D >= 3 shape is a set of tiles rather than one gapless sheet: test each cell's own
-  // quad (M17.12). A ray can cross several sheets, so every intersection is collected
-  // rather than stopping at the first.
+  // A D >= 3 shape is a set of curved tiles rather than one gapless sheet, so each
+  // patch's own sub-quads are tested, exactly as the 2-D path tests `corners_` (M17.12
+  // part A). A ray can cross several sheets, so every intersection is collected rather
+  // than stopping at the first.
   if (stacked_) {
     struct Hit {
       float t;
       CellId cell;
     };
     std::vector<Hit> hits;
-    for (std::size_t i = 0; i < quads_.size(); ++i) {
-      const std::array<view::Vec3, 4>& q = quads_[i];
-      float t = 0.0f;
-      if (hit(q[0], q[1], q[2], t) || hit(q[0], q[2], q[3], t)) {
-        hits.push_back({t, quadCells_[i]});
+    constexpr int kSide = kSubdiv + 1;
+    for (const SurfacePatch& p : patches_) {
+      for (int i = 0; i + 1 < kSide; ++i) {
+        for (int j = 0; j + 1 < kSide; ++j) {
+          const view::Vec3& a = p.pos[static_cast<std::size_t>(i * kSide + j)];
+          const view::Vec3& b = p.pos[static_cast<std::size_t>((i + 1) * kSide + j)];
+          const view::Vec3& c = p.pos[static_cast<std::size_t>((i + 1) * kSide + j + 1)];
+          const view::Vec3& d = p.pos[static_cast<std::size_t>(i * kSide + j + 1)];
+          float t = 0.0f;
+          if (hit(a, b, c, t) || hit(a, c, d, t)) hits.push_back({t, p.cell});
+        }
       }
     }
     if (hits.empty()) return kInvalidCell;
@@ -1204,8 +1244,17 @@ bool PlaySurface::blocked(const view::Vec3& eye, const view::Vec3& target,
     return (hit(a, b, c, t) || hit(a, c, d, t)) && t > 1e-4f && t < limit;
   };
   if (stacked_) {
-    for (const std::array<view::Vec3, 4>& q : quads_) {
-      if (tri(q[0], q[1], q[2], q[3])) return true;
+    constexpr int kSide = kSubdiv + 1;
+    for (const SurfacePatch& p : patches_) {
+      for (int i = 0; i + 1 < kSide; ++i) {
+        for (int j = 0; j + 1 < kSide; ++j) {
+          const view::Vec3& a = p.pos[static_cast<std::size_t>(i * kSide + j)];
+          const view::Vec3& b = p.pos[static_cast<std::size_t>((i + 1) * kSide + j)];
+          const view::Vec3& c = p.pos[static_cast<std::size_t>((i + 1) * kSide + j + 1)];
+          const view::Vec3& d = p.pos[static_cast<std::size_t>(i * kSide + j + 1)];
+          if (tri(a, b, c, d)) return true;
+        }
+      }
     }
     return false;
   }

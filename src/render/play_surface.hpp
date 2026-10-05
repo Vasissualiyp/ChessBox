@@ -379,11 +379,10 @@ class PlaySurface {
   /// A gapless grid of surface points, `nx * kSubdiv + 1` by `nz * kSubdiv + 1`, that
   /// the pick ray is tested against.
   std::vector<view::Vec3> corners_;
-  /// The D >= 3 shapes' tiles: one quad per cell, the surface the pick ray is tested
-  /// against. Empty on a two-dimensional board, which uses `corners_`.
+  /// The D >= 3 shapes' tiles: each cell is a curved patch of `playShapeAt`'s surface,
+  /// the same sub-quad grid the 2-D path cuts, and the picker and anti-clip test read
+  /// `patches_` directly so what a click resolves is what was drawn (M17.12 part A).
   bool stacked_{false};
-  std::vector<std::array<view::Vec3, 4>> quads_;
-  std::vector<CellId> quadCells_;
   int nx_{0};
   int nz_{0};
   /// What `pointAt` needs to sample the parametrised surface: the warp, the folded pose
