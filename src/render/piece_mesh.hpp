@@ -55,6 +55,13 @@ inline constexpr float kCylinderDiscHalfThick = 0.10f;
 inline constexpr float kCylinderDecalRatio = 0.82f;
 inline constexpr float kCylinderDecalScale = kCylinderIconScale * kCylinderDecalRatio;
 
+/// The radius of the shared foot every sculptural piece stands on, in the mesh's own
+/// local units - the widest part of the piece, and so the radius that bounds its
+/// silhouette. `addFoot` builds to it, and the shape view's pick uses it to size the
+/// volume a click may land on (M17.27). One number read in both places, so retuning the
+/// pieces cannot leave the picker behind.
+inline constexpr float kPieceFootRadius = 0.34f;
+
 /// The shapes a piece can be given.
 ///
 /// Pieces cannot ship as model files: a variant may declare a piece nobody anticipated,

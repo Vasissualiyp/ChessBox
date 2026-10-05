@@ -1174,7 +1174,9 @@ int main(int argc, char** argv) {
                     surf.pick(session->cameraOver(surfacePlacements(surf), surf.bounds(),
                                                   view::ViewConfig{}),
                               boardRect.width, boardRect.height, e.button.x - boardRect.x,
-                              e.button.y - boardRect.y, settings.geometryGhost);
+                              e.button.y - boardRect.y, settings.geometryGhost,
+                              &session->snapshot(), settings.pieceHeightScale,
+                              settings.shapePieceCylinders);
                 (void)shell->session()->apply(a);
               }
             }

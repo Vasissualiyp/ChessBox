@@ -49,6 +49,57 @@ view::Vec3 normalAt(app::SurfaceKind kind, SurfacePose pose, float u, float v, i
   return n * (1.0f / len);
 }
 
+/// Nearest positive ray parameter at which `ray` enters the capsule of radius `r` about
+/// the segment `[a, b]`, or false. Analytic - no per-triangle mesh test - because the
+/// shape view's piece pick only has to bound the silhouette a click may land on, not be
+/// pixel-perfect (M17.27). A capsule is the union of the finite cylinder with its two
+/// end spheres, and all three are convex, so the entry is the nearest of their own
+/// entries; the camera always starts outside the piece.
+bool rayCapsule(const view::OrbitCamera::Ray& ray, const view::Vec3& a,
+                const view::Vec3& b, float r, float& tOut) {
+  const view::Vec3 ba = b - a;
+  const view::Vec3 oa = ray.origin - a;
+  const float baba = view::dot(ba, ba);
+  const float bard = view::dot(ba, ray.direction);
+  const float baoa = view::dot(ba, oa);
+  const float rdoa = view::dot(ray.direction, oa);
+  const float oaoa = view::dot(oa, oa);
+  const float A = baba - bard * bard;
+  float best = 1e30f;
+  bool found = false;
+  // The curved wall, when the ray is not parallel to the axis. The root is inside the
+  // finite segment when its axial coordinate `y` lies in `[0, baba]`.
+  if (A > 1e-9f) {
+    const float B = baba * rdoa - baoa * bard;
+    const float C = baba * oaoa - baoa * baoa - r * r * baba;
+    const float h = B * B - A * C;
+    if (h >= 0.0f) {
+      const float t = (-B - std::sqrt(h)) / A;
+      const float y = baoa + t * bard;
+      if (y > 0.0f && y < baba && t > 1e-4f) {
+        best = t;
+        found = true;
+      }
+    }
+  }
+  // The two end caps, as hemispheres. A ray parallel to the axis - or one that enters
+  // through the flat top - is found here and nowhere else.
+  for (const view::Vec3& c : {a, b}) {
+    const view::Vec3 oc = ray.origin - c;
+    const float bb = view::dot(ray.direction, oc);
+    const float h = bb * bb - (view::dot(oc, oc) - r * r);
+    if (h < 0.0f) continue;
+    const float t = -bb - std::sqrt(h);
+    if (t > 1e-4f && t < best) {
+      best = t;
+      found = true;
+    }
+  }
+  if (!found) return false;
+  tOut = best;
+  return true;
+}
+
 /// A unit quaternion from an orthonormal, right-handed frame given as the images of the
 /// local axes. The standard branch-on-the-largest-diagonal form: the naive trace formula
 /// loses all its precision when the rotation is near a half-turn, which on a closed
@@ -1127,7 +1178,9 @@ void PlaySurface::buildStacked(const VariantSpec& v, SurfacePose pose) {
 }
 
 CellId PlaySurface::pick(const view::OrbitCamera& camera, float width, float height,
-                         float px, float py, float ghost) const {
+                         float px, float py, float ghost,
+                         const view::PositionView* pieces, float pieceHeightScale,
+                         bool pieceCylinders) const {
   const view::OrbitCamera::Ray ray = camera.pickRay(px, py, width, height);
   // Moeller-Trumbore, nearest hit wins: a cell round the back of the shape is behind the
   // one in front of it, and the one in front is the answer.
@@ -1149,6 +1202,35 @@ CellId PlaySurface::pick(const view::OrbitCamera& camera, float width, float hei
     return t > 1e-4f;
   };
 
+  // The volume an occupied seat's piece stands in, along the seat's normal: from the
+  // surface up to the piece's rendered top, radius matched to its footprint - the same
+  // `0.8 * fit` the render path scales a body by, and the same mesh foot radius that
+  // body is built from, so the two cannot drift (M17.27). A piece is opaque; the caller
+  // folds this hit into the tile walk as an opaque candidate.
+  const auto pieceHitT = [&](const SurfaceSeat& seat, float& tOut) -> bool {
+    if (pieces == nullptr || seat.cell >= pieces->cellCount()) return false;
+    const Piece occupant = pieces->at(seat.cell);
+    if (occupant.empty()) return false;
+    const PieceTypeDef& def =
+        pieces->variant().pieces[static_cast<std::size_t>(occupant.type)];
+    const float hgt = 1.0f + (heightFor(def) - 1.0f) * pieceHeightScale;
+    const float fit = std::min(std::sqrt(seat.stepU * seat.stepV), 1.0f);
+    const float radius = 0.8f * fit * kPieceFootRadius;
+    view::Vec3 base = seat.centre;
+    view::Vec3 top = seat.centre;
+    if (pieceCylinders) {
+      // The icon puck is centred on the surface and protrudes both ways (M17.25).
+      const float halfThick = 0.8f * fit * hgt * kCylinderDiscHalfThick;
+      base = seat.centre - seat.normal * halfThick;
+      top = seat.centre + seat.normal * halfThick;
+    } else {
+      const float lift = PlaySurface::kThickness * 0.5f;
+      base = seat.centre + seat.normal * lift;
+      top = base + seat.normal * (0.8f * fit * hgt);
+    }
+    return rayCapsule(ray, base, top, radius, tOut);
+  };
+
   // A D >= 3 shape is a set of curved tiles rather than one gapless sheet, so each
   // patch's own sub-quads are tested, exactly as the 2-D path tests `corners_` (M17.12
   // part A). A ray can cross several sheets, so every intersection is collected rather
@@ -1157,6 +1239,7 @@ CellId PlaySurface::pick(const view::OrbitCamera& camera, float width, float hei
     struct Hit {
       float t;
       CellId cell;
+      bool opaque;  ///< a piece, not a tile
     };
     std::vector<Hit> hits;
     constexpr int kSide = kSubdiv + 1;
@@ -1168,22 +1251,32 @@ CellId PlaySurface::pick(const view::OrbitCamera& camera, float width, float hei
           const view::Vec3& c = p.pos[static_cast<std::size_t>((i + 1) * kSide + j + 1)];
           const view::Vec3& d = p.pos[static_cast<std::size_t>(i * kSide + j + 1)];
           float t = 0.0f;
-          if (hit(a, b, c, t) || hit(a, c, d, t)) hits.push_back({t, p.cell});
+          if (hit(a, b, c, t) || hit(a, c, d, t)) hits.push_back({t, p.cell, false});
         }
       }
+    }
+    // Each occupied seat also stands a piece at its centre, along its normal; a click on
+    // the visible body has to resolve to the cell, not slip past the bare tile.
+    for (const SurfaceSeat& seat : seats_) {
+      float t = 0.0f;
+      if (pieceHitT(seat, t)) hits.push_back({t, seat.cell, true});
     }
     if (hits.empty()) return kInvalidCell;
     std::sort(hits.begin(), hits.end(),
               [](const Hit& a, const Hit& b) { return a.t < b.t; });
     const float alpha = std::clamp(ghost, 0.0f, 1.0f);
-    // Fully opaque: the nearest sheet is the answer, exactly as before. Ghosted: the
-    // sheets in front are see-through, so the tile the eye settles on is the first at
-    // which the accumulated opacity toward the eye reaches the visibility threshold - a
-    // click through a ghosted outer shell reaches the one inside it. Falling all the way
-    // through (a lone translucent tile) still returns the nearest (M17.22).
+    // Fully opaque: the nearest candidate is the answer - a piece and the tile it stands
+    // on are the same cell, so this is unchanged. Ghosted: the sheets in front are
+    // see-through, so the tile the eye settles on is the first at which the accumulated
+    // opacity toward the eye reaches the visibility threshold - a click through a
+    // ghosted outer shell reaches the one inside it. A piece is opaque, so it wins as
+    // soon as the ray reaches it *unless* the ghosted tiles in front have already
+    // accumulated enough opacity to hide it - the click bypasses through the squares to
+    // the piece (M17.22, M17.27).
     if (alpha >= kGhostPickVisibility) return hits.front().cell;
     float transmitted = 1.0f;
     for (const Hit& h : hits) {
+      if (h.opaque) return h.cell;
       transmitted *= (1.0f - alpha);
       if (1.0f - transmitted >= kGhostPickVisibility) return h.cell;
     }
@@ -1209,6 +1302,16 @@ CellId PlaySurface::pick(const view::OrbitCamera& camera, float width, float hei
         bestT = t;
         best = seats_[static_cast<std::size_t>((i / kSubdiv) * nz_ + (j / kSubdiv))].cell;
       }
+    }
+  }
+  // The same piece volumes, for the parametrised single-sheet surfaces: a piece on a
+  // steeply turned part of the tube stands clear of its tile, so a click on its body has
+  // to resolve to its cell too (M17.27). A single sheet has no ghosting, so nearest wins.
+  for (const SurfaceSeat& seat : seats_) {
+    float t = 0.0f;
+    if (pieceHitT(seat, t) && t < bestT) {
+      bestT = t;
+      best = seat.cell;
     }
   }
   return best;

@@ -3024,3 +3024,71 @@ player's intended click land near the piece's visible silhouette," not pixel-per
 picking, and a tight analytic shape is cheap and good enough. Do not let this touch move
 legality, `VariantId`, or anything beyond which `CellId` a click resolves to - same
 contract `ClickCell` already has.
+
+### Status: M17.27 part 1 built, part 2 deferred (2026-10-05, opencode)
+
+**Built (part 1 - the report's own case).** `PlaySurface::pick` takes the drawn position
+(`const view::PositionView* pieces`), the height scale and the cylinder flag, and the GUI
+click handler (`src/gui/main.cpp`) passes `&session->snapshot()`, the live
+`pieceHeightScale` and `shapePieceCylinders` - the same values the renderer drew with, so
+the pick cannot test a different board than the one on screen. For every **occupied** seat
+it builds a hit volume along the seat's normal, from the rendered foot to the piece's own
+top (`1 + (heightFor(def) - 1) * pieceHeightScale` folded in exactly as
+`emitSurfacePiece` does), radius `0.8 * fit * kPieceFootRadius` - the same `0.8 * fit`
+body scale the render path uses and the same mesh foot radius the body is built from. That
+radius is now the single constant `kPieceFootRadius` in `piece_mesh.hpp`, read by both
+`addFoot` and the picker, so retuning a piece's mesh cannot silently leave the hit volume
+behind. Icon-puck mode (`shapePieceCylinders`) gets a symmetric volume about the surface
+at the puck's half-thickness instead, since a puck is centred on the surface and
+protrudes both ways (M17.25). The test is a closed-form capsule test (`rayCapsule`), not a
+per-triangle mesh hit - the spec's non-goal.
+
+Both branches of `pick` take the candidate. The stacked path merges it into the **same**
+distance-sorted list as the tile patches, flagged opaque, so the existing ghost walk is
+unchanged and does the work: an opaque piece wins as soon as the ray reaches it, *unless*
+a ghosted tile in front has already accumulated `kGhostPickVisibility` opacity - exactly
+"ghost mode bypasses through the squares"; with the board opaque the nearest tile still
+wins (M17.22 unchanged). The 2-D single-sheet path takes the nearer of the tile and piece
+hits. Only `CellId` resolution moved - no legality, `VariantId` or `ClickCell` contract
+was touched.
+
+**Tests.** Two new `[render]` cases in `tests/render/test_play_surface.cpp`, both on
+`torus3d` (the reported variant). `the shape view picks a piece standing off its own tile`
+occupies each seat in turn and aims a ray at a point on the piece's own rendered axis (not
+the tile centre); wherever the tile-only pick is a clean miss, the piece-aware pick must
+resolve to that seat - only the clean-miss seats are asserted, so a body genuinely hidden
+behind a nearer shell cannot make it flap. `a ghosted tile lets the shape view reach the
+piece behind it` requires the opaque pick to stop at the near tile and the bare tile-only
+ghosted pick to miss the body, while the piece-aware ghosted pick reaches it. Both were
+run red first with the piece candidates disabled: the first fell to 1 of 7 assertions, the
+second to `reached := 0`; both then green. `tools/test.sh --build render` green (137
+cases, the M17.22 ghost and shape-pick tests unchanged), `--build app` green (69),
+`tools/precommit.sh` green (arch/unit/property). The geometry/play-shape GUI captures
+(`ctest -R 'gui-geometry|gui-play-shape|gui-ghost'`, including the `torus3d` shots) are
+green.
+
+**Part 2 (the ordinary `view::pickBox` path) deferred, deliberately.** The report and every
+acceptance bullet are shape-mode; the spec marks part 2 lower priority. It is also not the
+same simple change here: the ordinary pick lives in `app::Session::clickPixel` (L95),
+which sits *below* `render` (L100) where `heightFor` lives, and **no** variant sets
+`heightPermille` (checked all `variants/*.toml`), so the derived height is the only source.
+Tracking the real piece height in `app` would invert a layer, and a fixed-height
+approximation is not safe on the nD lattices: on `cube5` the three screen axes stack levels
+along Z at `ViewConfig::depthSpacing = 2.5`, while a tall piece's box reaches ~1.42, so an
+occupied level's box would overlap the level above/below and change which cell a click
+resolves to - an unrequested nD behaviour change with no report behind it. The spec
+explicitly invites this fallback ("if X proves too deep, ship Y and record why"). The
+ordinary path's existing regression is still pinned: `test_session.cpp`'s `a click resolved
+from a pixel reaches the right cell` (and the `[app]` suite) exercise `Session::clickPixel`
+on `standard` unchanged.
+
+**What could and could not be verified.** The picking geometry is verified directly and
+numerically, which is the only way it can be: the two tests above build a real
+`PlaySurface`, occupy real seats, and check the `CellId` a real camera ray resolves to at
+pixels aimed at the piece's rendered body. A *live* mouse click cannot be driven headlessly
+in this repo: `--script`'s `click e2` is parsed straight into a `ClickCell` action and never
+passes through `clickPixel`/`PlaySurface::pick`, and `--shot`/`--clip` inject no SDL events,
+so the actual `SDL_EVENT_MOUSE_BUTTON_DOWN` -> pixel -> `pick` call is covered by the
+compiled call site plus the unit tests, not by a scripted click or a screenshot. A
+screenshot could not have shown what a click resolved to in any case. The ordinary-board
+part (2) is unbuilt, as recorded above.

@@ -502,7 +502,7 @@ void addIconDisc(MeshLibrary& m, std::int32_t base, const PieceIcon& icon) {
 
 /// Every piece stands on the same foot, which is what makes an army look like a set.
 void addFoot(MeshLibrary& m, std::int32_t base, float totalHeight) {
-  addCone(m, base, 0.00f, 0.09f, 0.34f, 0.30f, totalHeight, false);
+  addCone(m, base, 0.00f, 0.09f, kPieceFootRadius, 0.30f, totalHeight, false);
   addCone(m, base, 0.09f, 0.14f, 0.30f, 0.22f, totalHeight, false);
 }
 

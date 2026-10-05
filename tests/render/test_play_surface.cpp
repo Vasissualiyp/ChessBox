@@ -22,10 +22,13 @@
 #include <utility>
 #include <vector>
 
+#include "position/position.hpp"
 #include "render/overture_scene.hpp"
+#include "render/piece_mesh.hpp"
 #include "render/play_surface.hpp"
 #include "support/variants.hpp"
 #include "view/layout.hpp"
+#include "view/snapshot.hpp"
 
 using namespace cb;
 using namespace cb::render;
@@ -2205,6 +2208,87 @@ TEST_CASE("ghosted picking reaches a hidden tile on a stacked shape", "[render]"
       CHECK(s.pick(cam, w, h, sp.x, sp.y) == s.pick(cam, w, h, sp.x, sp.y, 1.0f));
     }
   }
+}
+
+TEST_CASE("the shape view picks a piece standing off its own tile", "[render]") {
+  // M17.27. A stacked shape's pieces stand along their seat's normal, which on
+  // `torus3d`'s nested shells can point almost anywhere relative to the camera, so the
+  // visible body projects clear of the bare, zero-height tile patch. A ray aimed at the
+  // body used to test the tile and miss. The piece-aware pick tests a volume along the
+  // seat's normal and resolves the click to the cell the piece stands on. Only seats
+  // whose tile-only pick is a clean miss are asserted, so a body hidden behind a nearer
+  // shell (correctly not selected) cannot make this flap.
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("torus3d"));
+  const PlaySurface s = PlaySurface::build(v);
+  const float w = 1000.0f;
+  const float h = 760.0f;
+  const view::OrbitCamera cam = view::OrbitCamera::frame(s.bounds(), w / h, 0.0f);
+  const PieceTypeId rook = v.findPiece("rook");
+  const float pieceH = heightFor(v.pieces[rook]);
+
+  int demonstrated = 0;
+  for (const SurfaceSeat& seat : s.seats()) {
+    Position p = Position::startPosition(v);
+    p.clear();
+    p.place(seat.cell, rook, Color::White);
+    const view::PositionView pv = view::PositionView::capture(p);
+    const float fit = std::min(std::sqrt(seat.stepU * seat.stepV), 1.0f);
+    const float lift = PlaySurface::kThickness * 0.5f;
+    // A point on the piece's own rendered axis, above the tile plane - not the tile
+    // centre, which is the whole point.
+    const view::Vec3 body =
+        seat.centre + seat.normal * (lift + 0.5f * 0.8f * fit * pieceH);
+    const view::OrbitCamera::ScreenPoint sp = cam.project(body, w / h, w, h);
+    if (!sp.visible) continue;
+    const CellId tileOnly = s.pick(cam, w, h, sp.x, sp.y);
+    const CellId withPiece = s.pick(cam, w, h, sp.x, sp.y, 1.0f, &pv);
+    if (tileOnly == kInvalidCell) {
+      CAPTURE(seat.cell, sp.x, sp.y);
+      CHECK(withPiece == seat.cell);
+      ++demonstrated;
+    }
+  }
+  CHECK(demonstrated > 0);
+}
+
+TEST_CASE("a ghosted tile lets the shape view reach the piece behind it", "[render]") {
+  // M17.27, the report's own ask: "if ghost mode is enabled, the choice can bypass
+  // through the squares". A piece behind a ghosted tile is still reached when the
+  // accumulated opacity of the tiles in front has not crossed the visibility threshold;
+  // with the board opaque the same ray still stops at the near tile (M17.22, unchanged).
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("torus3d"));
+  const PlaySurface s = PlaySurface::build(v);
+  const float w = 1000.0f;
+  const float h = 760.0f;
+  const view::OrbitCamera cam = view::OrbitCamera::frame(s.bounds(), w / h, 0.0f);
+  const PieceTypeId rook = v.findPiece("rook");
+  const float pieceH = heightFor(v.pieces[rook]);
+
+  int reached = 0;
+  for (const SurfaceSeat& seat : s.seats()) {
+    Position p = Position::startPosition(v);
+    p.clear();
+    p.place(seat.cell, rook, Color::White);
+    const view::PositionView pv = view::PositionView::capture(p);
+    const float fit = std::min(std::sqrt(seat.stepU * seat.stepV), 1.0f);
+    const float lift = PlaySurface::kThickness * 0.5f;
+    const view::Vec3 body =
+        seat.centre + seat.normal * (lift + 0.5f * 0.8f * fit * pieceH);
+    const view::OrbitCamera::ScreenPoint sp = cam.project(body, w / h, w, h);
+    if (!sp.visible) continue;
+    const CellId opaque = s.pick(cam, w, h, sp.x, sp.y, 1.0f, &pv);
+    const CellId tileGhost = s.pick(cam, w, h, sp.x, sp.y, 0.35f);
+    const CellId pieceGhost = s.pick(cam, w, h, sp.x, sp.y, 0.35f, &pv);
+    // Opaque, the near tile wins. Ghosted, the bare tiles do not reach this body point
+    // (the ray is off the tile), but the piece behind the translucent sheet does.
+    if (opaque != kInvalidCell && opaque != seat.cell && tileGhost != seat.cell &&
+        pieceGhost == seat.cell) {
+      CAPTURE(seat.cell, opaque, tileGhost, sp.x, sp.y);
+      ++reached;
+    }
+  }
+  CAPTURE(reached);
+  CHECK(reached > 0);
 }
 
 TEST_CASE("the stacked shape's adjacency is pinned, not asserted in prose", "[render]") {

@@ -392,8 +392,19 @@ class PlaySurface {
   /// actually settles on behind a ghosted outer shell. A lone translucent tile is still
   /// picked when nothing crosses the threshold. The parametrised 2-D surfaces keep the
   /// ordinary nearest hit: a single sheet has no hidden cell to reach (M17.22).
+  ///
+  /// `pieces`, when given, is the position being drawn: each occupied seat gets a hit
+  /// volume along the seat's normal, from the surface to the piece's own rendered top,
+  /// sized to the piece's footprint - the same geometry `emitSurfacePiece` draws. A piece
+  /// is opaque, so it wins as soon as the ray reaches it, unless the ghosted tiles in
+  /// front of it have already accumulated enough opacity to hide it; with the board
+  /// opaque the nearest tile still wins. `pieceHeightScale`/`pieceCylinders` mirror the
+  /// render options the volume has to track (M17.27).
   [[nodiscard]] CellId pick(const view::OrbitCamera& camera, float width, float height,
-                            float px, float py, float ghost = 1.0f) const;
+                            float px, float py, float ghost = 1.0f,
+                            const view::PositionView* pieces = nullptr,
+                            float pieceHeightScale = 1.0f,
+                            bool pieceCylinders = false) const;
 
   /// True when any drawn tile lies between `eye` and `target` (nearer than it by more
   /// than `eps`) - the anti-clip test that keeps the shape from coming between a followed
