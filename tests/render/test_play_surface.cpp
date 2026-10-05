@@ -1973,6 +1973,158 @@ TEST_CASE("hyper4's tesseract turns through two live fourth-dimension planes",
   }
 }
 
+TEST_CASE("hyper4's tesseract carries its own 16-corner wireframe scaffold", "[render]") {
+  // M17.12 part D. A two-nested-cubes wireframe drawn from the board's *own* projection
+  // gives the eye a small, stable skeleton to read the fourth-dimension rotation against;
+  // 256 independently moving tiles do not. The 16 corners are the `playShapeAt` images of
+  // the 4-cube's own lattice extremes, not a second, re-derived rotation - so the
+  // scaffold turns in lockstep because it *is* the board's math at 16 fixed points. The
+  // extreme is per axis, matching what the renderer projects: file/rank reach the lattice
+  // edge
+  // (`{0,4}`, i.e. `{-2,+2}`), while level/aeon are pinned at every cell's centre and
+  // stay at `{0.5,3.5}` (`{-1.5,+1.5}`) - reaching past that is the original overshoot
+  // defect (M17.12 part D revision). The 32 edges are the 4-cube's XOR adjacency, exactly
+  // the topology `deco.cpp`'s menu tesseract already draws.
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("hyper4"));
+  const SurfacePose rest;
+  // The per-axis extreme the corner builder must use: file/rank at the lattice edge,
+  // level/aeon at the cell-centre extreme. Shared by the cross-check below.
+  const auto extreme = [](int i, int d) {
+    const bool subdivided = d < 2;
+    return ((i >> d) & 1) ? (subdivided ? 4.0f : 3.5f) : (subdivided ? 0.0f : 0.5f);
+  };
+
+  // The scaffold is `hyper4`'s alone.
+  CHECK(hypercubeScaffoldCorners(*new VariantSpec(test::loadVariant("torus3d")), rest)
+            .empty());
+  CHECK(hypercubeScaffoldCorners(*new VariantSpec(test::loadVariant("torus")), rest)
+            .empty());
+
+  const std::vector<view::Vec3> corners = hypercubeScaffoldCorners(v, rest);
+  REQUIRE(corners.size() == 16);
+
+  // Every corner is exactly `playShapeAt` at its own extreme lattice coordinate, in the
+  // board's Z-up world - the no-duplicated-formula guarantee. The extent is per axis, as
+  // the builder's is.
+  for (int i = 0; i < 16; ++i) {
+    std::array<float, kMaxDims> axis{};
+    for (int d = 0; d < 4; ++d) {
+      axis[static_cast<std::size_t>(d)] = extreme(i, d);
+    }
+    OvVec3 p;
+    REQUIRE(playShapeAt(v, axis, p, rest));
+    CHECK_THAT(dist(corners[static_cast<std::size_t>(i)], view::Vec3{p.x, -p.z, p.y}),
+               WithinAbs(0.0f, 1e-5f));
+  }
+
+  // Sixteen distinct, well-separated points: not a degenerate collapse to one spot.
+  for (int i = 0; i < 16; ++i) {
+    for (int j = i + 1; j < 16; ++j) {
+      CAPTURE(i, j);
+      CHECK(dist(corners[static_cast<std::size_t>(i)],
+                 corners[static_cast<std::size_t>(j)]) > 0.5f);
+    }
+  }
+
+  // Two nested cubes: the 8 corners on one aeon sheet are the inner cube and project to a
+  // strictly smaller silhouette than the other 8 - the aeon nesting the projection's own
+  // depth uses. The scaffold encloses the cell stack rather than passing through it.
+  view::Vec3 centroid{};
+  for (const view::Vec3& c : corners) centroid = centroid + c;
+  centroid = centroid * (1.0f / 16.0f);
+  float inner = 0.0f;
+  float outer = 0.0f;
+  for (int i = 0; i < 16; ++i) {
+    const float r = dist(corners[static_cast<std::size_t>(i)], centroid);
+    if (((i >> 3) & 1) == 0) {
+      inner = std::max(inner, r);
+    } else {
+      outer = std::max(outer, r);
+    }
+  }
+  CHECK(inner > 0.0f);
+  CHECK(inner < outer * 0.8f);
+
+  // Regression guard (M17.12 part D revision). The scaffold must sit *around* the drawn
+  // board, not shoot past it. The original defect pushed level/aeon to the lattice edge
+  // as well as file/rank, producing coordinates the renderer never projects; because the
+  // perspective divide is nonlinear in the rotated aeon, the worst corner then fell far
+  // outside what is actually drawn - the "spikes past the board" look. The honest
+  // reference is the board's real geometry, the patch corners the renderer puts on screen
+  // (their own subdivision reaches a cell's true `kCoverage` edge at `+/-1.95`, one step
+  // beyond the outermost cell *centre* at `+/-1.5`, which alone understates the extent).
+  // The bound is loose (1.5x): the scaffold should clearly enclose the cells, but not by
+  // anything like the old overshoot (~1.75x on this metric; the corrected scaffold sits
+  // within ~1.06x, just outside the outermost patch).
+  const PlaySurface surface = PlaySurface::build(v);
+  REQUIRE(surface.patches().size() == v.dims.cellCount());
+  view::Vec3 boardCentroid{};
+  std::size_t boardPoints = 0;
+  for (const SurfacePatch& patch : surface.patches()) {
+    for (const view::Vec3& p : patch.pos) {
+      boardCentroid = boardCentroid + p;
+      ++boardPoints;
+    }
+  }
+  boardCentroid = boardCentroid * (1.0f / static_cast<float>(boardPoints));
+  float patchMax = 0.0f;
+  for (const SurfacePatch& patch : surface.patches()) {
+    for (const view::Vec3& p : patch.pos) {
+      patchMax = std::max(patchMax, dist(p, boardCentroid));
+    }
+  }
+  float scaffoldMax = 0.0f;
+  for (const view::Vec3& c : corners) {
+    scaffoldMax = std::max(scaffoldMax, dist(c, boardCentroid));
+  }
+  CAPTURE(scaffoldMax, patchMax, scaffoldMax / patchMax);
+  CHECK(scaffoldMax <= patchMax * 1.5f);
+
+  const std::vector<ScaffoldEdge> edges = hypercubeScaffoldEdges(v, rest);
+  REQUIRE(edges.size() == 32);
+  // XOR adjacency: every vertex has degree exactly 4 (a 4-cube's own).
+  std::array<int, 16> degree{};
+  for (const ScaffoldEdge& e : edges) {
+    int ia = -1;
+    int ib = -1;
+    for (int i = 0; i < 16; ++i) {
+      if (dist(e.a, corners[static_cast<std::size_t>(i)]) < 1e-4f) ia = i;
+      if (dist(e.b, corners[static_cast<std::size_t>(i)]) < 1e-4f) ib = i;
+    }
+    REQUIRE(ia >= 0);
+    REQUIRE(ib >= 0);
+    ++degree[static_cast<std::size_t>(ia)];
+    ++degree[static_cast<std::size_t>(ib)];
+  }
+  for (int i = 0; i < 16; ++i) CHECK(degree[static_cast<std::size_t>(i)] == 4);
+  // Each bar's own frame turns its local +X onto the edge it spans, so the renderer can
+  // lay one thin bar along an arbitrary 3-D direction (unlike the axis-aligned rails).
+  for (const ScaffoldEdge& e : edges) {
+    const view::Vec3 along = byQuat(e.quat, view::Vec3{1.0f, 0.0f, 0.0f});
+    CHECK_THAT(dist(along, view::normalize(e.b - e.a)), WithinAbs(0.0f, 1e-4f));
+  }
+
+  // Continuity, matching part B's: a small turn of either 4-D plane moves every corner by
+  // well under its own spacing, so the scaffold turns rather than jumping.
+  for (const float d : {0.01f, -0.01f}) {
+    SurfacePose pu;
+    pu.hyperSpinU = rest.hyperSpinU + d;
+    SurfacePose pv;
+    pv.hyperSpinV = d;
+    const std::vector<view::Vec3> cu = hypercubeScaffoldCorners(v, pu);
+    const std::vector<view::Vec3> cv = hypercubeScaffoldCorners(v, pv);
+    REQUIRE(cu.size() == 16);
+    REQUIRE(cv.size() == 16);
+    for (int i = 0; i < 16; ++i) {
+      CAPTURE(i, d);
+      CHECK(dist(cu[static_cast<std::size_t>(i)], corners[static_cast<std::size_t>(i)]) <
+            1.0f);
+      CHECK(dist(cv[static_cast<std::size_t>(i)], corners[static_cast<std::size_t>(i)]) <
+            1.0f);
+    }
+  }
+}
+
 TEST_CASE("invert swaps the side on a stacked shape without moving it", "[render]") {
   // M17.22. The same revised invert the 2-D board uses (M17.7): the geometry is
   // identical and the outward normal is reversed, so a piece stands on the other face

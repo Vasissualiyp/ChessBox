@@ -959,6 +959,45 @@ InstanceSet BoardRenderer::buildInstances(
       }
     }
 
+    // M17.12 part D: the tesseract's own 16-corner, 32-edge wireframe scaffold, so the
+    // eye has a small number of long, stable lines to read the fourth-dimension rotation
+    // against. The corners are the board's *own* `playShapeAt` projection at the lattice
+    // extremes - not a second rotation formula - so the scaffold turns in exact lockstep
+    // with the cells. Gated on `showSeams`, the existing toggle for structural (non-
+    // gameplay) markings, and specific to `hyper4`: the nested shells are legible
+    // already. The bars are blended (a wire, not a strut), and they never enter picking -
+    // the ray still tests the patches alone, exactly as before.
+    if (v.name == "hyper4" && options_.showSeams) {
+      constexpr float kScaffoldHalf = 0.03f;
+      constexpr float kScaffoldAlpha = 0.5f;
+      const view::Vec3 cellHalf = cellHalfExtent();
+      const std::size_t cellGroup = static_cast<std::size_t>(Archetype::Cell);
+      out.scaffoldBatches[cellGroup].first =
+          static_cast<std::uint32_t>(out.scaffold.size());
+      for (const ScaffoldEdge& e : hypercubeScaffoldEdges(v, pose)) {
+        const view::Vec3 delta = e.b - e.a;
+        const float len = view::length(delta);
+        if (len < 1e-6f) continue;
+        const view::Vec3 mid = (e.a + e.b) * 0.5f;
+        Instance bar{};
+        bar.center[0] = mid.x;
+        bar.center[1] = mid.y;
+        bar.center[2] = mid.z;
+        // A bar mesh's long axis is its local +X, turned onto the edge by `quat`; the
+        // other two axes set the wire's cross-section.
+        bar.scale[0] = (0.5f * len) / cellHalf.x;
+        bar.scale[1] = kScaffoldHalf / cellHalf.y;
+        bar.scale[2] = kScaffoldHalf / cellHalf.z;
+        for (std::size_t q = 0; q < 4; ++q) bar.quat[q] = e.quat[q];
+        toFloat4(theme_.boardRim, bar.color);
+        bar.color[3] = kScaffoldAlpha;
+        out.scaffold.push_back(bar);
+      }
+      out.scaffoldBatches[cellGroup].count =
+          static_cast<std::uint32_t>(out.scaffold.size()) -
+          out.scaffoldBatches[cellGroup].first;
+    }
+
     std::size_t total = 0;
     for (const auto& group : byShape) total += group.size();
     for (const auto& group : byShapeDisc) total += group.size();
@@ -1607,9 +1646,13 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
                                    const std::function<void(VkCommandBuffer)>& overlay,
                                    const std::function<void(VkCommandBuffer)>& background,
                                    BoardRect boardRect, std::uint32_t frame) {
-  // The contact shadows and the flourish ride the same buffer, immediately after the
-  // opaque ones, so each blended pass is one more draw group rather than a second buffer.
-  const std::size_t shadowBase = set.instances.size() + set.flourish.size();
+  // The scaffold, the contact shadows and the flourish all ride the same buffer,
+  // immediately after the opaque ones, so each blended pass is one more draw group rather
+  // than a second buffer. Their order is the order they are drawn in: the scaffold first,
+  // then the shadows it grounds, then the capture flourish on top.
+  const std::size_t flourishBase = set.instances.size();
+  const std::size_t scaffoldBase = flourishBase + set.flourish.size();
+  const std::size_t shadowBase = scaffoldBase + set.scaffold.size();
   const std::size_t instanceCount = shadowBase + set.shadows.size();
   if (auto r = ensureInstanceCapacity(frame, instanceCount); !r.has_value()) return r;
   if (instanceCount > 0) {
@@ -1617,8 +1660,10 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     vkMapMemory(ctx_->device(), instanceMem_[frame], 0, instanceCount * sizeof(Instance),
                 0, &mapped);
     std::memcpy(mapped, set.instances.data(), set.instances.size() * sizeof(Instance));
-    std::memcpy(static_cast<char*>(mapped) + set.instances.size() * sizeof(Instance),
+    std::memcpy(static_cast<char*>(mapped) + flourishBase * sizeof(Instance),
                 set.flourish.data(), set.flourish.size() * sizeof(Instance));
+    std::memcpy(static_cast<char*>(mapped) + scaffoldBase * sizeof(Instance),
+                set.scaffold.data(), set.scaffold.size() * sizeof(Instance));
     std::memcpy(static_cast<char*>(mapped) + shadowBase * sizeof(Instance),
                 set.shadows.data(), set.shadows.size() * sizeof(Instance));
     vkUnmapMemory(ctx_->device(), instanceMem_[frame]);
@@ -1808,6 +1853,27 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
         vkCmdBindIndexBuffer(cmd, surfaceIndexBuffer_[frame], 0, VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(cmd, static_cast<std::uint32_t>(set.surfaceIndices.size()), 1, 0,
                          0, set.surfaceInstance);
+      }
+    }
+    // The tesseract scaffold (M17.12 part D), blended so it reads as a wire: depth-tested
+    // against the board but writing no depth, so an edge behind the patches is hidden and
+    // one in front lays over them. Drawn before the shadows, which belong under pieces.
+    if (!set.scaffold.empty()) {
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, surfaceBlendPipeline_);
+      vkCmdPushConstants(cmd, layout_,
+                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                         sizeof(PushConstants), &push);
+      const VkDeviceSize zero = 0;
+      vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer_, &zero);
+      vkCmdBindVertexBuffers(cmd, 1, 1, &instanceBuffer_[frame], &zero);
+      vkCmdBindIndexBuffer(cmd, indexBuffer_, 0, VK_INDEX_TYPE_UINT16);
+      const std::uint32_t base = static_cast<std::uint32_t>(scaffoldBase);
+      for (std::size_t s = 0; s < set.scaffoldBatches.size(); ++s) {
+        const auto& batch = set.scaffoldBatches[s];
+        if (batch.count == 0) continue;
+        const MeshRange& range = meshes_.ranges[s];
+        vkCmdDrawIndexed(cmd, range.indexCount, batch.count, range.firstIndex,
+                         range.vertexOffset, base + batch.first);
       }
     }
     // The contact shadows (M18.2), blended like the flourish: a soft decal under each

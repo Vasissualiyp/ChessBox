@@ -1273,4 +1273,66 @@ bool PlaySurface::blocked(const view::Vec3& eye, const view::Vec3& target,
   return false;
 }
 
+std::vector<view::Vec3> hypercubeScaffoldCorners(const VariantSpec& v, SurfacePose pose) {
+  std::vector<view::Vec3> corners;
+  if (v.name != "hyper4" || v.dims.dims() != 4) return corners;
+  corners.reserve(16);
+  for (int i = 0; i < 16; ++i) {
+    std::array<float, kMaxDims> axis{};
+    for (int d = 0; d < 4; ++d) {
+      // The extent has to match what the renderer actually projects, axis by axis. Only
+      // file (`d = 0`) and rank (`d = 1`) are subdivided by `buildStacked`'s patch
+      // sampling, so only there is the lattice's literal edge (`{0, 4}`, i.e. `{-2, +2}`
+      // in the projection's own frame) a point the real geometry reaches. Level
+      // (`d = 2`) and aeon (`d = 3`) are pinned at every cell's own centre, so they never
+      // leave `{0.5, 3.5}` (`{-1.5, +1.5}`) on screen; pushing them to `{0, 4}` here
+      // would be a combination the renderer never produces, which the perspective divide
+      // turns into corners far outside the board - the "spikes past the stack" defect
+      // (M17.12 part D revision). Keep each axis at the extent the real geometry reaches.
+      const bool subdivided = d < 2;
+      const float lo = subdivided ? 0.0f : 0.5f;
+      const float hi = subdivided ? 4.0f : 3.5f;
+      axis[static_cast<std::size_t>(d)] = ((i >> d) & 1) ? hi : lo;
+    }
+    OvVec3 p;
+    if (!playShapeAt(v, axis, p, pose)) return {};
+    corners.push_back(view::Vec3{p.x, -p.z, p.y});  // into the board's Z-up world
+  }
+  return corners;
+}
+
+std::vector<ScaffoldEdge> hypercubeScaffoldEdges(const VariantSpec& v, SurfacePose pose) {
+  std::vector<ScaffoldEdge> edges;
+  const std::vector<view::Vec3> corners = hypercubeScaffoldCorners(v, pose);
+  if (corners.size() != 16) return edges;
+  edges.reserve(32);
+  for (int i = 0; i < 16; ++i) {
+    for (int d = 0; d < 4; ++d) {
+      // The 4-cube's XOR adjacency, each pair emitted once: the same topology the menu
+      // tesseract in `deco.cpp` draws.
+      const int j = i ^ (1 << d);
+      if (j < i) continue;
+      const view::Vec3& a = corners[static_cast<std::size_t>(i)];
+      const view::Vec3& b = corners[static_cast<std::size_t>(j)];
+      const view::Vec3 delta = b - a;
+      const float len = view::length(delta);
+      if (len < 1e-6f) continue;
+      const view::Vec3 ex = delta * (1.0f / len);
+      // Any two unit vectors perpendicular to the edge complete the frame; a bar is
+      // symmetric about its own length, so the roll does not matter. Pick a seed that is
+      // not parallel to `ex`, then orthogonalise it.
+      const view::Vec3 seed = std::abs(ex.x) < 0.9f ? view::Vec3{1.0f, 0.0f, 0.0f}
+                                                    : view::Vec3{0.0f, 1.0f, 0.0f};
+      const view::Vec3 ey = view::normalize(seed - ex * view::dot(seed, ex));
+      const view::Vec3 ez = view::cross(ex, ey);
+      ScaffoldEdge edge;
+      edge.a = a;
+      edge.b = b;
+      edge.quat = quatOf(ex, ey, ez);
+      edges.push_back(edge);
+    }
+  }
+  return edges;
+}
+
 }  // namespace cb::render

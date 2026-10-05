@@ -1393,6 +1393,31 @@ TEST_CASE("the shape tints its seam rails into the board mesh", "[render]") {
   CHECK(carriesRail(bare) == 0);
 }
 
+TEST_CASE("the tesseract scaffold is drawn only for hyper4 and only with seams on",
+          "[render]") {
+  // M17.12 part D. The wireframe is a structural (non-gameplay) marking, so it rides the
+  // same `showSeams` toggle every other one does, and it is specific to the tesseract -
+  // `torus3d`'s nested shells get none. It lives in its own blended batch, so it never
+  // touches the pick path (`PlaySurface::pick` reads `patches_` alone). No device needed:
+  // `buildInstances` is pure data in, pure data out.
+  BoardRenderer renderer;
+  const auto scaffoldCells = [&](const char* name, bool seams) {
+    const VariantSpec v = test::loadVariant(name);
+    const Position p = Position::startPosition(v);
+    const view::PositionView snap = view::PositionView::capture(p);
+    const view::ViewConfig cfg = view::ViewConfig::forBoard(v.dims);
+    BoardOptions options = renderer.options();
+    options.surface = true;
+    options.showSeams = seams;
+    renderer.setOptions(options);
+    const InstanceSet set = renderer.buildInstances(snap, cfg);
+    return set.scaffoldBatches[static_cast<std::size_t>(Archetype::Cell)].count;
+  };
+  CHECK(scaffoldCells("hyper4", true) == 32u);
+  CHECK(scaffoldCells("hyper4", false) == 0u);
+  CHECK(scaffoldCells("torus3d", true) == 0u);
+}
+
 TEST_CASE("the board screen's real ambient field is submitted behind the board",
           "[render][gpu]") {
   // The synthetic fill above proves the callback ordering; this proves the real wiring -

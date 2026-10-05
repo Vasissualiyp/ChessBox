@@ -149,6 +149,16 @@ struct InstanceSet {
   std::vector<Instance> shadows;
   std::array<Batch, static_cast<std::size_t>(Archetype::Count)> shadowBatches{};
 
+  /// The `hyper4` wireframe scaffold (M17.12 part D): the tesseract's own 16-corner,
+  /// 32-edge skeleton, drawn as thin bars so the eye has a small, stable frame to read
+  /// the fourth-dimension rotation against instead of 256 independently moving tiles.
+  /// Blended like the shadows, and for the same reason - a modest alpha is what keeps it
+  /// a wire rather than a strut - so it cannot ride the opaque per-shape batches. Always
+  /// fully drawn (depth-tested against the real board geometry); whether its far-side
+  /// edges should dim is a separate judgement call. It never enters picking.
+  std::vector<Instance> scaffold;
+  std::array<Batch, static_cast<std::size_t>(Archetype::Count)> scaffoldBatches{};
+
   [[nodiscard]] std::size_t size() const noexcept { return instances.size(); }
 };
 

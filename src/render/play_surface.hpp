@@ -285,6 +285,40 @@ struct SurfaceRail {
 [[nodiscard]] SurfaceRail surfaceRail(const view::SeamMap& seams, CellId cell, int axis,
                                       int i, int j);
 
+/// One edge of the `hyper4` tesseract's own wireframe scaffold (M17.12 part D), in the
+/// board's Z-up world: the projected endpoints of the two corners it joins, and the
+/// quaternion that turns a bar mesh's local +X axis onto the edge. The scaffold is a
+/// visual anchor for the fourth-dimension rotation - a small number of long, stable lines
+/// where the cells are 256 small moving tiles - so it must never feed picking or
+/// `CellId` resolution; the shape-view pick reads `PlaySurface::pick`, which tests the
+/// patches alone.
+struct ScaffoldEdge {
+  view::Vec3 a{};
+  view::Vec3 b{};
+  std::array<float, 4> quat{{0.0f, 0.0f, 0.0f, 1.0f}};
+};
+
+/// The 16 projected corners of `hyper4`'s own 4-cube skeleton, in the board's Z-up world,
+/// in the given pose - the `playShapeAt` image of the lattice's extreme coordinates, so
+/// the scaffold encloses the cell stack and turns in exact lockstep with it: it *is* the
+/// board's own projection, evaluated at 16 fixed points rather than 256 cell centres,
+/// with no second formula to drift. The extreme is per axis, matching what the renderer
+/// actually projects: file and rank reach the lattice's own edge (`{0, 4}`, i.e.
+/// `{-2, +2}` in the projection's frame), while level and aeon are pinned at every cell's
+/// centre by the patch sampling and so stay at `{0.5, 3.5}` (`{-1.5, +1.5}`) - reaching
+/// past that is a coordinate the real geometry never produces and the perspective divide
+/// throws far outside the board (M17.12 part D revision). Empty for every variant that is
+/// not `hyper4` (M17.12 part D).
+[[nodiscard]] std::vector<view::Vec3> hypercubeScaffoldCorners(const VariantSpec& v,
+                                                               SurfacePose pose);
+
+/// The 32 edges of `hyper4`'s wireframe scaffold: vertex `i` joins `i ^ (1 << d)` for
+/// each bit `d` in `0..3`, each pair emitted once, matching a 4-cube's own XOR adjacency
+/// (the same topology `deco.cpp`'s menu tesseract draws). Empty for every variant that is
+/// not `hyper4` (M17.12 part D).
+[[nodiscard]] std::vector<ScaffoldEdge> hypercubeScaffoldEdges(const VariantSpec& v,
+                                                               SurfacePose pose);
+
 /// The play board as the shape its geometry describes (M17).
 ///
 /// One object answers the three questions the geometry view asks: what shape is each
