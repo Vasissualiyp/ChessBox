@@ -1388,6 +1388,59 @@ into the figure-eight in place, then the twist settles the two sides into their 
 connected alignment - three legible stages, not one tangled motion. `formed = 1`
 unchanged.
 
+**Status, items 2 and 3 (2026-10-06, opencode).** Built both, and only those two; items 1
+and 4 are untouched.
+
+- **One shared staging helper.** `render::stageForm(form, begin, end)` (`overture_scene.hpp`,
+  defined in `overture_scene.cpp`) clamps `form` into `[begin, end]` and rescales it to 0..1
+  within that window: exactly 0 at or before `begin`, exactly 1 at or after `end`, linear
+  like every other ramp in the morph. Both items spend disjoint slices of `formed` through
+  it rather than defining their own clamps.
+- **Item 2 (Mobius ribbon).** `PlaySurface::build` no longer pins `pose.stretch` at the play
+  value on frame 0. For `Band` it now sets `pose.stretch = kRibbonStretch *
+  stageForm(form, 0, kRibbonStretchWindow)` and `pose.formed = stageForm(form,
+  kRibbonStretchWindow, 1)`; every other warp takes `kRibbonStretch` unchanged. The play
+  board's own constant moved to `play_surface.hpp` as `kRibbonStretch = 0.5f` (read, not
+  reinvented); `kRibbonStretchWindow = 0.45f` is the tuning constant. So the ribbon spends
+  the first 45% of the morph flat and elongating with the ring angle at zero, then curls.
+- **Item 3 (Klein).** `kleinMorph(form, twist)` (`overture_scene.{hpp,cpp}`) is the one
+  definition of the three windows: `ring = stageForm(form, 0, 0.40)` drives `th` and `ph`,
+  `fold = stageForm(form, 0.40, 0.72)` drives `pinch`, `spin = stageForm(form, 0.72, 1)`
+  drives the `tau` argument passed to `kleinSurf`, and it returns `{kTau * ring, fold,
+  kTau * ring, twist * spin}`. `derivedSurfaceAt`'s Klein case passes those through;
+  `pose.openness` keeps its own separate ramp (it is the hole's legibility cheat, not a
+  construction stage). At `form = 1` every window is 1, so the call is bit-for-bit the
+  unstaged shipped one.
+- **Deviations.** Only the documented tuning constants and the choice of linear ramps (the
+  existing morph's own ramps are linear; smoothstep would change the intermediate pacing).
+  One tidy-up: `searchSlide`'s orientable probe used a bare `0.5f` for the board's stretch;
+  it now reads `kRibbonStretch`, same value, one source.
+- **Tests (test-first: all three went red against the pre-staging code).**
+  `the Mobius ribbon stretches before it curls` measures the ribbon's own width:length from
+  the seats' steps: 1:1 at `formed = 0`, strictly increasing and flat (all seat `z = 0`)
+  through `kRibbonStretchWindow`, and the ring curls (>1 unit of `z`) after it.
+  `the Klein morph is three legible stages` drives `kleinMorph` directly across 1000
+  samples: exact endpoints; window 1 has `pinch == 0` and `tau == 0` with `th == ph`
+  strictly increasing; window 2 has `tau == 0` and `pinch` strictly increasing; window 3
+  has `pinch == 1` and `tau` strictly increasing to `twist`. The boundaries are discovered
+  from the parameters themselves, so retuning the windows does not invalidate the test.
+  `the Klein morph never jumps more than a cell` checks no seat moves further between
+  adjacent `formed` samples than its own `max(stepU, stepV)` - nothing disappears and
+  reappears.
+- **Results.** `tools/test.sh --build render`: 128 cases / 4.99M assertions green.
+  `tools/test.sh --build app`: 68 cases green. The existing
+  `formed one is the shipped surface, bit for bit` and the morph-continuity sweeps stay
+  green, so `formed = 1` has not moved.
+- **Visual captures (looked at, not just taken).** `--clip` sweeps only the library
+  overture's own `t`, so the play board's `formed` was sampled with repeated
+  `--shot --formed X` (which does reach it). `klein --geometry` at X = 0.05 .. 0.40 reads as
+  a plain tube forming and closing - a fan that curls into a ring, with no fold, no twist and
+  none of the old "top rows disappear into the inside of a torus"; 0.40 is the closed plain
+  ring, after which the fold and twist settle it. `mobius --geometry` at X = 0.0 .. 0.45
+  stays a flat board and visibly elongates to the full stretched strip before any curl
+  begins, then curls into the loop. Captures are under `build/m18_rev_check/items23/`
+  (gitignored).
+
 #### 4. The Klein seam's visual connection sits half a square from where it should
 
 Reported: "current implementation is the best one so far, but the 'connection' is half-a-

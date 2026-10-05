@@ -2069,6 +2069,135 @@ TEST_CASE("the flat-to-shape morph is continuous and never degenerate", "[render
   }
 }
 
+TEST_CASE("the Mobius ribbon stretches before it curls", "[render]") {
+  // M18 revision, item 2. The bug, from actual play: the ribbon went from the square
+  // board to the fully-stretched strip instantly and only the curl animated, because
+  // `PlaySurface::build` pinned `pose.stretch` at its play value on frame 0. The morph
+  // now spends `kRibbonStretchWindow` of `formed` stretching with the ring angle still
+  // zero, then curls. Measured the way the flat-end test measures: from the seats' own
+  // steps.
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("mobius"));
+  constexpr int kSamples = 200;
+  float prevRatio = 0.0f;
+  bool ringCurled = false;
+  for (int i = 0; i <= kSamples; ++i) {
+    const float form = static_cast<float>(i) / static_cast<float>(kSamples);
+    SurfacePose pose;
+    pose.formed = form;
+    const PlaySurface s = PlaySurface::build(v, pose);
+    const SurfaceSeat& s00 = seatAt(s, v, 0, 0);
+    const SurfaceSeat& s10 = seatAt(s, v, 1, 0);
+    const SurfaceSeat& s01 = seatAt(s, v, 0, 1);
+    const float ratio = dist(s10.centre, s00.centre) / dist(s01.centre, s00.centre);
+    float maxZ = 0.0f;
+    for (const SurfaceSeat& t : s.seats()) maxZ = std::max(maxZ, std::abs(t.centre.z));
+    CAPTURE(form, ratio, maxZ);
+    if (form <= kRibbonStretchWindow + 1e-6f) {
+      // Still flat, and elongating: the ratio starts at 1:1 and grows.
+      CHECK_THAT(maxZ, WithinAbs(0.0f, 1e-4f));
+      if (i == 0) {
+        CHECK_THAT(ratio, WithinAbs(1.0f, 1e-3f));
+      } else {
+        CHECK(ratio > prevRatio);
+      }
+      if (form >= kRibbonStretchWindow - 1e-6f) CHECK(ratio > 3.0f);
+    } else if (maxZ > 1.0f) {
+      ringCurled = true;
+    }
+    prevRatio = ratio;
+  }
+  // The ring does curl once the stretch is spent - the test has teeth.
+  CHECK(ringCurled);
+}
+
+TEST_CASE("the Klein morph is three legible stages", "[render]") {
+  // M18 revision, item 3. The bug, from actual play: the ring, the figure-eight fold and
+  // the twist all ran off the same `form`, while the twist was applied at full strength
+  // from frame 0 - a twist on a half-folded, self-intersecting cross-section inside a
+  // still-forming ring, which read as winding through the inside of a torus. The morph is
+  // now three sequential windows: ring, fold, twist.
+  constexpr float kTau = 6.283185307179586f;
+  constexpr float kTwist = 1.0f;
+  constexpr int kSamples = 1000;
+  {
+    const KleinMorph a = kleinMorph(0.0f, kTwist);
+    CHECK(a.th == 0.0f);
+    CHECK(a.pinch == 0.0f);
+    CHECK(a.ph == 0.0f);
+    CHECK(a.tau == 0.0f);
+    const KleinMorph b = kleinMorph(1.0f, kTwist);
+    CHECK(b.th == kTau);
+    CHECK(b.pinch == 1.0f);
+    CHECK(b.ph == kTau);
+    CHECK(b.tau == kTwist);
+  }
+  // Window boundaries, discovered from the staged parameters themselves, so retuning them
+  // does not break the test.
+  float ringEnd = -1.0f;
+  float foldEnd = -1.0f;
+  for (int i = 0; i <= kSamples; ++i) {
+    const float form = static_cast<float>(i) / static_cast<float>(kSamples);
+    const KleinMorph k = kleinMorph(form, kTwist);
+    if (ringEnd < 0.0f && k.pinch > 0.0f) ringEnd = form;
+    if (foldEnd < 0.0f && k.tau > 0.0f) foldEnd = form;
+  }
+  REQUIRE(ringEnd > 0.0f);
+  REQUIRE(foldEnd > ringEnd);
+
+  float prevTh = -1.0f;
+  float prevPinch = -1.0f;
+  float prevTau = -1.0f;
+  for (int i = 0; i <= kSamples; ++i) {
+    const float form = static_cast<float>(i) / static_cast<float>(kSamples);
+    const KleinMorph k = kleinMorph(form, kTwist);
+    CAPTURE(form, k.th, k.pinch, k.ph, k.tau);
+    CHECK(k.th == k.ph);
+    if (form < ringEnd) {
+      // Window 1: the ring only, and a plain circular cross-section (no fold, no twist).
+      CHECK(k.th >= prevTh);
+      if (form > 0.0f) CHECK(k.th > prevTh);
+      CHECK(k.pinch == 0.0f);
+      CHECK(k.tau == 0.0f);
+    } else if (form < foldEnd) {
+      // Window 2: the fold, the ring held, still no twist.
+      CHECK(k.th == kTau);
+      CHECK(k.tau == 0.0f);
+      CHECK(k.pinch > prevPinch);
+    } else {
+      // Window 3: the twist, the fold held.
+      CHECK(k.pinch == 1.0f);
+      CHECK(k.tau > prevTau);
+    }
+    prevTh = k.th;
+    prevPinch = k.pinch;
+    prevTau = k.tau;
+  }
+}
+
+TEST_CASE("the Klein morph never jumps more than a cell", "[render]") {
+  // M18 revision, item 3. The three stages must not make a seat disappear and reappear:
+  // between adjacent samples of `formed`, no seat moves further than its own neighbour
+  // spacing (its `stepU`/`stepV`), which is the seat's own notion of "one square".
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("klein"));
+  constexpr int kSamples = 200;
+  PlaySurface prev;
+  for (int i = 0; i <= kSamples; ++i) {
+    SurfacePose pose;
+    pose.formed = static_cast<float>(i) / static_cast<float>(kSamples);
+    const PlaySurface s = PlaySurface::build(v, pose);
+    if (i > 0) {
+      REQUIRE(s.seats().size() == prev.seats().size());
+      for (std::size_t c = 0; c < s.seats().size(); ++c) {
+        const float moved = dist(s.seats()[c].centre, prev.seats()[c].centre);
+        const float spacing = std::max(s.seats()[c].stepU, s.seats()[c].stepV);
+        CAPTURE(i, c, pose.formed, moved, spacing);
+        CHECK(moved < spacing);
+      }
+    }
+    prev = s;
+  }
+}
+
 TEST_CASE("the morph keeps the camera on the shape as its bounds move", "[render]") {
   // M17.24. `frameBoard` commits the camera's frame once, at the instant SHAPE flips -
   // which is the *flat* end of the morph. The shape's own bounds move as it rolls up, so

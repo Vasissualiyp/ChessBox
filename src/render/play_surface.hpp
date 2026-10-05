@@ -48,6 +48,17 @@ inline constexpr float kFormMorphRate = 2.0f;
 [[nodiscard]] float advanceFormMorph(float formed, float target, float dt,
                                      float formSpeed) noexcept;
 
+/// The play board's own ribbon stretch (M18 revision, item 2): half the library screen's,
+/// which is about as little as the surface will take and still play. This is the value
+/// the flat<->shape morph eases *in* over `kRibbonStretchWindow`, rather than applying it
+/// on the first frame while only the ring curls.
+inline constexpr float kRibbonStretch = 0.5f;
+/// The fraction of the flat<->shape morph spent stretching the Mobius ribbon to
+/// `kRibbonStretch` with no ring curl; the remaining fraction is the curl. Split from the
+/// same `SurfacePose::formed` the ring angle reads, via `stageForm`. Tuning constant, by
+/// eye, like every other morph-pacing number.
+inline constexpr float kRibbonStretchWindow = 0.45f;
+
 /// Ease the camera toward the geometry view's *current* frame while the flat/shape morph
 /// is in flight (M17.24).
 ///

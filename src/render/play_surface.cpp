@@ -193,13 +193,6 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
     return s;
   }
   if (!hasPlaySurface(v)) return s;
-  // How much of the ribbon's stretch a *board* can afford. At the library screen's full
-  // stretch each cell is nine times longer than it is wide, which reads beautifully as a
-  // ribbon and not at all as a board: you cannot see which square you are on. Half of it
-  // is about as little as the shape will take - any less and the ribbon is wider than the
-  // loop it goes round, and the band passes through itself - and it is the same kind of
-  // stated legibility cheat as the torus's pulled-open hole.
-  pose.stretch = 0.5f;
   // INVERT swaps which side is out, it does not move the surface (M17.7, revised). The
   // geometric eversion the library's shapes carry mirrors the whole board about the
   // origin
@@ -209,6 +202,20 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
   const bool inverted = pose.evert > 0.5f;
   pose.evert = 0.0f;
   const app::SurfaceKind kind = app::overtureSignature(v).surface;
+  // The ribbon is the one warp whose two axes trade against each other, and the play
+  // board spends only `kRibbonStretch` of the library's stretch on it (see the header).
+  // The morph eases that in *before* the ring curls (M18 revision, item 2): the first
+  // `kRibbonStretchWindow` of `formed` is spent stretching with the ring angle held at
+  // zero, and the remaining fraction is the curl - so the ribbon visibly elongates, then
+  // loops, rather than arriving fully stretched on frame 0. The stretch is inert for
+  // every other warp; those take the play value and keep the one-ramp morph.
+  const float form = std::clamp(pose.formed, 0.0f, 1.0f);
+  if (kind == app::SurfaceKind::Band) {
+    pose.stretch = kRibbonStretch * stageForm(form, 0.0f, kRibbonStretchWindow);
+    pose.formed = stageForm(form, kRibbonStretchWindow, 1.0f);
+  } else {
+    pose.stretch = kRibbonStretch;
+  }
   const int nx = static_cast<int>(v.dims.extent(0));
   const int nz = static_cast<int>(v.dims.extent(1));
   s.nx_ = nx;
@@ -800,7 +807,9 @@ SlideOffset searchSlide(const VariantSpec& v, CellId target, float eyeDistance,
   if (orientable) {
     const app::SurfaceKind kind = app::overtureSignature(v).surface;
     SurfacePose base;
-    base.stretch = 0.5f;  // what the board fixes, so the probe samples the drawn surface
+    // What the board fixes, so the probe samples the drawn surface (the morph is settled
+    // whenever a move is followed).
+    base.stretch = kRibbonStretch;
     const Coord cell = v.dims.toCoord(target);
     const int f = cell[0];
     const int r = cell[1];

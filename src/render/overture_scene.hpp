@@ -172,6 +172,36 @@ struct SurfacePose {
   float formed{1.0f};
 };
 
+/// A sequential sub-window of a morph's own 0..1 progress (M18 revision, items 2 and 3).
+///
+/// The flat<->shape morph is one number, `SurfacePose::formed`, but a shape's
+/// construction is several stages that must not overlap: the Mobius ribbon has to stretch
+/// before it curls, and the Klein bottle has to form its ring, then fold its
+/// cross-section, then apply its twist. `stageForm(form, begin, end)` clamps `form` to
+/// `[begin, end]` and rescales it to 0..1 within that window, linear like every other
+/// ramp in the morph - so a caller can spend disjoint slices of the morph on disjoint
+/// parameters. At or before `begin` it is exactly 0 and at or after `end` exactly 1,
+/// which is what keeps `formed = 1` landing bit-for-bit on the shipped shape.
+[[nodiscard]] float stageForm(float form, float begin, float end) noexcept;
+
+/// The Klein bottle morph's three real construction stages (M18 revision, item 3): the
+/// ring forms as a plain circular-cross-section tube, then the cross-section folds into
+/// the figure-eight, then the cross-section twist settles the identifications. Exposed so
+/// the staging can be tested directly against `form`, and so the surface function and any
+/// future caller share one definition.
+struct KleinMorph {
+  float th;     ///< ring roll, 0 .. 2*pi
+  float pinch;  ///< figure-eight fold, 0 .. 1
+  float ph;     ///< rank ring roll, 0 .. 2*pi
+  float tau;    ///< cross-section twist, 0 .. `twist`
+};
+
+/// The staged parameters `derivedSurfaceAt` passes to `kleinSurf` at `form`, where
+/// `twist` is the cross-section twist the caller asked for (`SurfacePose::twist`). At
+/// `form = 1` this is exactly `th = ph = 2*pi`, `pinch = 1`, `tau = twist` - the unstaged
+/// call.
+[[nodiscard]] KleinMorph kleinMorph(float form, float twist) noexcept;
+
 /// Where a lattice point lands on a derived overture's fully-formed surface, keyed by the
 /// surface the geometry implies. Exposed so the differential test can assert it equals
 /// the hand-authored surface for the same topology - the shipped scenes are the oracle

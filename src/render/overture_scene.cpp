@@ -2627,6 +2627,30 @@ OvVec3 overtureSurfaceAt(app::Overture which, float u, float v) {
   }
 }
 
+float stageForm(float form, float begin, float end) noexcept {
+  if (end <= begin) return form >= end ? 1.0f : 0.0f;
+  return std::clamp((form - begin) / (end - begin), 0.0f, 1.0f);
+}
+
+/// The three windows of the Klein morph (M18 revision, item 3): disjoint slices of
+/// `formed` spent on the ring, the fold and the twist. Tuning constants, by eye, like
+/// every other morph-pacing number here.
+constexpr float kKleinRingEnd = 0.40f;
+constexpr float kKleinFoldEnd = 0.72f;
+
+KleinMorph kleinMorph(float form, float twist) noexcept {
+  // A plain circular-cross-section tube first, then the fold into the figure-eight, then
+  // the twist applied to the - now non-symmetric - cross-section. Running all three off
+  // one `form` made the twist act on a half-folded, self-intersecting ring and read as
+  // winding through the inside of a torus; the sequential windows are what stops the
+  // stages fighting. At `form = 1` every stage is exactly the shipped value, so the
+  // formed shape does not move.
+  const float ring = stageForm(form, 0.0f, kKleinRingEnd);
+  const float fold = stageForm(form, kKleinRingEnd, kKleinFoldEnd);
+  const float spin = stageForm(form, kKleinFoldEnd, 1.0f);
+  return {kTau * ring, fold, kTau * ring, twist * spin};
+}
+
 OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v) {
   return derivedSurfaceAt(kind, u, v, SurfacePose{});
 }
@@ -2674,12 +2698,14 @@ OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v, SurfacePose pos
                                 kH / stretch * pose.thickness, kTau * form, 1.0f, e)
                  : band(u, v, kTau * form, 1.0f, e);
     }
-    case app::SurfaceKind::Klein:
-      // The pinch is scaled with the rolls: at `form = 0` the cross-section must be the
-      // flat line again, not the figure-eight the fully-formed bottle needs.
-      return kleinSurf(u, v, kTau * form, form, kTau * form, pose.twist,
-                       pose.openness * ramp(2.05f), e, pose.collapsePhase,
-                       pose.thickness);
+    case app::SurfaceKind::Klein: {
+      // The morph is three sequential stages - ring, fold, twist - not one shared ramp
+      // (M18 revision, item 3). `kleinMorph` owns that staging; `openness` keeps its own
+      // ramp because it is the hole's legibility cheat, not a stage of the construction.
+      const KleinMorph k = kleinMorph(form, pose.twist);
+      return kleinSurf(u, v, k.th, k.pinch, k.ph, k.tau, pose.openness * ramp(2.05f), e,
+                       pose.collapsePhase, pose.thickness);
+    }
     case app::SurfaceKind::FlatGrid:
     case app::SurfaceKind::MirrorBox:
       return flatBoard()(u, v);
