@@ -1246,6 +1246,186 @@ M18.6's shipped pacing.
 - **Deviations.** Only the slider's position relative to the camera gate, above. No behaviour
   change at the default; no capture-path change.
 
+### Revision: four morph-quality problems, reported from actual play (2026-10-06)
+
+Four separate issues in the flat<->shape morph, reported together from hands-on use. Two
+have a confirmed root cause already (one of them a previously-deferred, documented
+limitation); one is a real design problem with a concrete fix direction; one needs
+investigation before a fix can be stated precisely. Each is its own numbered item below -
+they touch different surface kinds and can be built and tested independently, though all
+four land in the same handful of files.
+
+#### 1. `formed = 0` is a 180-degree rank-mirror of the real flat board
+
+Reported: "it reverses the board, rotates it 180 deg (i.e. on standard black and white
+are swapped)." This is the **exact limitation M18.6 already identified and deliberately
+deferred** - see "Deferred: `formed = 0` is the overture's flat pose, not the lattice
+board" in that milestone's own status note above, and the test that pins it,
+`the morph's flat end is the flat board, reflected in rank`
+(`tests/render/test_play_surface.cpp:1953`). Restated precisely: the surface functions'
+`th = ph = 0` embedding places cell `(f, r)` with the **ranks reversed** relative to
+`view::layout`'s ordinary flat board - same files, opposite handedness - so the very
+first frame of every SHAPE-off-to-on morph (`standard` included, since the ordinary 3-D
+board shares the same flat embedding path) is a rank-mirror of the real board, which
+reads exactly as "black and white swapped" before it un-mirrors over the rest of the
+roll. The original spec ruled out a naive fix: a linear blend between two *flat*
+embeddings of opposite handedness has to pass through a degenerate state where every
+rank collapses onto one line, which is worse than the mirror it would fix.
+
+**A fix direction, not yet a full derivation.** A linear blend collapses because it tries
+to resolve two mirror-image *flat* (2-D, in-plane) states without ever leaving the plane.
+A continuous **rotation through the third dimension** does not have this problem: turning
+a flat rectangle 180 degrees about an axis in its own plane (think a page turning) carries
+every point through a smooth arc that is never degenerate, and lands exactly on the
+mirrored arrangement with no collapse anywhere in between - because the intermediate
+states are briefly 3-D (edge-on), not because any two points ever coincide. The shape
+morph already lifts the board into 3-D as `th`/`ph` ramp up; the proposal is to spend part
+of the *early* portion of the morph on this turn - the board rotating through its own
+edge-on orientation to reach the handedness the curved shape actually needs - before or
+alongside the ring/cross-section forming starts, rather than trying to resolve the
+handedness mismatch in-plane. The exact mechanics (which axis, how much of the `form`
+range it spends, how it composes with each shape's own `th`/`ph`/`pinch` ramp, whether it
+is one shared stage or per-shape) need real investigation and iteration - this is
+research-grade work, the same way M17.12's `torus3d_twist` shell was flagged as such, not
+a mechanical fix. Investigate the turn-through-3-D direction first since it is the one
+that avoids the known collapse problem by construction; if it proves unworkable, report
+back with what was tried rather than shipping a partial fix silently.
+
+**Tests.** The existing `the morph's flat end is the flat board, reflected in rank` test
+is the thing to make fail (in the good way) once a real fix lands - it currently pins the
+mirror as *expected*; once fixed, invert it to assert `formed = 0` matches
+`view::layout`'s handedness exactly, for every shape in `kShapes`, and keep a record of
+what changed in its comment rather than deleting the history. A new test (or several)
+pinning whatever intermediate mechanism is built - continuity (no seat jumps further than
+its neighbour's own spacing between adjacent `formed` samples), and that `formed = 1` is
+still bit-identical to the shipped shape for every kind, the one invariant every other fix
+in this revision must also preserve.
+
+**Acceptance.** Pressing SHAPE from the ordinary board never shows a rank-mirrored frame -
+not at `formed = 0`, not anywhere during the roll - for `standard` and for every glued
+variant. `formed = 1` unchanged, bit for bit, everywhere.
+
+#### 2. The Mobius ribbon snaps to its full stretch instead of easing into it
+
+Reported: "it goes from 'square' board to 'stretched' strip instantly. It should stretch
+it first instead." Root cause, confirmed by reading the code: `PlaySurface::build`
+(`play_surface.cpp:202`) sets `pose.stretch = 0.5f` unconditionally - never scaled by
+`pose.formed` - while `derivedSurfaceAt`'s `Band` case (`overture_scene.cpp:2668-2675`)
+only ramps the ring angle (`kTau * form`) with the morph. The ribbon's width-to-length
+ratio is therefore already at its final, fully-stretched shape on the very first frame;
+only the curling into a loop animates.
+
+**The fix.** Stage the two instead of running only one: `pose.stretch` itself needs to
+ease in as part of the morph, and - per the report - it should complete *before* the ring
+starts curling, not alongside it. Split `form` into two sequential windows (exact
+proportions are a tuning call, by eye, the same as every other morph-pacing constant in
+this file): an early fraction ramps `pose.stretch` from 0 to its target (0.5, the play
+board's own constant - read, do not hand-pick a new number) while the ring angle stays at
+0, and the remaining fraction ramps the ring angle from 0 to `kTau` while `stretch` holds
+at its now-complete value. `PlaySurface::build` is the natural home for the split, since
+it already owns `pose.stretch = 0.5f` and already threads `pose.formed` through
+unmodified; whatever staging helper is written should be reusable by item 3 below, which
+needs the same "sequential sub-ranges of `form`" shape for an unrelated set of
+parameters - write it once.
+
+**Tests.** A property/unit test driving `derivedSurfaceAt`'s `Band` case (or the staged
+value `PlaySurface::build` now computes) across `form = 0..1`: the ribbon's own
+width:length ratio (measured the way
+`the morph's flat end is the flat board, reflected in rank` already measures per-axis
+step sizes) is unchanged from 1:1 at `form = 0`, strictly increasing over the stretch
+window, and the ring angle stays at (or very near) 0 until the stretch window completes.
+`formed = 1` bit-identical, as always.
+
+**Acceptance.** Watching the live SHAPE toggle on `mobius`, the ribbon visibly elongates
+before it starts curling into its loop, not in one cut.
+
+#### 3. Klein's single-parameter ramp fights itself - stage it like a real construction
+
+Reported, in detail: "square board gets its bottom row 'stretched' among all of its
+length, top 7 rows disappear. Then they suddenly reappear and the winding up is happening
+through the insides of a 'torus'." Root cause: `derivedSurfaceAt`'s `Klein` case
+(`overture_scene.cpp:2677-2681`) currently drives `th`, `pinch` and `ph` all off the
+*same* `form` value simultaneously, while `tau` (the cross-section's twist, `pose.twist`)
+is **never scaled by `form` at all** - it is applied at full strength from the first
+frame. A circular cross-section is rotationally symmetric, so applying the twist to it is
+invisible on its own - but `th`/`pinch` ramping together means the cross-section is
+*not* circular for most of the morph, it is already partway folded into the figure-eight,
+and a full-strength twist applied to a partially-folded, self-intersecting shape while the
+ring is also still forming is exactly the kind of fighting-itself motion that reads as
+"winding through the inside of a torus."
+
+**The fix, per the report's own proposed structure - it names the right three stages.**
+Split `form` into three sequential windows (reusing the staging helper from item 2), each
+owning a disjoint set of `kleinSurf`'s parameters, held at their completed value once
+their own window ends:
+
+1. **Ring, plain tube.** `th` and `ph` ramp from 0 to `kTau` (an ordinary torus-like
+   ring and a circular cross-section - the shape before any pinch or twist exists, reads
+   as a plain tube forming, "without ends attaching" per the report, since neither the
+   fold nor the twist has started).
+2. **Fold.** `pinch` ramps from 0 to 1 while `th`/`ph` hold at `kTau` - the circular
+   cross-section collapses into the figure-eight, "the seam fold[ing] in."
+3. **Twist.** The `tau` argument passed to `kleinSurf` ramps from 0 to `pose.twist` while
+   everything else holds - only now does the chi rotation have a non-symmetric
+   cross-section to act on, so this is the stage where the identification actually
+   becomes visible, "ends connecting."
+
+At `form = 1` every window has completed, so `th = ph = kTau`, `pinch = 1`,
+`tau = pose.twist` - exactly the values the current, unstaged call already passes,
+confirming the shipped shape does not move.
+
+**Tests.** A property test driving the staged parameters directly across `form = 0..1`:
+`pinch` and the effective `tau` are both exactly 0 while `form` is within window 1;
+`pinch` is strictly increasing and the effective `tau` is exactly 0 within window 2; the
+effective `tau` is strictly increasing to `pose.twist` within window 3 while `pinch` stays
+at 1. A visual/continuity check analogous to item 1's: no seat moves further between
+adjacent `form` samples than its own neighbour spacing, so nothing "disappears and
+reappears."
+
+**Acceptance.** Watching the live SHAPE toggle on `klein`, the board reads as: a ring
+forms first (plainly, no self-intersection visible), then the ring's cross-section folds
+into the figure-eight in place, then the twist settles the two sides into their final,
+connected alignment - three legible stages, not one tangled motion. `formed = 1`
+unchanged.
+
+#### 4. The Klein seam's visual connection sits half a square from where it should
+
+Reported: "current implementation is the best one so far, but the 'connection' is half-a-
+square apart from where it is supposed to be" - at the shipped default (`kleinShift = 0`,
+not the slide-drift issue the previous correction in this file already fixed). Not yet
+root-caused. One hypothesis checked and ruled out while writing this spec: the pinch's
+own self-intersection locus (where `kleinSurf`'s figure-eight crosses itself) lands
+exactly at `u = 0` in the continuous embedding - `lemniscateAngle(0) = -pi`, and the
+lemniscate curve's own point at `a = -pi` is the origin, the figure-eight's crossing
+point - so the continuous surface function is not offset from the seam by half a cell.
+The discrepancy more likely lives in how the *discrete* lattice is read against that
+continuous locus - a cell spans `u` from `f / nx` to `(f + 1) / nx`, centred at
+`(f + 0.5) / nx`, so anything that uses a cell's centre where the seam math expects its
+edge (or the reverse) would show up as exactly this half-cell offset. Investigate before
+fixing: compare, numerically (the same differential-sweep style the slide-drift
+correction above used, not a screenshot), where `SeamMap`'s seam-face cells, the rendered
+seam rail (`surfaceRail`), and the pinch's actual geometric crossing each place "the
+seam," at the default `kleinShift = 0`, and report which two disagree and by how much
+before writing the fix - a confirmed half-cell mismatch in a specific comparison, not a
+guess.
+
+**Tests.** Whatever differential check locates the mismatch should become the permanent
+regression test, in the style of
+`a Klein bottle's seam stays closed under a square shift and a slide`
+(`tests/render/test_play_surface.cpp`) - red before the fix, green after, at the default
+pose with no shift and no slide.
+
+**Acceptance.** On `klein --geometry` at the shipped default, the seam rail
+(`showSeams`) and the shape's own visible pinch/crossing line up on the same cell
+boundary, not half a cell apart - confirmed by a crop, looked at closely, not just a shot
+taken.
+
+**Scope note for all four items.** These are independent; land and verify each on its own
+rather than batching them into one large, hard-to-review change. Items 2 and 3 share a
+staging helper and are the most mechanical; item 1 is explicitly research-grade and may
+take more than one round; item 4 needs its investigation done and reported before any
+code changes, the same discipline the slide-drift correction above used.
+
 ## Dependencies and ordering
 
 M18.1-M18.3 and M18.6 touch only `src/render`/`src/view`/`src/gui` and are independent of
