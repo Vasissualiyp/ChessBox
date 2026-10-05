@@ -60,6 +60,46 @@ std::vector<std::string> variantLibrary() {
   return names;
 }
 
+/// Where the bundled showcase games live (M12.8), resolved the way the variants are:
+/// beside the binary in an install, or in the working tree during development.
+std::filesystem::path gameDir() {
+  for (const char* base : {"games", "../games", "../../games", "share/chessbox/games",
+                           "/usr/share/chessbox/games"}) {
+    if (std::filesystem::is_directory(base)) return base;
+  }
+  return "games";
+}
+
+/// Read every bundled game once, at startup. A file that will not parse is skipped with a
+/// message rather than taking the menu down with it.
+std::vector<app::WatchGame> bundledGames() {
+  std::vector<std::filesystem::path> paths;
+  std::error_code ec;
+  for (const auto& e : std::filesystem::directory_iterator(gameDir(), ec)) {
+    if (e.is_regular_file() && e.path().extension() == ".cbgame")
+      paths.push_back(e.path());
+  }
+  std::sort(paths.begin(), paths.end());
+  std::vector<app::WatchGame> games;
+  for (const std::filesystem::path& path : paths) {
+    std::ifstream in(path);
+    if (!in) continue;
+    std::ostringstream buffer;
+    buffer << in.rdbuf();
+    auto parsed = parseGameFile(buffer.str());
+    if (!parsed.has_value()) {
+      std::fprintf(stderr, "bundled game '%s': %s\n", path.c_str(),
+                   parsed.error().format().c_str());
+      continue;
+    }
+    app::WatchGame g;
+    g.name = path.stem().string();
+    g.file = std::move(*parsed);
+    games.push_back(std::move(g));
+  }
+  return games;
+}
+
 /// The unshifted character a key produces, for the two-player keyboard; '\0' for a key
 /// that is not part of either half. It is the key's identity, so the halves are the same
 /// on any layout that has the keys.
@@ -157,6 +197,7 @@ std::unique_ptr<app::Shell> makeShell(const std::filesystem::path& settings = {}
   });
   shell->setVariantPathResolver(
       [](const std::string& name) { return variantDir() / (name + ".toml"); });
+  shell->setBundledGames(bundledGames());
   return shell;
 }
 
@@ -381,7 +422,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
                  const std::string& shapeFollow, float moveT, int benchFrames,
                  bool geometry, float evert, float formed, bool flatCapture, float slideU,
                  float slideV, float ghost, const std::string& playFile, float dwell,
-                 int fps, float playAt, bool framesGiven, int width, int height) {
+                 int fps, float playAt, bool framesGiven, int width, int height,
+                 const std::string& watchName) {
   // Captures use default settings, never the person's own. A screenshot that changes
   // because whoever ran it likes a larger interface is not a screenshot of the game -
   // and `ctest -R gui-` would then pass or fail by whose machine it ran on.
@@ -469,6 +511,31 @@ int captureFrame(const std::string& variantName, const std::string& path,
     shell->overtures().setProgress(overtureT);
   } else if (screen == "quit")
     shell->go(app::Screen::QuitConfirm);
+  else if (screen == "watch")
+    shell->go(app::Screen::Watch);
+
+  // A capture can show the watching state itself (M12.8): start a bundled game and render
+  // its board with the STOP WATCHING control, so the mode is reviewable the way every
+  // screen is. A glued variant is shown as its shape with the follow choreography, the
+  // same showcase the interactive action gives it.
+  if (!watchName.empty()) {
+    if (auto ok = shell->startWatching(watchName); !ok.has_value()) {
+      std::fprintf(stderr, "watch: %s\n", ok.error().format().c_str());
+      return 1;
+    }
+    const app::Session* session = shell->session();
+#ifdef CB_HAVE_IMGUI
+    if (session != nullptr && render::hasPlaySurface(session->variant())) {
+      shell->settings().geometryView = true;
+      shell->settings().geometryFormed = 1.0f;
+      shell->settings().cameraMode = "route";
+      shell->session()->setCameraMode("route");
+      shell->session()->setFollowStrength(1.0f);
+    }
+#else
+    (void)session;
+#endif
+  }
 
   // A capture that wants to show the move camera states it rather than relying on the
   // player's settings (a capture uses defaults, where following is off). `--move-t` pins
@@ -841,10 +908,11 @@ int main(int argc, char** argv) {
   float slideV = 0.0f;
   float ghost = 1.0f;
   std::string playFile;
-  float dwell = 0.6f;
+  float dwell = app::kDefaultDwellSeconds;
   int captureFps = 30;
   float playAt = -1.0f;
   bool framesGiven = false;
+  std::string watchName;
   int width = 1920;
   int height = 1080;
   for (int i = 1; i < argc; ++i) {
@@ -882,6 +950,10 @@ int main(int argc, char** argv) {
           "pause held after each move (default 0.6), --fps N the export frame rate\n"
           "(default 30), --play-at SECONDS the instant a --shot captures (default: "
           "end).\n"
+          "--watch NAME starts the bundled game NAME and captures the watching state, "
+          "so\n"
+          "the reviewable screens include it; --screen watch is the bundled-game "
+          "picker.\n"
           "--width W --height H set the capture/window resolution (default 1920x1080).\n"
           "--dims 2..4 is how many dimensions the designer's move preview shows.\n");
       return 0;
@@ -922,6 +994,8 @@ int main(int argc, char** argv) {
       ghost = std::strtof(argv[++i], nullptr);
     else if (arg == "--play" && i + 1 < argc)
       playFile = argv[++i];
+    else if (arg == "--watch" && i + 1 < argc)
+      watchName = argv[++i];
     else if (arg == "--dwell" && i + 1 < argc)
       dwell = std::strtof(argv[++i], nullptr);
     else if (arg == "--fps" && i + 1 < argc)
@@ -952,7 +1026,7 @@ int main(int argc, char** argv) {
                         clipFrames, clipT0, clipT1, cinema, followMode, shapeFollow,
                         moveT, benchFrames, geometry || formedGiven, evert, formed,
                         flatCapture, slideU, slideV, ghost, playFile, dwell, captureFps,
-                        playAt, framesGiven, width, height);
+                        playAt, framesGiven, width, height, watchName);
   }
 
   auto shell = makeShell();
@@ -1180,8 +1254,14 @@ int main(int argc, char** argv) {
           app::Action a;
           switch (e.key.key) {
             case SDLK_ESCAPE:
-              // Esc is "step back one screen", which from the board means pause.
-              shell->back();
+              // Esc is "step back one screen", which from the board means pause. While a
+              // bundled game is being watched it is the way out instead: the board is
+              // read-only, so there is no pause to step back to (M12.8).
+              if (shell->watching()) {
+                shell->stopWatching();
+              } else {
+                shell->back();
+              }
               break;
             case SDLK_Q:
               if (shell->screen() == app::Screen::MainMenu) running = false;
@@ -1310,6 +1390,12 @@ int main(int argc, char** argv) {
     // so the old follow behaviour is untouched.
     updateShapeSequence(*shell, shapeSeq, dt);
 
+    // The watched game's own clock (M12.8): it plays the next move once the current one
+    // has settled and its dwell has passed, and leaves for the main menu when the file
+    // runs out. This is the real interactive clock, not a fixed `t` - the watching action
+    // is for a person, not a reproducible capture, so nothing here is deterministic.
+    shell->advanceWatching(dt);
+
     // Set once the interface has built this frame: the surface view draws the board
     // itself, so the ordinary renderer stays out of the way (M17).
 #ifdef CB_HAVE_IMGUI
@@ -1338,6 +1424,25 @@ int main(int argc, char** argv) {
       if (shell->loadGame(request.gameName).has_value()) {
         // The loaded game may be a different variant, so treat it like a variant load:
         // refresh the renderer and put the camera round whatever is now drawn.
+        renderer->setOptions(optionsFor(*shell));
+        frameBoard(*shell);
+        wasSurface = optionsFor(*shell).surface;
+      }
+    }
+    if (!request.watchGame.empty()) {
+      if (shell->startWatching(request.watchGame).has_value()) {
+        // The showcase gives a glued board its shape and the follow choreography, so the
+        // first-time watcher sees what the geometry view is for. A flat game is left
+        // alone; nothing is forced there. This is presentation only - the game and its
+        // variant are untouched (M12.8).
+        const app::Session* session = shell->session();
+        if (session != nullptr && render::hasPlaySurface(session->variant())) {
+          shell->settings().geometryView = true;
+          shell->settings().geometryFormed = 1.0f;
+          shell->settings().cameraMode = "route";
+          shell->session()->setCameraMode("route");
+          shell->session()->setFollowStrength(1.0f);
+        }
         renderer->setOptions(optionsFor(*shell));
         frameBoard(*shell);
         wasSurface = optionsFor(*shell).surface;

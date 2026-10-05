@@ -50,7 +50,8 @@ set_tests_properties(property PROPERTIES TIMEOUT 900)
 if(TARGET chessbox_gui)
   # Every screen, not just the board: a menu that fails to lay out, or a panel that makes
   # the validation layers complain, is caught here rather than by someone opening it.
-  foreach(screen board welcome menu newgame quit pause settings editor info pieces)
+  foreach(screen board welcome menu newgame quit pause settings editor info pieces
+                 watch)
     add_test(NAME gui-${screen}
       COMMAND chessbox_gui standard
               --shot ${CMAKE_BINARY_DIR}/render-captures/gui-${screen}.ppm
@@ -175,6 +176,24 @@ if(TARGET chessbox_gui)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/check_clip_deterministic.cmake
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(gui-play-deterministic PROPERTIES LABELS "render;gui" TIMEOUT 600
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  # M12.8: the interactive watching state reached headlessly, so the mode is reviewable
+  # the way every screen is. The flat game shows the ordinary HUD; the glued one is shown
+  # as its shape with the follow choreography. Both must carry the STOP WATCHING control
+  # and stay validation-clean.
+  add_test(NAME gui-watch-state-flat
+    COMMAND chessbox_gui --watch opera
+            --shot ${CMAKE_BINARY_DIR}/render-captures/gui-watch-state-flat.ppm
+            --width 640 --height 400
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(gui-watch-state-flat PROPERTIES LABELS "render;gui" TIMEOUT 180
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  add_test(NAME gui-watch-state-shape
+    COMMAND chessbox_gui --watch torus-wrap
+            --shot ${CMAKE_BINARY_DIR}/render-captures/gui-watch-state-shape.ppm
+            --width 640 --height 400
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(gui-watch-state-shape PROPERTIES LABELS "render;gui" TIMEOUT 180
     ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
   # M18.3: cinema adds a vignette and a grade, ordinary play does not. The torus as its
   # own shape leaves the ring's centre as page, so corner-vs-centre reads the vignette

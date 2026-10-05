@@ -152,27 +152,155 @@ UiRequest Ui::buildMainMenu(app::Shell& shell) {
   if (menuEntry("New game", 1, t, display, width, true, scale_)) {
     shell.go(app::Screen::NewGame);
   }
+  // The demo action: watch a bundled game play itself, through the ordinary board and
+  // move camera (M12.8). It opens a short picker rather than a fixed file, because two
+  // games ship.
+  if (menuEntry("Watch a game", 2, t, display, width, true, scale_)) {
+    shell.go(app::Screen::Watch);
+  }
   // Disabled rows stay in the list, marked and nothing more. A menu that hides what is
   // coming is dishonest; one that explains itself every time the pointer crosses it is
   // just noisy.
-  if (menuEntry("Continue", 2, t, display, width, false, scale_)) {
+  if (menuEntry("Continue", 3, t, display, width, false, scale_)) {
     // unreachable while disabled, but kept so enabling it is a one-word change
   }
-  if (menuEntry("Multiplayer", 3, t, display, width, false, scale_)) {
+  if (menuEntry("Multiplayer", 4, t, display, width, false, scale_)) {
   }
   // The curated "start here" path, summoned when the player asks for it rather than
   // opened on first launch (M14.1, revised).
-  if (menuEntry("Tutorial", 4, t, display, width, true, scale_)) {
+  if (menuEntry("Tutorial", 5, t, display, width, true, scale_)) {
     shell.go(app::Screen::Welcome);
   }
-  if (menuEntry("Editor", 5, t, display, width, true, scale_)) {
+  if (menuEntry("Editor", 6, t, display, width, true, scale_)) {
     shell.go(app::Screen::Editor);
   }
-  if (menuEntry("Settings", 6, t, display, width, true, scale_)) {
+  if (menuEntry("Settings", 7, t, display, width, true, scale_)) {
     shell.go(app::Screen::Settings);
   }
-  if (menuEntry("Quit", 7, t, display, width, true, scale_)) {
+  if (menuEntry("Quit", 8, t, display, width, true, scale_)) {
     shell.go(app::Screen::QuitConfirm);
+  }
+
+  endPane();
+  return request;
+}
+
+UiRequest Ui::buildWatch(app::Shell& shell) {
+  UiRequest request;
+  const view::Theme& t = theme_;
+  auto* display = static_cast<ImFont*>(fontDisplay_);
+  auto* small = static_cast<ImFont*>(fontSmall_);
+  auto* mono = static_cast<ImFont*>(fontMono_);
+
+  const std::vector<app::WatchGame>& games = shell.bundledGames();
+  if (pickedWatch_.empty() && !games.empty()) pickedWatch_ = games.front().name;
+
+  ImVec2 menuMin, menuMax;
+  drawShellFrame(shell, menuMin, menuMax);
+  const PaneMove move = paneMove();
+  beginPane("##watch", menuMin, menuMax, move.scale, move.alpha, px(46.0f), !ghosting_);
+  eyebrow("watch", t, mono, scale_);
+  screenTitle("Watch a game", t, display, scale_, 2.0f);
+  ImGui::Dummy(ImVec2(0, px(6)));
+  ImGui::PushFont(small);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
+  ImGui::TextWrapped(
+      "The engine plays a recorded game move by move and you watch. The board is not "
+      "yours to touch until you stop.");
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
+  ImGui::Dummy(ImVec2(0, px(10)));
+
+  const float rowH = px(26.0f);
+  const float listW = ImGui::GetContentRegionAvail().x * 0.44f;
+  const float footer = px(10) + px(40) + px(6);
+  const float wantH = static_cast<float>(games.size()) * rowH + px(18.0f);
+  const float listH =
+      std::clamp(wantH, px(60.0f), ImGui::GetContentRegionAvail().y - footer);
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, col(t.ink, 0.45f));
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+  ImGui::BeginChild("##watchlist", ImVec2(listW, listH), ImGuiChildFlags_Border,
+                    ImGuiWindowFlags_NavFlattened);
+  for (const app::WatchGame& g : games) {
+    const bool active = g.name == pickedWatch_;
+    ImGui::PushID(g.name.c_str());
+    const float rowW = ImGui::GetContentRegionAvail().x;
+    const ImVec2 min = ImGui::GetCursorScreenPos();
+    const ImVec2 max(min.x + rowW, min.y + rowH);
+    const bool clicked = ImGui::InvisibleButton("##row", ImVec2(rowW, rowH));
+    const bool hovered = ImGui::IsItemHovered();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    if (active) {
+      dl->AddRectFilled(min, max, u32(t.emberDeep, 0.88f), px(4));
+    } else if (hovered) {
+      dl->AddRectFilled(min, max, u32(t.panelHi), px(4));
+    }
+    dl->AddText(ImVec2(min.x + px(12), min.y + (rowH - ImGui::GetFontSize()) * 0.5f),
+                u32(active ? t.bone : (hovered ? t.bone : t.boneDim)),
+                upper(g.name).c_str());
+    if (clicked) pickedWatch_ = g.name;
+    ImGui::PopID();
+  }
+  ImGui::EndChild();
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor();
+
+  ImGui::SameLine();
+  ImGui::BeginChild("##watchdetail", ImVec2(0, listH), 0, ImGuiWindowFlags_NavFlattened);
+  const app::WatchGame* sel = nullptr;
+  for (const app::WatchGame& g : games) {
+    if (g.name == pickedWatch_) sel = &g;
+  }
+  if (sel != nullptr) {
+    ImGui::PushFont(display);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.bone));
+    ImGui::TextUnformatted(upper(sel->file.variant).c_str());
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+    ImGui::Dummy(ImVec2(0, px(6)));
+    ImGui::PushFont(small);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+    char line[96];
+    std::snprintf(line, sizeof(line), "%zu moves",
+                  static_cast<std::size_t>(sel->file.moves.size()));
+    ImGui::TextUnformatted(line);
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+    ImGui::Dummy(ImVec2(0, px(8)));
+    ImGui::PushFont(small);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
+    if (watchDescribedFor_ != sel->file.variant) {
+      watchDescribedFor_ = sel->file.variant;
+      watchDescription_ = shell.variantDescription(sel->file.variant);
+    }
+    if (!watchDescription_.empty()) ImGui::TextWrapped("%s", watchDescription_.c_str());
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+  }
+  ImGui::EndChild();
+
+  ImGui::Dummy(ImVec2(0, px(10)));
+  const bool enter = !ghosting_ && !games.empty() && !ImGui::GetIO().WantTextInput &&
+                     (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
+                      ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
+  if (!games.empty() &&
+      (button("START WATCHING", t, px(180), true, false, true, display) || enter)) {
+    request.watchGame = pickedWatch_;
+  } else if (games.empty()) {
+    ImGui::PushFont(small);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+    ImGui::TextUnformatted("no bundled games are installed");
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+  }
+  ImGui::SameLine();
+  if (button("BACK", t, px(110), false, false, true, display)) shell.back();
+  if (!shell.message().empty()) {
+    ImGui::PushFont(small);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.blood));
+    ImGui::TextWrapped("%s", shell.message().c_str());
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
   }
 
   endPane();

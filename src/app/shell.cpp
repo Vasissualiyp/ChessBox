@@ -19,6 +19,8 @@ std::string_view screenName(Screen s) noexcept {
       return "main menu";
     case Screen::NewGame:
       return "new game";
+    case Screen::Watch:
+      return "watch a game";
     case Screen::Game:
       return "game";
     case Screen::Paused:
@@ -44,6 +46,7 @@ int screenDepth(Screen s) noexcept {
     case Screen::MainMenu:
       return 0;
     case Screen::NewGame:
+    case Screen::Watch:
     case Screen::Settings:
     case Screen::Editor:
     case Screen::QuitConfirm:
@@ -222,6 +225,7 @@ void Shell::back() {
     case Screen::Settings:
     case Screen::Editor:
     case Screen::NewGame:
+    case Screen::Watch:
     case Screen::QuitConfirm:
     case Screen::PauseQuitConfirm:
       screen_ = previous_;
@@ -397,6 +401,43 @@ std::vector<std::string> Shell::savedGames() const {
   }
   std::sort(names.begin(), names.end());
   return names;
+}
+
+Result<void> Shell::startWatching(const std::string& name) {
+  const WatchGame* found = nullptr;
+  for (const WatchGame& g : bundled_) {
+    if (g.name == name) {
+      found = &g;
+      break;
+    }
+  }
+  if (found == nullptr) {
+    message_ = "no bundled game called '" + name + "'";
+    return fail(ErrorCode::ValidationError, message_);
+  }
+  if (auto ok = startGame(found->file.variant); !ok.has_value()) return ok;
+  if (auto ok = session_->startWatching(found->file, settings_.watchDwell);
+      !ok.has_value()) {
+    message_ = ok.error().format();
+    return ok;
+  }
+  screen_ = Screen::Game;
+  previous_ = Screen::MainMenu;
+  return {};
+}
+
+void Shell::stopWatching() {
+  if (session_ != nullptr) session_->stopWatching();
+  go(Screen::MainMenu);
+}
+
+bool Shell::watching() const noexcept {
+  return session_ != nullptr && session_->watching();
+}
+
+void Shell::advanceWatching(float dt) {
+  if (session_ == nullptr || !session_->watching()) return;
+  if (!session_->advanceWatching(dt)) go(Screen::MainMenu);
 }
 
 void Shell::pause() {

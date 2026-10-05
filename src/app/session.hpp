@@ -6,18 +6,16 @@
 #include <string>
 #include <vector>
 
+#include "app/game_runner.hpp"
 #include "app/hotseat.hpp"
 #include "game/game.hpp"
+#include "io/game_file.hpp"
 #include "view/camera.hpp"
 #include "view/layout.hpp"
 #include "view/move_anim.hpp"
 #include "view/move_camera.hpp"
 #include "view/seams.hpp"
 #include "view/snapshot.hpp"
-
-namespace cb {
-struct GameFile;  // io/game_file.hpp; only a reference is needed here
-}
 
 namespace cb::app {
 
@@ -122,6 +120,10 @@ class Session {
   /// True while a move's camera shot owns the view, which is exactly when the board is
   /// interaction-locked.
   [[nodiscard]] bool shotInFlight() const noexcept;
+  /// Whether the board refuses input right now: a shot in flight, or a game being watched
+  /// (M12.8). One gate for picking, so a watched board and a shot-followed board cannot
+  /// disagree about whether a click counts.
+  [[nodiscard]] bool boardLocked() const noexcept { return shotInFlight() || watching_; }
   /// Move the animation on. Returns true while something is still moving, which is how
   /// the front end knows to keep drawing frames.
   bool advanceAnimation(float dt);
@@ -230,6 +232,26 @@ class Session {
   /// move, when it is not legal in the current position.
   Result<void> playMoveText(std::string_view text);
 
+  /// Begin watching `file`: the engine plays it move by move and the board refuses input
+  /// (M12.8). The first move is started immediately; `advanceWatching` then holds each
+  /// settled move for `dwellSeconds` before playing the next. Not deterministic - the
+  /// caller drives it with the real interactive clock - so this is the menu's mode, not
+  /// the clip exporter's.
+  Result<void> startWatching(GameFile file, float dwellSeconds);
+  [[nodiscard]] bool watching() const noexcept { return watching_; }
+  /// Leave the watching mode. The game is left where it stopped; the caller decides
+  /// which screen to show next.
+  void stopWatching() noexcept;
+  /// Advance the watch's clock by `dt`: while the current move is still drawing it does
+  /// nothing; once settled it holds for the dwell and then plays the next move. Ends the
+  /// watch when the file has no move left. Returns true while still watching, so the
+  /// front end knows to keep drawing.
+  bool advanceWatching(float dt);
+  /// How many moves have been played (1 once the first move has started) and how many
+  /// there are, for a status line.
+  [[nodiscard]] std::size_t watchIndex() const noexcept;
+  [[nodiscard]] std::size_t watchCount() const noexcept;
+
   /// Resolve a pixel to a cell and act on it. Returns kInvalidCell if the click missed
   /// the board, which is not an error - it deselects, like clicking off a board does.
   CellId clickPixel(float px, float py, float width, float height);
@@ -287,6 +309,13 @@ class Session {
   PendingMove pendingMove_;
   bool confirmMoves_{false};
   std::string promotionPreference_;
+  /// The watching mode (M12.8): the file, the runner over it, and the dwell clock. The
+  /// file is heap-held so the runner's reference to it cannot be invalidated by a move.
+  std::unique_ptr<GameFile> watchFile_;
+  std::unique_ptr<GameRunner> watchRunner_;
+  bool watching_{false};
+  float watchDwell_{0.0f};
+  float watchClock_{0.0f};
   std::string message_;
 };
 

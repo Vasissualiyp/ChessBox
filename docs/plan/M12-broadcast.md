@@ -638,3 +638,68 @@ real content, not throwaway fixtures — writing a good one (or picking one from
 already shipped) is as much the task as the code; do not ship a trivial two-move game just
 to have *something* to watch if a better one is easy to construct from what the engine
 already knows how to play.
+
+### Status: M12.8 built (2026-10-04, opencode)
+
+The interactive half of the runner is in. A player can watch a bundled game play itself,
+move by move, through the ordinary move camera and the M17.19 choreography, with no way to
+touch the board and two ways out at any time.
+
+- **`Session` owns the watch mode** (`src/app/session.{hpp,cpp}`): a heap-held `GameFile`
+  and the `GameRunner` over it, `watching()`, `startWatching(file, dwell)`,
+  `stopWatching()`, and `advanceWatching(dt)` — the pure
+  "settle → dwell → step" clock. `startWatching` loads the file's start FEN and plays the
+  first move immediately; `advanceWatching` holds each move's dwell (including the last,
+  so the final position is seen) and ends the mode when the runner is done. Input is
+  refused by a single gate: `boardLocked()` is `shotInFlight() || watching_`, and both
+  `clickPixel` and the mutating `apply` actions consult it — no second lock. View controls
+  (orbit, pan, zoom, axes, promotion preference) still pass through.
+- **`Shell` owns the content** (`src/app/shell.{hpp,cpp}`): `WatchGame` (a name and a
+  parsed `GameFile`), `setBundledGames`/`bundledGames`, `startWatching` (resolves the
+  file's variant, starts it, hands the session the file), `stopWatching` (back to the main
+  menu), and `advanceWatching`, which the interactive loop forwards its real `dt` to. The
+  mode is deliberately **not deterministic** — it is the interactive clock, not a fixed
+  `t` — so no determinism test was added, and `--play --clip`'s own contract is untouched.
+- **The interface** (`src/render/ui.{hpp,cpp}`, `src/render/ui_menus.cpp`): a "Watch a
+  game" row on the main menu, right after "New game" (the rows below renumbered); a new
+  `Screen::Watch` picker that lists the bundled games and shows the selected variant and
+  move count (the library's list-and-detail widget style, no new one); and a
+  **STOP WATCHING** button in the game HUD, which replaces the ordinary control row while
+  watching and prints "move N of M — Esc leaves the game". Esc on a watched board calls
+  `stopWatching` instead of pause. The HUD is the ordinary one; cinema stays `--cinema`'s
+  job, as the spec required.
+- **Content.** Two real games live in `games/`, installed to `share/chessbox/games`:
+  `opera.cbgame` — Morphy's Opera Game (Paris 1858), 17 moves ending in the classic
+  back-rank mate, chosen for the flat-board showcase because it is short, legible and
+  decisive — and `torus-wrap.cbgame` — a 14-ply torus melee whose every move crosses a
+  glued edge (1. Qd5 is a queen capture across the rank seam; the rooks then trade through
+  the file seam and the bishops wrap diagonally). There is no toroidal game literature to
+  borrow, so it was generated from the engine's own legal moves with a capture-preferring
+  rule (a `build/` scratch script) and verified legal ply by ply; it is not a test fixture
+  and `tests/data/games/*.cbgame` are untouched.
+- **A capture path for the mode itself:** `--watch NAME` starts a bundled game and
+  captures the watching frame, and `--screen watch` captures the picker, so both are
+  reviewable the way every other screen is. `--dwell`'s default and the new
+  `Settings::watchDwell` now share one `kDefaultDwellSeconds` (0.6), so the two dwell
+  concepts cannot drift.
+
+**A deliberate deviation, stated.** The M12.6 note says a menu watch uses "the player's own
+camera settings, not a capture". That conflicts with this section's acceptance ("through the
+ordinary move camera *and shape choreography*") for a player who has never turned the shape
+view on: a glued game would then play flat and the choreography would never be seen. The
+watching action therefore gives a glued variant its shape and the follow camera (`SHAPE` +
+`CAMERA route`) when it starts — a showcase default, in the same spirit as the capture's
+`--geometry --follow route`. A flat game is left exactly as the player's settings are. The
+forced values are not saved unless the player later changes a setting.
+
+**Tests.** `tests/unit/app/test_watch.cpp` (first move in flight and the board locked, a
+pixel click refused, every move played to the file's position, an illegal move stopping on
+the legal prefix with the loader's own wording, stop leaving input working);
+`tests/unit/app/test_shell.cpp` (the bundled list, starting one starts its variant and
+first move, switching between two files, the watch ending on its own and returning to the
+menu, an unknown name refused); and three `ctest -R gui-` cases — `gui-watch` (the picker),
+`gui-watch-state-flat` (Opera on the ordinary HUD) and `gui-watch-state-shape` (the torus
+as its shape) — all validation-clean. Green: `tools/test.sh --build render app` (182 cases,
+4.8M assertions), all 34 `gui-*` ctests, and `tools/precommit.sh` (arch, unit, property). A
+first visual pass confirmed the main-menu row, the picker with both games, and the STOP
+WATCHING control on both the flat and the shape board.

@@ -12,6 +12,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "io/game_file.hpp"
+#include "space/coord.hpp"
 #include "support/variants.hpp"
 
 using namespace cb;
@@ -558,4 +560,85 @@ TEST_CASE("save/load rejects a bad name and a missing game", "[unit][app]") {
   CHECK_FALSE(shell->saveGame("").has_value());
   CHECK_FALSE(shell->saveGame("../escape").has_value());
   CHECK_FALSE(shell->loadGame("does-not-exist").has_value());
+}
+
+namespace {
+
+WatchGame watchGame(const char* name, const char* variant, const char* fen,
+                    std::vector<std::string> moves) {
+  WatchGame g;
+  g.name = name;
+  g.file.variant = variant;
+  g.file.variantId = 0;
+  g.file.startFen = fen;
+  g.file.moves = std::move(moves);
+  return g;
+}
+
+constexpr const char* kStandardFen =
+    "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+constexpr const char* kTorusFen = "8/8/8/rnbqkbnr/pppppppp/8/PPPPPPPP/RNBQKBNR w - - 0 1";
+
+}  // namespace
+
+TEST_CASE("the bundled games are listed and one can be watched", "[unit][app][watch]") {
+  auto shell = makeShell(tempSettings("watch.conf"));
+  shell->setBundledGames({
+      watchGame("flat-demo", "standard", kStandardFen, {"e2e4", "e7e5"}),
+      watchGame("glued-demo", "torus", kTorusFen, {"d1d5"}),
+  });
+  REQUIRE(shell->bundledGames().size() == 2);
+  CHECK(shell->bundledGames().front().name == "flat-demo");
+  CHECK(shell->bundledGames().back().file.variant == "torus");
+
+  // Picking the glued game starts the torus and its first move, on the game screen.
+  REQUIRE(shell->startWatching("glued-demo").has_value());
+  REQUIRE(shell->watching());
+  CHECK(shell->screen() == Screen::Game);
+  CHECK(shell->currentVariant() == "torus");
+  CHECK(shell->session()->game().moveHistory().size() == 1);
+
+  // The stop control returns to the main menu and leaves the mode.
+  shell->stopWatching();
+  CHECK_FALSE(shell->watching());
+  CHECK(shell->screen() == Screen::MainMenu);
+}
+
+TEST_CASE("the watch flips to the file's own variant", "[unit][app][watch]") {
+  // A flat game after a glued one: the shell resolves the variant from the file, so the
+  // starting position and the watched moves are the file's, not whatever was loaded.
+  auto shell = makeShell(tempSettings("watch-switch.conf"));
+  shell->setBundledGames({
+      watchGame("flat-demo", "standard", kStandardFen, {"e2e4"}),
+      watchGame("glued-demo", "torus", kTorusFen, {"d1d5"}),
+  });
+  REQUIRE(shell->startWatching("glued-demo").has_value());
+  REQUIRE(shell->watching());
+  REQUIRE(shell->startWatching("flat-demo").has_value());
+  CHECK(shell->currentVariant() == "standard");
+  CHECK(shell->session()->game().moveHistory().size() == 1);
+  CHECK(shell->session()->game().moveHistory().front().from ==
+        shell->session()->variant().dims.toCell(Coord::of({4, 1})));
+}
+
+TEST_CASE("a watch ends on its own and returns to the menu", "[unit][app][watch]") {
+  auto shell = makeShell(tempSettings("watch-end.conf"));
+  shell->setBundledGames(
+      {watchGame("flat-demo", "standard", kStandardFen, {"e2e4", "e7e5"})});
+  REQUIRE(shell->startWatching("flat-demo").has_value());
+  // Drive the same clock the interactive loop does: the move body, then the dwell.
+  for (int i = 0; i < 20000 && shell->watching(); ++i) {
+    shell->session()->advanceAnimation(0.05f);
+    shell->advanceWatching(0.05f);
+  }
+  CHECK_FALSE(shell->watching());
+  CHECK(shell->screen() == Screen::MainMenu);
+  CHECK(shell->session()->game().moveHistory().size() == 2);
+}
+
+TEST_CASE("watching an unknown bundled game is refused", "[unit][app][watch]") {
+  auto shell = makeShell(tempSettings("watch-bad.conf"));
+  shell->setBundledGames({watchGame("flat-demo", "standard", kStandardFen, {"e2e4"})});
+  CHECK_FALSE(shell->startWatching("no-such-game").has_value());
+  CHECK_FALSE(shell->watching());
 }

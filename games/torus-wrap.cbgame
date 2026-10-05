@@ -1,0 +1,24 @@
+# ChessBox game v1
+# The torus showcase: a short tactical melee in which nearly every move crosses a glued
+# edge, so the shape-follow choreography is exercised from the first move. The line is
+# plain engine chess - there is no toroidal literature to borrow a famous game from - so
+# it was generated from the engine's own legal moves with a capture-preferring rule and
+# verified legal move by move. The opener 1. Qd5 is a queen capture across the rank seam;
+# the rooks then trade through the file seam and the bishops wrap diagonally.
+variant torus
+variant_id 12057290357954865990
+start 8/8/8/rnbqkbnr/pppppppp/8/PPPPPPPP/RNBQKBNR w - - 0 1
+move d1d5
+move e5d5
+move h1h5
+move a5a1
+move c1g5
+move c5g1
+move f1b5
+move f5b1
+move g5h4
+move d5e6
+move b5c4
+move e6d7
+move h5h8
+move g1h8

@@ -8,6 +8,11 @@
 
 namespace cb::app {
 
+/// How long a watched game holds a settled move before the next one begins, in seconds.
+/// One number for both the interactive "Watch a game" action (M12.8) and the `--dwell`
+/// default of the notation runner, so the two cannot drift.
+inline constexpr float kDefaultDwellSeconds = 0.6f;
+
 /// Everything the player can change, and where it is kept between sessions.
 ///
 /// Deliberately a plain struct of values with sane defaults: a settings file that fails
@@ -159,6 +164,10 @@ struct Settings {
   /// Piece name to promote to without asking; empty means always ask.
   std::string autoPromoteTo;
   std::string lastVariant{"standard"};
+  /// Seconds a watched bundled game (M12.8) holds each settled move before the next
+  /// begins. The same concept `--dwell` names for a clip; `kDefaultDwellSeconds` is the
+  /// shared default.
+  float watchDwell{kDefaultDwellSeconds};
   /// The first-run welcome screen has been seen (M14.1). Persisted, so the sequence plays
   /// once.
   bool seenWelcome{false};

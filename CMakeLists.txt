@@ -56,3 +56,8 @@ cb_write_layer_manifest(${CMAKE_BINARY_DIR}/layers.manifest)
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/variants/
         DESTINATION share/chessbox/variants
         FILES_MATCHING PATTERN "*.toml")
+# The bundled showcase games for the "Watch a game" action (M12.8) are content too: the
+# menu reads them at startup, so an install that left them behind would ship a dead row.
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/games/
+        DESTINATION share/chessbox/games
+        FILES_MATCHING PATTERN "*.cbgame")

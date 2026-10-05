@@ -19,6 +19,7 @@ enum class Screen : std::uint8_t {
   Welcome,  ///< the tutorial: what this is, and where to start (M14.1)
   MainMenu,
   NewGame,  ///< choosing a variant
+  Watch,    ///< choosing a bundled game to watch (M12.8)
   Game,
   Paused,
   Settings,
@@ -34,6 +35,14 @@ enum class Screen : std::uint8_t {
 struct CuratedVariant {
   std::string name;
   std::string what;
+};
+
+/// A bundled showcase game the "Watch a game" action (M12.8) can play. The name is the
+/// file stem shown in the picker; the file is already parsed, so starting one needs no
+/// filesystem access and a test can supply its own.
+struct WatchGame {
+  std::string name;
+  GameFile file;
 };
 
 /// The curated first-run path, standard first, exotic last. A front door, not a gate -
@@ -131,6 +140,24 @@ class Shell {
   /// The names of the saved games, sorted, for a menu to list.
   [[nodiscard]] std::vector<std::string> savedGames() const;
 
+  /// Install the bundled showcase games (M12.8). Injected like the variant loader so the
+  /// shell stays testable without a filesystem; the front end reads `games/` at startup.
+  void setBundledGames(std::vector<WatchGame> games) { bundled_ = std::move(games); }
+  [[nodiscard]] const std::vector<WatchGame>& bundledGames() const noexcept {
+    return bundled_;
+  }
+  /// Watch the bundled game `name` (M12.8): start its variant, load the file and hand it
+  /// to the session to play. Fails, with a message, when the name is unknown or the file
+  /// will not load.
+  Result<void> startWatching(const std::string& name);
+  /// Leave the watching mode and return to the main menu. The stop control and the
+  /// escape key both land here.
+  void stopWatching();
+  [[nodiscard]] bool watching() const noexcept;
+  /// Drive the watched game's clock for one interactive frame. Ends the watch and returns
+  /// to the main menu when the file runs out.
+  void advanceWatching(float dt);
+
   /// A variant's advertised difficulty, for the library's order and its colours.
   /// Resolved through the loader once and remembered; a name that will not load is
   /// `Other` rather than an error, because the picker must still be able to draw it.
@@ -217,6 +244,8 @@ class Shell {
   /// Difficulty per variant name, filled on first ask so the picker does not re-read a
   /// file for every row on every frame.
   mutable std::map<std::string, Difficulty> difficulty_;
+  /// The bundled showcase games for "Watch a game" (M12.8).
+  std::vector<WatchGame> bundled_;
 };
 
 }  // namespace cb::app

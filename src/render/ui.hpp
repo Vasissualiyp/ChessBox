@@ -45,6 +45,9 @@ struct UiRequest {
   bool saveGame{false};
   bool loadGame{false};
   std::string gameName;
+  /// Watch the named bundled game (M12.8): the engine plays it and the player watches.
+  /// One frame's request, cleared once acted on.
+  std::string watchGame;
 };
 
 /// Whether the camera-projected file/rank coordinate labels are drawn.
@@ -174,6 +177,9 @@ class Ui {
   /// the scale option moves the text and leaves the panels behind.
   [[nodiscard]] float px(float v) const noexcept { return v * scale_; }
   UiRequest buildMainMenu(app::Shell& shell);
+  /// The bundled-game picker for "Watch a game" (M12.8): the list of showcase games and
+  /// the one the START button will play.
+  UiRequest buildWatch(app::Shell& shell);
   /// The tutorial screen: what this is, and the curated "start here" path, reached from
   /// the main menu's Tutorial row rather than opened on first launch (M14.1/M14.2).
   UiRequest buildWelcome(app::Shell& shell);
@@ -306,8 +312,9 @@ class Ui {
   Deco leaving_{Deco::None};
   bool deeper_{true};
   DepthField field_;
-  /// The much quieter field the board screen draws behind the game: wireframes only, fewer
-  /// bodies, further out and fainter, so it never competes with the pieces being played.
+  /// The much quieter field the board screen draws behind the game: wireframes only,
+  /// fewer bodies, further out and fainter, so it never competes with the pieces being
+  /// played.
   DepthField boardField_{true};
   /// Which variant the new-game screen is showing details for.
   std::string pickedVariant_;
@@ -315,6 +322,12 @@ class Ui {
   /// is read once per selection rather than once per frame.
   std::string pickedDescription_;
   std::string describedFor_;
+  /// Which bundled game the "Watch a game" picker has selected (M12.8).
+  std::string pickedWatch_;
+  /// The selected bundled game's variant blurb, cached so the variant file is read once
+  /// per selection rather than every frame.
+  std::string watchDescription_;
+  std::string watchDescribedFor_;
   /// Which pair of axes the "axes" control will show next.
   int axisRotation_{0};
   bool initialised_{false};

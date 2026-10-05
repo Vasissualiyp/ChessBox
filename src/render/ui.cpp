@@ -67,6 +67,7 @@ bool isMenuScreen(app::Screen s) noexcept {
   switch (s) {
     case app::Screen::MainMenu:
     case app::Screen::NewGame:
+    case app::Screen::Watch:
     case app::Screen::Editor:
     case app::Screen::Settings:
     case app::Screen::QuitConfirm:
@@ -894,6 +895,9 @@ void Ui::drawGhost(app::Shell& shell) {
     case app::Screen::NewGame:
       (void)buildNewGame(shell);
       break;
+    case app::Screen::Watch:
+      (void)buildWatch(shell);
+      break;
     case app::Screen::Editor:
       (void)buildEditor(shell);
       break;
@@ -976,6 +980,9 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
       break;
     case app::Screen::NewGame:
       request = buildNewGame(shell);
+      break;
+    case app::Screen::Watch:
+      request = buildWatch(shell);
       break;
     case app::Screen::Editor:
       request = buildEditor(shell);
@@ -1273,7 +1280,22 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       ImGuiCond_Always, ImVec2(0.0f, 1.0f));
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
   ImGui::Begin("##controls", nullptr, overlayFlags);
-  {
+  if (shell.watching()) {
+    // Watching is not playing: the only control that matters is the way out, so it is
+    // the only one offered. Esc does the same (M12.8).
+    if (button("STOP WATCHING", t, px(180), false, true, true, display)) {
+      shell.stopWatching();
+    }
+    ImGui::SameLine();
+    ImGui::PushFont(small);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+    char watching[96];
+    std::snprintf(watching, sizeof(watching), "move %zu of %zu   -   Esc leaves the game",
+                  session.watchIndex(), session.watchCount());
+    ImGui::TextUnformatted(watching);
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+  } else {
     if (button("UNDO", t, px(78), false, false, true, display)) {
       app::Action a;
       a.kind = app::ActionKind::Undo;

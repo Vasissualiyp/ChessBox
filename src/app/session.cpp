@@ -475,6 +475,24 @@ void Session::refreshSnapshot() {
 }
 
 Result<void> Session::apply(const Action& a) {
+  // While the engine plays a game for a watcher (M12.8), the board is not the player's:
+  // the actions that would move, select, undo or end the game are refused outright. The
+  // view controls - orbit, pan, zoom, axes, promotion preference - still pass through, so
+  // a watcher can look around the board while it plays.
+  if (watching_) {
+    switch (a.kind) {
+      case ActionKind::ClickCell:
+      case ActionKind::Undo:
+      case ActionKind::Reset:
+      case ActionKind::Resign:
+      case ActionKind::AgreeDraw:
+      case ActionKind::Confirm:
+      case ActionKind::Cancel:
+        return {};
+      default:
+        break;
+    }
+  }
   switch (a.kind) {
     case ActionKind::None:
       return {};
@@ -689,11 +707,87 @@ Result<void> Session::playMoveText(std::string_view text) {
               "'" + std::string(text) + "' is not legal in this position");
 }
 
+Result<void> Session::startWatching(GameFile file, float dwellSeconds) {
+  stopWatching();  // replace any watch already running
+  watchFile_ = std::make_unique<GameFile>(std::move(file));
+  watchRunner_ = std::make_unique<GameRunner>(*watchFile_, *this);
+  if (auto ok = watchRunner_->reset(); !ok.has_value()) {
+    stopWatching();
+    return ok;
+  }
+  watchDwell_ = std::max(0.0f, dwellSeconds);
+  watchClock_ = 0.0f;
+  selected_ = kInvalidCell;
+  pending_ = PendingPromotion{};
+  pendingMove_ = PendingMove{};
+  watching_ = true;
+  if (watchRunner_->done()) {  // a file with no moves is nothing to watch
+    message_ = "nothing to watch";
+    stopWatching();
+    return {};
+  }
+  if (auto ok = watchRunner_->step(); !ok.has_value()) {
+    const ErrorCode code = ok.error().code;
+    const std::string text = ok.error().format();
+    stopWatching();
+    message_ = text;
+    return fail(code, ok.error().message);
+  }
+  message_ = "watching " + watchFile_->variant + "  -  move 1 of " +
+             std::to_string(watchRunner_->count());
+  return {};
+}
+
+void Session::stopWatching() noexcept {
+  watching_ = false;
+  watchClock_ = 0.0f;
+  watchDwell_ = 0.0f;
+  watchRunner_.reset();
+  watchFile_.reset();
+}
+
+bool Session::advanceWatching(float dt) {
+  if (!watching_ || watchRunner_ == nullptr) return false;
+  // Still drawing the move: on a flat board that is the move animation, and on a shape
+  // the follow choreography keeps it active until the board has morphed home, so this one
+  // test covers both. Hold the dwell clock while anything is moving.
+  if (anim_.active()) {
+    watchClock_ = 0.0f;
+    return true;
+  }
+  watchClock_ += dt;
+  if (watchClock_ < watchDwell_) return true;
+  watchClock_ = 0.0f;
+  if (watchRunner_->done()) {
+    // The last move has settled and been held. Leave the mode; the caller returns to the
+    // menu. The board is deliberately not left sitting on the final position.
+    stopWatching();
+    return false;
+  }
+  if (auto ok = watchRunner_->step(); !ok.has_value()) {
+    message_ = ok.error().format();
+    stopWatching();
+    return false;
+  }
+  message_ = "watching " + watchFile_->variant + "  -  move " +
+             std::to_string(watchRunner_->index()) + " of " +
+             std::to_string(watchRunner_->count());
+  return true;
+}
+
+std::size_t Session::watchIndex() const noexcept {
+  return watchRunner_ != nullptr ? watchRunner_->index() : 0;
+}
+
+std::size_t Session::watchCount() const noexcept {
+  return watchRunner_ != nullptr ? watchRunner_->count() : 0;
+}
+
 CellId Session::clickPixel(float px, float py, float width, float height) {
-  // While a shot owns the view the board is locked: the pose is moving, so a pixel would
-  // resolve against where the board *was* and select the wrong cell. When the shot
-  // settles, picking resumes from the settled pose - no invisible drift.
-  if (shotInFlight()) return kInvalidCell;
+  // While a shot owns the view, or while the engine is playing a game for a watcher, the
+  // board is locked: the pose may be moving, and in either case the position is not the
+  // player's to touch. One gate, `boardLocked`, so the two cases cannot drift apart.
+  if (boardLocked()) return kInvalidCell;
   // The effective camera, not the raw member: the pause pull-back moves the board, and
   // the ray has to move with it or a click lands beside the cell under the cursor.
   const auto ray = camera().pickRay(px, py, width, height);

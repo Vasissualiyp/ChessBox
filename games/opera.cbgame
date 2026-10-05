@@ -1,0 +1,40 @@
+# ChessBox game v1
+# The Opera Game - Morphy vs. the Duke of Brunswick and Count Isouard, Paris 1858.
+# A 17-move miniature ending in checkmate: a queen sacrifice and the classic back-rank
+# finish, chosen as the flat-board showcase because it is short, legible and decisive.
+variant standard
+variant_id 6406979786874926849
+start rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
+move e2e4
+move e7e5
+move g1f3
+move d7d6
+move d2d4
+move c8g4
+move d4e5
+move g4f3
+move d1f3
+move d6e5
+move f1c4
+move g8f6
+move f3b3
+move d8e7
+move b1c3
+move c7c6
+move c1g5
+move b7b5
+move c3b5
+move c6b5
+move c4b5
+move b8d7
+move e1c1
+move a8d8
+move d1d7
+move d8d7
+move h1d1
+move e7e6
+move b5d7
+move f6d7
+move b3b8
+move d7b8
+move d1d8
