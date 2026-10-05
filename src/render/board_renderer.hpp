@@ -70,6 +70,12 @@ struct BoardOptions {
   /// untouched at any value (M17).
   float surfaceSlideU{0.0f};
   float surfaceSlideV{0.0f};
+  /// The `hyper4` tesseract's own two live fourth-dimension rotation angles, in radians
+  /// (M17.12 part B): the middle-drag's 4D turn, where a glued board has a slide. U is
+  /// the file/aeon plane the library's spin used, so 0.9 is the pre-change picture; V is
+  /// a second rank/aeon plane, 0 at rest. Ignored by every other shape.
+  float surfaceHyperSpinU{0.9f};
+  float surfaceHyperSpinV{0.0f};
   /// How far the surface has been turned through itself, 0 to 1 - a torus pulled inside
   /// out through its own hole, a cylinder rolled back over itself.
   float surfaceEvert{0.0f};

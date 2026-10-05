@@ -58,6 +58,14 @@ struct Settings {
   /// rather than be told about it.
   float geometrySlideU{0.0f};
   float geometrySlideV{0.0f};
+  /// The `hyper4` tesseract's own fourth-dimension pose: two accumulated rotation angles
+  /// in radians, fed to `SurfacePose::hyperSpinU`/`hyperSpinV`, driven by the middle-drag
+  /// (U by the horizontal motion, V by the vertical) where a glued board slides. U starts
+  /// at the library's fixed file/aeon spin `0.9` and V at `0`, so the opening, undragged
+  /// picture is exactly the pre-M17.12.B one. Persisted with the slide, both being the
+  /// player's chosen pose; ignored by every variant but `hyper4`.
+  float geometryHyperSpinU{0.9f};
+  float geometryHyperSpinV{0.0f};
   /// How far the geometry view has been turned through itself, 0 to 1: a torus pulled
   /// inside out through its own hole, a cylinder rolled back over itself like a sock.
   ///

@@ -656,6 +656,8 @@ InstanceSet BoardRenderer::buildInstances(
     SurfacePose pose;
     pose.slideU = options_.surfaceSlideU;
     pose.slideV = options_.surfaceSlideV;
+    pose.hyperSpinU = options_.surfaceHyperSpinU;
+    pose.hyperSpinV = options_.surfaceHyperSpinV;
     pose.evert = options_.surfaceEvert;
     pose.twist = options_.surfaceTwist;
     pose.openness = options_.surfaceOpenness;

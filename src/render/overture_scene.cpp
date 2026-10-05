@@ -2752,21 +2752,34 @@ bool playShapeAt(const VariantSpec& v, const std::array<float, kMaxDims>& axis,
   }
   if (d.dims() == 4 && v.name == "hyper4") {
     // The tesseract: the 4-cube projected as two nested cubes joined corner to corner,
-    // the aeon axis being the nesting. `spin` is fixed, so the play board does not turn
-    // under the player the way the library's does. The coordinates are the cell centres
-    // in the projected cube's own frame (`axis - 2` is the integer offset from 1.5),
-    // fractional within a cell so the patch is the projection's true image of the cell (a
-    // projective trapezoid, where a tangent rectangle is only its centre's
-    // approximation).
-    constexpr float kSpin = 0.9f;
+    // the aeon axis being the nesting. The pose now carries two live rotation angles
+    // instead of the old fixed `kSpin`: `hyperSpinU` is the same file/aeon plane the
+    // library's spin used (its default `0.9` is exactly that spin, so the opening shot is
+    // unchanged), and `hyperSpinV` is a second rank/aeon plane so a middle-drag can bring
+    // another axis to the front. Rank is chosen over level for the second plane as a
+    // legibility call: it pairs the two horizontal in-plane axes (file and rank) with the
+    // nesting axis symmetrically and leaves level as the fixed up axis. The coordinates
+    // are the cell centres in the projected cube's own frame (`axis - 2` is the integer
+    // offset from 1.5), fractional within a cell so the patch is the projection's true
+    // image of the cell (a projective trapezoid, where a tangent rectangle is only its
+    // centre's approximation). At `hyperSpinV == 0` the second rotation is the identity
+    // to the bit, so the default output is the old fixed-spin one exactly.
     const float cx = axis[0] - 2.0f;
     const float cy = axis[2] - 2.0f;
     const float cz = axis[1] - 2.0f;
     const float cw = axis[3] - 2.0f;
-    const float nx = cx * std::cos(kSpin) - cw * std::sin(kSpin);
-    const float nw = cx * std::sin(kSpin) + cw * std::cos(kSpin);
-    const float k = 2.35f / (3.5f - nw);
-    out = OvVec3{nx * k * 2.15f, cy * k * 2.15f * 1.05f, cz * k * 2.15f};
+    const float cu = std::cos(pose.hyperSpinU);
+    const float su = std::sin(pose.hyperSpinU);
+    const float cv = std::cos(pose.hyperSpinV);
+    const float sv = std::sin(pose.hyperSpinV);
+    // Plane one: file (`cx`) with aeon (`cw`).
+    const float nx = cx * cu - cw * su;
+    const float nw = cx * su + cw * cu;
+    // Plane two: rank (`cz`) with the rotated aeon (`nw`).
+    const float nz = cz * cv - nw * sv;
+    const float nd = cz * sv + nw * cv;
+    const float k = 2.35f / (3.5f - nd);
+    out = OvVec3{nx * k * 2.15f, cy * k * 2.15f * 1.05f, nz * k * 2.15f};
     return true;
   }
   return false;

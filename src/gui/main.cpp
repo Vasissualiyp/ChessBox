@@ -215,6 +215,8 @@ render::BoardOptions optionsFrom(const app::Settings& s) {
   // shape never visibly turned (M17.17).
   o.surfaceSlideU = s.geometrySlideU + s.geometryAlignOffset;
   o.surfaceSlideV = s.geometrySlideV + s.geometryAlignOffsetV;
+  o.surfaceHyperSpinU = s.geometryHyperSpinU;
+  o.surfaceHyperSpinV = s.geometryHyperSpinV;
   o.surfaceEvert = s.geometryEvert;
   o.surfaceGhost = s.geometryGhost;
   o.surfaceTwist = s.kleinTwist;
@@ -1217,7 +1219,16 @@ int main(int argc, char** argv) {
             const VariantSpec& variant = shell->session()->variant();
             const bool ring = render::PlaySurface::slidesAlongRanks(variant);
             const bool stacked = variant.dims.dims() >= 3;
-            if (ring && !variant.geom.isOrientable()) {
+            if (variant.name == "hyper4") {
+              // `hyper4`'s tesseract has its own fourth-dimension pose instead of a
+              // slide: the middle-drag turns it through the file/aeon plane horizontally
+              // and the rank/aeon plane vertically, at the same feel as the slide. Both
+              // are accumulated angles and the projection is a pure function of them, so
+              // dragging back retraces it. U starts at the library's fixed spin, so an
+              // undragged shape is exactly the pre-M17.12.B picture (M17.12 part B).
+              st.geometryHyperSpinU += e.motion.xrel * 0.014f;
+              st.geometryHyperSpinV += e.motion.yrel * 0.014f;
+            } else if (ring && !variant.geom.isOrientable()) {
               // On a non-orientable board the V axis is the only slide measured to keep
               // the tile corners abutting across the seam (the U slide's gap grew to
               // about ten times an ordinary one), so both drag axes turn V - up does what
@@ -1227,8 +1238,7 @@ int main(int argc, char** argv) {
               if (ring) st.geometrySlideV += e.motion.xrel * 0.014f;
               st.geometrySlideU += e.motion.yrel * 0.014f;
               // A stacked `D >= 3` shape whose ranks the 2-D test does not call a ring
-              // still rotates about the same horizontal drag. `hyper4` has no periodic
-              // axis, so this is a no-op there rather than a lie (M17.22).
+              // still rotates about the same horizontal drag; `hyper4` is handled above.
               if (stacked && !ring) st.geometrySlideV += e.motion.xrel * 0.014f;
             }
           } else if (panning && shell->hasGame()) {

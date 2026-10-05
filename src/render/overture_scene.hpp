@@ -134,6 +134,16 @@ struct SurfacePose {
   /// so this is sampling, not a special case.
   float slideU{0.0f};
   float slideV{0.0f};
+  /// The `hyper4` tesseract's own two live fourth-dimension rotation angles, in radians -
+  /// the middle-drag's 4D turn, where a glued board has a slide. `hyperSpinU` is the
+  /// file/aeon plane: the library's fixed spin, so its default is that same `0.9` and the
+  /// opening, undragged picture is unchanged to the bit. `hyperSpinV` is a second, rank/
+  /// aeon plane, identity (`0`) at rest, so the two angles together turn the board
+  /// through its fourth dimension instead of only orbiting the camera. A pure function of
+  /// the two numbers, so a drag retraces and a still reproduces. Ignored by every other
+  /// shape.
+  float hyperSpinU{0.9f};
+  float hyperSpinV{0.0f};
   /// The Klein bottle ring's twist multiplier: 1 is the value the shipped surface uses.
   /// A diagnostic knob; ignored by every other warp.
   float twist{1.0f};

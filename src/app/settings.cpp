@@ -132,6 +132,10 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.geometrySlideU = asFloat(value, s.geometrySlideU);
     else if (key == "geometry_slide_v")
       s.geometrySlideV = asFloat(value, s.geometrySlideV);
+    else if (key == "geometry_hyper_spin_u")
+      s.geometryHyperSpinU = asFloat(value, s.geometryHyperSpinU);
+    else if (key == "geometry_hyper_spin_v")
+      s.geometryHyperSpinV = asFloat(value, s.geometryHyperSpinV);
     else if (key == "animate_moves")
       s.animateMoves = asBool(value);
     else if (key == "animation_speed")
@@ -211,6 +215,8 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "shape_follow = " << shapeFollow << '\n';
   out << "geometry_slide_u = " << geometrySlideU << '\n';
   out << "geometry_slide_v = " << geometrySlideV << '\n';
+  out << "geometry_hyper_spin_u = " << geometryHyperSpinU << '\n';
+  out << "geometry_hyper_spin_v = " << geometryHyperSpinV << '\n';
   out << "animate_moves = " << boolText(animateMoves) << '\n';
   out << "animation_speed = " << animationSpeed << '\n';
   out << "overture_speed = " << overtureSpeed << '\n';

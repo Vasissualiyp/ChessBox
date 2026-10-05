@@ -1281,6 +1281,8 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       SurfacePose pose;
       pose.slideU = st.geometrySlideU + st.geometryAlignOffset;
       pose.slideV = st.geometrySlideV + st.geometryAlignOffsetV;
+      pose.hyperSpinU = st.geometryHyperSpinU;
+      pose.hyperSpinV = st.geometryHyperSpinV;
       pose.evert = st.geometryEvert;
       pose.twist = st.kleinTwist;
       pose.openness = st.geometryWidth;

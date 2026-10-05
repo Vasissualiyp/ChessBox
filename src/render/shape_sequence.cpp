@@ -80,6 +80,8 @@ SurfacePose surfacePose(const app::Settings& s, const VariantSpec& v) {
   SurfacePose pose;
   pose.slideU = s.geometrySlideU + s.geometryAlignOffset;
   pose.slideV = s.geometrySlideV + s.geometryAlignOffsetV;
+  pose.hyperSpinU = s.geometryHyperSpinU;
+  pose.hyperSpinV = s.geometryHyperSpinV;
   pose.evert = s.geometryEvert;
   pose.twist = s.kleinTwist;
   pose.openness = s.geometryWidth;
@@ -159,9 +161,10 @@ SlideOffset alignOffsetFor(const app::Shell& shell, CellId followed,
 
 std::shared_ptr<const PlaySurface> SurfaceCache::get(const VariantSpec& v,
                                                      const SurfacePose& pose) {
-  const Key key{&v,          pose.slideU,       pose.slideV, pose.evert,
-                pose.twist,  pose.openness,     pose.stretch, pose.thickness,
-                pose.collapsePhase, pose.formed};
+  const Key key{&v,           pose.slideU,    pose.slideV,
+                pose.evert,   pose.twist,     pose.openness,
+                pose.stretch, pose.thickness, pose.collapsePhase,
+                pose.formed};
   for (auto& [k, surf] : entries_) {
     if (k == key) return surf;
   }

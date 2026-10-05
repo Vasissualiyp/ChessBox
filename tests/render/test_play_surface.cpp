@@ -1859,6 +1859,120 @@ TEST_CASE("a stacked shape slides along its own cells", "[render]") {
   }
 }
 
+TEST_CASE("hyper4's tesseract turns through two live fourth-dimension planes",
+          "[render]") {
+  // M17.12 part B. `playShapeAt`'s hyper4 branch used to rotate file/aeon by a fixed
+  // `kSpin = 0.9`. The pose now carries two live angles - U is that same file/aeon plane,
+  // V a second rank/aeon plane - so a middle-drag can turn the tesseract through the
+  // fourth dimension instead of only orbiting the camera. The claims: the default pose is
+  // the old fixed-spin picture bit for bit (the opening shot must not move), the second
+  // plane is a real, independent degree of freedom, a full turn of either plane is
+  // exactly a full turn (period 2*pi), and a small turn is continuous - every cell moves
+  // by well under a cell.
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("hyper4"));
+  const int nx = static_cast<int>(v.dims.extent(0));
+  const int nz = static_cast<int>(v.dims.extent(1));
+  const int nl = static_cast<int>(v.dims.extent(2));
+  const int na = static_cast<int>(v.dims.extent(3));
+
+  const auto axisOf = [&](int f, int r, int L, int A) {
+    std::array<float, kMaxDims> axis{};
+    axis[0] = static_cast<float>(f) + 0.5f;
+    axis[1] = static_cast<float>(r) + 0.5f;
+    axis[2] = static_cast<float>(L) + 0.5f;
+    axis[3] = static_cast<float>(A) + 0.5f;
+    return axis;
+  };
+  const auto project = [&](const SurfacePose& pose, int f, int r, int L, int A) {
+    OvVec3 p;
+    REQUIRE(playShapeAt(v, axisOf(f, r, L, A), p, pose));
+    return p;
+  };
+
+  // The historical projection, written out here rather than reached through the code
+  // under test, so the default pose is pinned against the old behaviour and not against
+  // itself. `x`=file, `y`=level, `z`=rank, `w`=aeon, in the projected cube's own frame.
+  const auto oldSpin = [](float x, float y, float z, float w) {
+    constexpr float kSpin = 0.9f;
+    const float nxv = x * std::cos(kSpin) - w * std::sin(kSpin);
+    const float nw = x * std::sin(kSpin) + w * std::cos(kSpin);
+    const float k = 2.35f / (3.5f - nw);
+    return OvVec3{nxv * k * 2.15f, y * k * 2.15f * 1.05f, z * k * 2.15f};
+  };
+  const auto dist3 = [](const OvVec3& a, const OvVec3& b) {
+    return std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) +
+                     (a.z - b.z) * (a.z - b.z));
+  };
+
+  const SurfacePose rest;
+  // The default pose is exactly the historical fixed spin: same arithmetic, same order.
+  for (int f = 0; f < nx; ++f) {
+    for (int r = 0; r < nz; ++r) {
+      for (int L = 0; L < nl; ++L) {
+        for (int A = 0; A < na; ++A) {
+          const OvVec3 got = project(rest, f, r, L, A);
+          const OvVec3 want =
+              oldSpin(static_cast<float>(f) - 1.5f, static_cast<float>(L) - 1.5f,
+                      static_cast<float>(r) - 1.5f, static_cast<float>(A) - 1.5f);
+          CAPTURE(f, r, L, A);
+          CHECK(got.x == want.x);
+          CHECK(got.y == want.y);
+          CHECK(got.z == want.z);
+        }
+      }
+    }
+  }
+
+  // The second plane is a real degree of freedom: a quarter turn of V moves cells that U
+  // alone leaves put.
+  {
+    SurfacePose p;
+    p.hyperSpinV = 1.0f;
+    float moved = 0.0f;
+    for (int f = 0; f < nx; ++f) {
+      for (int r = 0; r < nz; ++r) {
+        for (int L = 0; L < nl; ++L) {
+          moved =
+              std::max(moved, dist3(project(p, f, r, L, 0), project(rest, f, r, L, 0)));
+        }
+      }
+    }
+    CHECK(moved > 0.1f);
+  }
+
+  // A full turn of either plane is exactly a full turn: period 2*pi, no drift.
+  {
+    SurfacePose full;
+    full.hyperSpinU = rest.hyperSpinU + 2.0f * 3.14159265358979f;
+    full.hyperSpinV = 2.0f * 3.14159265358979f;
+    for (int f = 0; f < nx; ++f) {
+      for (int r = 0; r < nz; ++r) {
+        for (int L = 0; L < nl; ++L) {
+          CHECK(dist3(project(full, f, r, L, 0), project(rest, f, r, L, 0)) < 1e-3f);
+        }
+      }
+    }
+  }
+
+  // Continuity: a small turn moves every cell by well under a cell's own spacing, on both
+  // planes, so the tesseract turns rather than teleporting.
+  for (const float d : {0.01f, -0.01f}) {
+    SurfacePose pu;
+    pu.hyperSpinU = rest.hyperSpinU + d;
+    SurfacePose pv;
+    pv.hyperSpinV = d;
+    for (int f = 0; f < nx; ++f) {
+      for (int r = 0; r < nz; ++r) {
+        for (int L = 0; L < nl; ++L) {
+          CAPTURE(f, r, L, d);
+          CHECK(dist3(project(pu, f, r, L, 0), project(rest, f, r, L, 0)) < 0.5f);
+          CHECK(dist3(project(pv, f, r, L, 0), project(rest, f, r, L, 0)) < 0.5f);
+        }
+      }
+    }
+  }
+}
+
 TEST_CASE("invert swaps the side on a stacked shape without moving it", "[render]") {
   // M17.22. The same revised invert the 2-D board uses (M17.7): the geometry is
   // identical and the outward normal is reversed, so a piece stands on the other face
