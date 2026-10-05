@@ -16,8 +16,8 @@
 
 #include <imgui.h>
 
+#include "app/shell.hpp"
 #include "render/deco.hpp"
-#include "render/quintic.hpp"
 
 using namespace cb;
 using namespace cb::render;
@@ -66,6 +66,31 @@ TEST_CASE("a decoration at alpha zero emits nothing", "[render]") {
   CHECK(g.dl.VtxBuffer.Size > 0);
 }
 
+TEST_CASE("the main menu wears the quintic manifold object", "[render]") {
+  // The original, dedicated centrepiece: the Calabi-Yau cross-section itself, not the
+  // quintic reduced to one faint wireframe among the clutter. The first M18.4 pass retired
+  // it from these screens; the correction restores it, and this pins the mapping so a
+  // later background edit cannot quietly drop it again.
+  CHECK(decoForScreen(static_cast<int>(app::Screen::MainMenu)) == Deco::Manifold);
+  CHECK(decoForScreen(static_cast<int>(app::Screen::Welcome)) == Deco::Manifold);
+}
+
+TEST_CASE("the field's wire vocabulary is five shapes and reaches no sixth", "[render]") {
+  // The quintic survives only as the main menu's dedicated `Deco::Manifold`; it is not a
+  // clutter body. The selection is a modulo over the shape count, so the test states the
+  // bound directly and then samples many respawns to confirm no body ever holds a value
+  // at or past it (which is what a stray `% 6` over a five-value enum would produce).
+  REQUIRE(static_cast<int>(WireShape::Count) == 5);
+  DepthField field;
+  for (int step = 0; step < 2000; ++step) {
+    field.advance(0.5f);
+    for (const BodyState& b : field.bodies()) {
+      if (b.piece) continue;
+      CHECK(static_cast<int>(b.wire) < static_cast<int>(WireShape::Count));
+    }
+  }
+}
+
 TEST_CASE("the candlelit theme's drifting field is muted and dark", "[render]") {
   // The drifting polygons are the only colours in the shell that mean nothing, but they
   // still have to follow the page: on the light theme they are pastel, and on the
@@ -102,7 +127,7 @@ TEST_CASE("each wireframe body is a real drawing", "[render]") {
   // by a radius or forgets an angle can silently emit nothing, and a background of
   // nothing looks exactly like a feature that was never wired up.
   const int count = static_cast<int>(WireShape::Count);
-  REQUIRE(count == 6);
+  REQUIRE(count == 5);
   for (int s = 0; s < count; ++s) {
     for (const float t : {0.0f, 0.5f, 2.0f}) {
       DecoFrame f;
@@ -113,46 +138,6 @@ TEST_CASE("each wireframe body is a real drawing", "[render]") {
       CHECK(w > 10.0f);
       CHECK(h > 10.0f);
     }
-  }
-}
-
-TEST_CASE("the quintic wire body is the shared oracle, not a second surface",
-          "[render]") {
-  // The quintic has returned as a sixth wireframe body, but as one of the six, not as the
-  // dominant object it used to be. Its geometry must come from the same `quinticPoint`
-  // formula the t6 overture settles onto - a hand-derived second surface would drift from
-  // the overture silently. Every segment endpoint must therefore be an oracle sample on
-  // the wire body's own coarse grid.
-  const std::vector<WireSegment> segs = wireShapeSegments(WireShape::Quintic);
-  REQUIRE(!segs.empty());
-  const float xSpan = 3.14159265358979f * 0.5f;
-  const auto onGrid = [xSpan](const std::array<float, 3>& p) {
-    for (int k1 = 0; k1 < kQuinticN; ++k1) {
-      for (int k2 = 0; k2 < kQuinticN; ++k2) {
-        for (int i = 0; i <= kQuinticWireCellsX; ++i) {
-          for (int j = 0; j <= kQuinticWireCellsY; ++j) {
-            const float x =
-                xSpan * static_cast<float>(i) / static_cast<float>(kQuinticWireCellsX);
-            const float y = -1.0f + 2.0f * static_cast<float>(j) /
-                                        static_cast<float>(kQuinticWireCellsY);
-            const std::array<float, 3> q = quinticPoint(k1, k2, x, y);
-            if (std::abs(q[0] - p[0]) < 1e-5f && std::abs(q[1] - p[1]) < 1e-5f &&
-                std::abs(q[2] - p[2]) < 1e-5f) {
-              return true;
-            }
-          }
-        }
-      }
-    }
-    return false;
-  };
-  for (const WireSegment& s : segs) {
-    // A degenerate segment (both ends the same point) is not a line, so it would satisfy
-    // the membership check vacuously; rule it out first.
-    CHECK((std::abs(s.a[0] - s.b[0]) + std::abs(s.a[1] - s.b[1]) +
-           std::abs(s.a[2] - s.b[2])) > 1e-6f);
-    CHECK(onGrid(s.a));
-    CHECK(onGrid(s.b));
   }
 }
 

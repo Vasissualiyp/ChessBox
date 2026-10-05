@@ -669,6 +669,40 @@ place and scale (same as any commit before this M18 round touched `decoForScreen
 background clutter is five shapes, not six, and none of it is the quintic; `tools/test.sh
 --build render` green.
 
+### Status: quintic corrected back to the centrepiece (2026-10-04, opencode)
+
+The dedicated quintic object is restored to the main menu and the sixth wireframe is gone
+from the clutter; the field is back to five shapes.
+
+- **The mapping.** `decoForScreen`'s `MainMenu`/`Welcome` case returns `Deco::Manifold`
+  again. Nothing in `drawManifold`/`Deco::Manifold` had been touched, so this was the
+  one-line revert the correction called for.
+- **The clutter.** `WireShape::Quintic` is deleted from the enum (back to Torus, Klein,
+  Mobius, Cube, Tesseract, `Count`), its `buildWireShape` case is gone, and `respawn`
+  selects with `nextFloat * 5.0f % 5`. The test-only scaffolding that existed solely for
+  the sixth shape went with it: `wireShapeSegments`, `WireSegment` and the
+  `kQuinticWireCellsX/Y` grid constants are removed, and the quintic differential test in
+  `tests/render/test_deco.cpp` is deleted. The containment (`kFieldMinRadius`) and
+  two-orientation-rate tests are untouched and still pass, as the correction predicted.
+- **Tests.** Two new `[render]` cases: `decoForScreen(MainMenu)`/`decoForScreen(Welcome)`
+  return `Deco::Manifold`, and the field's wire selection stays inside the five remaining
+  values across 1000 s of respawns. `each wireframe body is a real drawing` now asserts five
+  shapes. Written and shown red first (the mapping returned `Deco::None`, `Count` was 6),
+  then green.
+- **Verification.** `tools/test.sh --build render` green (115 cases, 4.92M assertions);
+  `--build app` green (68 cases); `tools/precommit.sh` green (format, build, arch, unit,
+  property). `--shot --screen menu` is validation-clean and byte-identical on re-run.
+- **The capture, actually looked at** (`build/m18_corr_check/menu.png`, plus crops). The
+  left pane shows the original filled checkerboard quilt — the wavy-boundaried quintic
+  cross-section — as one large, legible, roughly centred body with its piece icons on it;
+  it is unmistakably the centrepiece, not a wireframe tangle. The surrounding clutter reads
+  as coherent line drawings: a nested wireframe cube (top-left and top-right) and two
+  ring/grid surfaces off to the right that stay legible as a torus/Klein/Mobius family
+  figure — no 25-patch superimposed quintic noise anywhere, matching the code (no quintic
+  value is reachable).
+- **Open.** None; this restores the pre-M18-round `decoForScreen` behaviour with the
+  five-shape field from the first M18.4 pass.
+
 ## M18.5 Audio v1
 
 **Want.** The game is completely silent. `Settings` already carries `volumeMaster`/

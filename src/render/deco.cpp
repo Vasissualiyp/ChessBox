@@ -386,14 +386,13 @@ void drawTesseract(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& th
 // ---------------------------------------------------------------------------
 // The field's wireframe vocabulary.
 //
-// Six parametric geometries, each reduced to a handful of line segments in a unit-ish
+// Five parametric geometries, each reduced to a handful of line segments in a unit-ish
 // space and projected through the same local Camera the other decorations use. They are
 // self-contained rather than read off the board's own surface functions: this is ambient
 // 2-D decoration that never touches the Vulkan pipeline, and the board surfaces carry
-// board-scale constants and gluing concerns a background does not need. The one
-// exception is the quintic, which reads the shared `render/quintic.hpp` formula the t6
-// overture uses - there is no board surface to read, and one copy of that formula is the
-// point.
+// board-scale constants and gluing concerns a background does not need. The quintic is
+// deliberately absent - it is one surface only when its patches are filled and checkered
+// (`drawManifold`), and reads as noise as bare line art at clutter scale.
 // ---------------------------------------------------------------------------
 struct WireSeg {
   Vec3 a;
@@ -478,32 +477,6 @@ void buildWireShape(WireShape shape, std::vector<WireSeg>& out, float yaw, float
           const int j = i ^ (1 << d);
           if (j < i) continue;
           out.push_back({pts[i], pts[j]});
-        }
-      }
-      break;
-    }
-    case WireShape::Quintic: {
-      // A sparse grid of the Calabi-Yau quintic's own surface, coarser than
-      // `drawManifold` so it reads as a handful of segments rather than a quilt. The
-      // formula is the shared `quinticPoint` oracle (via the `quintic` wrapper above),
-      // the same the t6 overture collapses onto - never a second derivation.
-      const float xSpan = kPi * 0.5f;
-      for (int k1 = 0; k1 < kQuinticN; ++k1) {
-        for (int k2 = 0; k2 < kQuinticN; ++k2) {
-          for (int i = 0; i < kQuinticWireCellsX; ++i) {
-            const float xa =
-                xSpan * static_cast<float>(i) / static_cast<float>(kQuinticWireCellsX);
-            const float xb = xSpan * static_cast<float>(i + 1) /
-                             static_cast<float>(kQuinticWireCellsX);
-            for (int j = 0; j < kQuinticWireCellsY; ++j) {
-              const float ya = -1.0f + 2.0f * static_cast<float>(j) /
-                                           static_cast<float>(kQuinticWireCellsY);
-              const float yb = -1.0f + 2.0f * static_cast<float>(j + 1) /
-                                           static_cast<float>(kQuinticWireCellsY);
-              out.push_back({quintic(k1, k2, xa, ya), quintic(k1, k2, xb, ya)});
-              out.push_back({quintic(k1, k2, xa, ya), quintic(k1, k2, xa, yb)});
-            }
-          }
         }
       }
       break;
@@ -596,25 +569,15 @@ void drawWireShape(ImDrawList* dl, WireShape shape, ImVec2 centre, float scale, 
   }
 }
 
-std::vector<WireSegment> wireShapeSegments(WireShape shape, float yaw, float pitch) {
-  std::vector<WireSeg> segs;
-  buildWireShape(shape, segs, yaw, pitch);
-  std::vector<WireSegment> out;
-  out.reserve(segs.size());
-  for (const WireSeg& s : segs) {
-    out.push_back({{s.a.x, s.a.y, s.a.z}, {s.b.x, s.b.y, s.b.z}});
-  }
-  return out;
-}
-
 Deco decoForScreen(int screen) noexcept {
   switch (static_cast<app::Screen>(screen)) {
-    // The main menu used to add the quintic cross-section as a second, stacked object.
-    // At the size a background gets it is far too busy, so it is retired for these
-    // screens and the redone DepthField alone carries the background.
+    // The main menu carries the quintic cross-section itself - the one dedicated,
+    // dominant object, drawn from `drawManifold`. It is not a clutter body: reduced to a
+    // sparse wireframe among the field it reads as noise, which is why the field's
+    // vocabulary stops at five.
     case app::Screen::Welcome:
     case app::Screen::MainMenu:
-      return Deco::None;
+      return Deco::Manifold;
     // The library's object is the selected variant's *overture*, which the screen draws
     // itself - see Ui::drawOvertureObject. The turning lattice it replaces said only how
     // many boards a variant had; an overture says what shape they are on.
@@ -682,7 +645,7 @@ void DepthField::respawn(Body& b, std::uint32_t& seed, bool nearPlane) const {
   b.alphaV = 0.18f + nextFloat(seed) * 0.24f;
   b.rampPhase = nextFloat(seed);
   b.rampV = 0.02f + nextFloat(seed) * 0.05f;
-  b.wire = static_cast<std::uint8_t>(nextFloat(seed) * 6.0f) % 6;
+  b.wire = static_cast<std::uint8_t>(nextFloat(seed) * 5.0f) % 5;
   b.shape = static_cast<std::uint8_t>(nextFloat(seed) * 7.0f) % 7;
   b.z = nearPlane ? kZNear + 0.05f : kZFar;
 }

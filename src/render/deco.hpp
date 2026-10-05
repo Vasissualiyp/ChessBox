@@ -38,43 +38,18 @@ enum class Deco : std::uint8_t {
 /// once and can be read without opening the menu code.
 Deco decoForScreen(int screen) noexcept;
 
-/// The six geometries the background field is built from: the game's own exotic shapes,
-/// drawn as thin wireframes rather than filled polygons. The quintic is here as clutter,
-/// one body among many - not as the dense, dominant object `Deco::Manifold` used to draw.
+/// The five geometries the background field is built from: the game's own exotic shapes,
+/// drawn as thin wireframes rather than filled polygons. The quintic is deliberately not
+/// here - it is the main menu's one dedicated `Deco::Manifold` object, not a clutter body
+/// among many.
 enum class WireShape : std::uint8_t {
   Torus,
   Klein,
   Mobius,
   Cube,
   Tesseract,
-  Quintic,
   Count,
 };
-
-/// One line segment of a wireframe body, in the field's own local space (before the
-/// camera projects it).
-struct WireSegment {
-  std::array<float, 3> a;
-  std::array<float, 3> b;
-};
-
-/// The segments a wireframe body is built from. `yaw`/`pitch` are the two independent
-/// orientation angles: they drive the tesseract's two 4-D rotation planes (as
-/// `drawTesseract` does) and are ignored by the other five, which are turned by the
-/// camera.
-///
-/// Exposed so the quintic body can be pinned to the shared `quinticPoint` oracle
-/// (`render/quintic.hpp`) the t6 overture already uses, rather than a second hand-derived
-/// surface.
-[[nodiscard]] std::vector<WireSegment> wireShapeSegments(WireShape shape,
-                                                         float yaw = 0.62f,
-                                                         float pitch = 0.37f);
-
-/// The coarse grid the quintic wire body walks, per (k1, k2) patch: this many cells along
-/// x (over [0, pi/2]) and y (over [-1, 1]). Paired with `wireShapeSegments(Quintic)` for
-/// the differential test.
-inline constexpr int kQuinticWireCellsX = 2;
-inline constexpr int kQuinticWireCellsY = 2;
 
 /// Draw one wireframe shape, centred on `centre` and `scale` pixels across, turned by
 /// `yaw`/`pitch`, coloured off the theme's cold seam ramp. Exposed so the shape
