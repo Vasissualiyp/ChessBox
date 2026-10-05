@@ -2615,3 +2615,103 @@ One tension to name: the spec's Tests paragraph asks for the setting-off capture
 on - the button's own paint is the difference, and this build follows Acceptance 1. The
 board and the pieces are pixel-identical; `shapePieceCylinders` off is still a no-op
 everywhere outside that one label.
+
+### Revision: a true cylinder - a token circle with the icon on it, not an icon-shaped slab (2026-10-05)
+
+Reported directly, after looking at the built version: the flat 2D view does not draw a
+bare icon silhouette - it draws a *circle* (one neutral token colour, the same for both
+sides) with the figure in the piece's own colour *on* it (`Ui::drawPieceGlyph` plus the
+`AddCircleFilled`/`AddCircle` pair around it at `src/render/ui.cpp:1761-1775` - "one token
+colour for both sides... the disc is furniture... the thing being read is the figure").
+M17.25 as built instead cut the puck's own silhouette to the icon's outline, which is a
+correctly-shaped but differently-styled piece, not the flat view's piece in 3-D. Build the
+actual flat recipe as a solid: a true circular puck (hence "cylinder" - a real one now, not
+an icon-profile prism), the token colour on its disc, the icon in the piece's own colour
+sitting on top of that disc, just as the flat view already composites it.
+
+**Why this needs two meshes glued into one instance pair, not one mesh.** The existing
+instancing pipeline tints a *whole* mesh one colour: `MeshVertex::color` is "multiplied
+into the instance's colour", and `emitSurfacePiece` sets that one instance colour to the
+piece's white or black (`pc`, `src/render/board_renderer.cpp:828-850`). A single mesh
+cannot show a neutral token-coloured disc *and* a white/black icon at once through that one
+multiply - the disc would always inherit whichever side's colour the icon has. The flat
+view sidesteps this because it issues two separate draw calls (circle, then glyph) with two
+separate colours; the shape view's answer is the equivalent in meshes: keep today's
+icon-extrusion mesh (`addIconCylinder`, `cylinderRanges`) exactly as it is - it already
+carries plain white (1,1,1,1) vertices, so the existing per-side instance tint already
+colours it correctly - and add a **second**, new mesh per archetype: a true circular disc
+(top cap, bottom cap, a round side wall - a real cylinder, `N`-segment fan, the same
+segment count the flat view's own circles use, 24, for the same look at the same angle).
+
+**The disc's colour has to be an instance tint, not baked into the mesh.**
+`MeshLibrary::build()` (`board_renderer.cpp:113`) runs once, at renderer creation, before
+any theme is necessarily current, and is never called again - `BoardRenderer::setTheme`
+(`board_renderer.hpp:159`) changes `theme_` live (a palette switch in settings) with no
+mesh rebuild to go with it. Baking `theme_.pieceToken` into the disc's vertices at mesh-
+build time would freeze the disc to whichever theme happened to be live at startup and
+never follow a later switch - exactly the bug the existing pieces avoid by *not* baking
+their colour: every archetype mesh ships plain white (1,1,1,1), and the actual colour is
+the *instance's*, chosen fresh every time `buildInstances` runs (which is after
+`setTheme`, every frame). The disc mesh must follow the same rule: plain white vertices,
+identical in kind to the icon mesh's, and the token colour supplied as the disc
+*instance's* colour (`theme_.pieceToken`, read live, the same way `pc` already reads
+`theme_.whitePiece`/`theme_.blackPiece` live) rather than anything baked at build time.
+
+**Build**
+
+1. `piece_mesh.{hpp,cpp}`: a new `addIconDisc` (or similar) building the plain circular
+   puck, plain white (1,1,1,1) vertices exactly like `addIconCylinder`'s - cap radius
+   matched to today's puck footprint (reuse whatever `fit`-based scale the existing puck
+   already lands at; do not re-derive a new size unless the icon no longer looks right
+   against it), half-thickness close to `kCylinderHalfThick` but a hair *less* than the
+   icon mesh's, so the icon decal sits proud of the disc rather than fighting it in the
+   depth buffer at the exact same plane. A new `MeshRange discRanges[Archetype::Count]`
+   alongside `ranges`/`cylinderRanges`, same shared buffers, built the same way
+   `cylinderRanges` is - no new parameter to `MeshLibrary::build()`.
+2. The icon mesh (`cylinderRanges`, unchanged in its own geometry) becomes the decal riding
+   on the disc: shrink its footprint to sit inside the disc the way the flat view's glyph
+   sits inside its circle (`radius * 0.82` there - match that ratio, scaling
+   `kCylinderIconScale` or wherever the puck's own size is set, by eye against the new
+   disc). Its half-thickness should be slightly *more* than the disc's, by the same small
+   margin the disc's is less than today's combined value, so the decal's caps sit just
+   outside the disc's - a real, if tiny, proud step, not a coplanar fight.
+3. `emitSurfacePiece`/the surface seat loop (`board_renderer.cpp`) emits **two** instances
+   per surface piece when `shapePieceCylinders` is on, not one: the disc instance (against
+   `discRanges`, coloured `theme_.pieceToken` - read live off the current theme exactly
+   where `pc` already reads `theme_.whitePiece`/`theme_.blackPiece`, so a palette switch
+   repaints the disc the same frame it repaints everything else - and with no check tint,
+   matching the flat view, where only the status line announces check, never the token
+   circle) and the icon instance (against `cylinderRanges`, exactly as today - piece
+   colour, GHOST alpha, check tint all unchanged). Both share the same
+   `centre`/`normal`/`quat`/`fit` the single instance uses
+   today; GHOST's alpha should still apply to *both* (a ghosted piece fades as one object,
+   disc and figure together) - carry the alpha onto the disc instance's colour too, just
+   not the white/black tint or the check blend.
+4. The draw loop and the capture flourish need the same two-instance treatment wherever
+   they currently branch on `cylinderPieces` - review `record` and the flourish path
+   (`board_renderer.cpp` around the two spots the current `cylinderPieces` bool already
+   gates) for every place a single range lookup now needs to become two.
+
+**Tests**
+
+- Extend/replace the M17.25 silhouette tests: the icon decal's own two-cap-same-outline
+  property still holds and still needs to pass. Add a test that the new disc mesh is a
+  closed, round solid (same closed-rim check the icon mesh got, adapted) and that every one
+  of its vertices is plain white (1,1,1,1) - the same invariant the icon mesh's own
+  vertices already have to hold, and for the same reason: colour lives in the instance, not
+  the mesh, so a theme switch after startup still repaints it. A render test that the disc
+  *instance* (not the mesh) carries `theme_.pieceToken` and that switching `setTheme`
+  changes what the next frame's disc instance colour reads as, with no mesh rebuild.
+- A `--shot` of `klein --geometry --piece-cylinders`, cropped on one piece, inspected
+  closely: a visible neutral-coloured circular puck with the piece's own figure sitting on
+  it in white or black, legible as "the flat view's token, but a solid object" rather than
+  as a flat-coloured icon-shaped slab. Compare side by side with a flat `--shot` of the same
+  variant to confirm the two actually look like the same visual language.
+- `tools/test.sh --build render app` green.
+
+**Acceptance.** A piece on the shape, with the setting on, reads as a round token in the
+theme's one shared background colour with the piece's own white/black figure on its face -
+recognisably the same composition as the flat 2D view's pieces, carried into a solid shape,
+not an icon-profile prism in one flat colour. Everything else M17.25 already established
+(button wiring, scoping to the surface path, GHOST/check behaviour on the figure, the
+original "no regression with the setting off" guarantees) is unchanged and must still hold.
