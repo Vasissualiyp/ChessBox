@@ -614,6 +614,61 @@ independent orientation rates rather than one shared angle.
   `1.30..2.30`, breathe amplitude unchanged at `0.10`, containment floor `1.20`, quintic grid
   2x2 cells per patch. The floor is the knob if a future field wants more clearance.
 
+### Correction: wrong quintic, and it didn't work either (2026-10-04)
+
+Two things wrong with "the quintic is back as a sixth wireframe shape," found only once a
+fresh report ("still missing quintic in the main menu") forced an honest look rather than
+trusting the earlier screenshot.
+
+**Wrong reading.** "Still missing" meant the *original* dedicated quintic object
+(`Deco::Manifold`, the one the main menu carried since before any of M18 - retired by the
+first M18.4 pass on the direction that a big stacked centrepiece was "too much"), not a new
+sixth clutter shape. The spec above explicitly flagged this as an assumption and asked to be
+corrected if wrong; it was wrong. Restore `decoForScreen`'s `MainMenu`/`Welcome` mapping to
+`Deco::Manifold`, exactly as it was before the first M18.4 pass retired it -
+`drawManifold`/`Deco::Manifold` were never touched by any of this work, only unselected, so
+this is a one-line revert of the mapping, not new code.
+
+**It also didn't work as clutter.** Independent of the misreading, the sixth-shape build
+itself does not achieve what it was asked to: zoomed into an actual rendered body, the
+`WireShape::Quintic` tangle reads as noise, not as a recognisable shape, unlike the other
+five. Root cause: the five original shapes are each *one continuous parametric surface*, so
+even as bare line segments they stay legible as a ring, a strip, a box. The quintic is not
+one surface - it is 25 separate local patches (`(k1, k2)` each 0-4), each in its own
+position in 3-space, all pushed through *one* 2-D camera with no fill and no depth sorting
+between patches. `drawManifold`'s own version only reads as a quintic because area fill and
+light/dark checkering organise those 25 patches into a visible quilt; stripped to pure line
+art at clutter scale, what is left is 200 segments from 25 unrelated little grids
+superimposed with nothing showing which lines belong together. This was not caught before
+landing because the differential test only checks that each segment endpoint sits on the
+real surface - a true and necessary property, and not the same thing as the body reading as
+a shape to a person looking at it. No test in this codebase currently checks "is this
+legible," nor should one try to - this is exactly the kind of thing that needs eyes, which
+is why the earlier status note's visual claim ("shows a quintic tangle... sized and faded
+like the rest") should have been scrutinised harder before being written, not merely
+screenshotted and described.
+
+**Fix: remove `WireShape::Quintic` from the clutter vocabulary entirely.** Back to five
+shapes (torus, Klein, Mobius, cube, tesseract), `nextFloat * 5 % 5`. Delete the `Quintic`
+enum value, its `buildWireShape` case, and the differential test that exercised it (the
+containment and rotation-divergence tests from this same revision are unaffected - keep
+them, they tested something real and still do). The quintic's rightful place in this file is
+back where it started: the one big, dedicated `Deco::Manifold` object on the main menu, not
+a background shape among six.
+
+**Tests.** A test that `decoForScreen(MainMenu)`/`decoForScreen(Welcome)` return
+`Deco::Manifold` again (the inverse of whatever test, if any, pinned the `Deco::None`
+retirement - update or remove it to match). A test that `DepthField`'s wire-shape selection
+only ever produces the five remaining `WireShape` values (no stray `Quintic` reachable by
+any seed). The containment (`kFieldMinRadius`) and rotation-divergence tests stay exactly as
+they are - re-run them to confirm they still pass with `Quintic` removed, since they should
+not have depended on the shape count, but confirm rather than assume.
+
+**Acceptance.** The main menu shows the original quintic object again, in its original
+place and scale (same as any commit before this M18 round touched `decoForScreen`); the
+background clutter is five shapes, not six, and none of it is the quintic; `tools/test.sh
+--build render` green.
+
 ## M18.5 Audio v1
 
 **Want.** The game is completely silent. `Settings` already carries `volumeMaster`/
