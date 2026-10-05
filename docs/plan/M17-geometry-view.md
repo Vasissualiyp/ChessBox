@@ -2897,3 +2897,36 @@ Visual captures (`build/m1726/`, cropped/upscaled with ImageMagick) - looked at 
   `standard --geometry --piece-cylinders` is still the ordinary 3-D board with sculptural
   pieces (`standard` has no play surface, so the setting is ignored). The default path's
   draw is unchanged: `discCounts` is zero wherever the surface path is not.
+
+### Correction: the 2D/3D button could get stuck disabled on a plain variant (2026-10-05, Claude)
+
+Reported directly: "your edits have disabled the normal 2D mode... when I try using it
+on cube5 or standard." Found and fixed directly, test-first.
+
+**Root cause.** `viewModeButton`'s fallback branch (everywhere the shape-piece meaning
+does not apply) kept the button's enabled state exactly as it was before M17.25:
+`!settings.geometryView`, unconditionally. `geometryView` is a persisted setting with
+nothing that resets it when switching to a variant with no surface at all - it stays
+true from whatever glued variant was last browsed with SHAPE on. On `standard`/`cube5`
+(`surfaceAvailable == false`), that stale `true` disabled the board's ordinary flat/solid
+toggle for a reason that no longer applies there - there is no shape standing in for the
+flat board to protect the toggle from contradicting, because there is no shape at all.
+
+**The fix.** The fallback's enabled state is now `!(geometryView && surfaceAvailable)` -
+greyed out only where a shape is actually standing in for the flat board, which is the
+one state the original design meant to guard against. Unaffected: the repurposed-button
+branch (unchanged), and the "flat wins over the shape" degenerate case, which still greys
+out exactly as before (`surfaceAvailable` is true there, so the new condition agrees with
+the old one).
+
+**Tests.** The existing `the 2D/3D button is re-purposed on the shape view` test's
+"`geometryView` set on a variant with no surface" case is corrected from
+`CHECK_FALSE(b.enabled)` to `CHECK(b.enabled)`, with the reasoning above recorded in its
+own comment - confirmed red against the unfixed code first, green after.
+
+**Verification.** `tools/test.sh --build render app` green (193 cases, 4.97M assertions,
+Vulkan validation on); `tools/precommit.sh` green. A fresh `--shot` of `standard` (default
+settings, so `geometryView` starts false and cannot itself reproduce the stuck-true
+scenario a capture can't simulate) shows the button live and unaffected in the common
+case; the stuck-state scenario itself is pure settings logic, covered directly by the
+corrected unit test.

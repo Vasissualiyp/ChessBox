@@ -72,13 +72,17 @@ TEST_CASE("the 2D/3D button is re-purposed on the shape view", "[render]") {
     CHECK_FALSE(b.pieceStyle);
   }
 
-  // `geometryView` set on a variant with no surface (e.g. standard) is the old behaviour
-  // exactly: the board toggle, greyed out - not the new piece-style meaning.
+  // Reported directly: `geometryView` left on from a *different*, glued variant (SHAPE
+  // has no way to turn itself off on a plain switch to e.g. standard or cube5) must not
+  // disable the board toggle there - there is no surface for it to have any effect on,
+  // so disabling it serves no purpose and only breaks the ordinary flat/solid toggle on
+  // every variant without a shape. Live, and still the plain board meaning, not the
+  // piece-style one - `surfaceAvailable` is false, so the first branch cannot fire.
   settings.geometryView = true;
   {
     const ViewModeButton b = viewModeButton(settings, false, false);
     CHECK(std::string(b.label) == "3D");
-    CHECK_FALSE(b.enabled);
+    CHECK(b.enabled);
     CHECK_FALSE(b.pieceStyle);
   }
 

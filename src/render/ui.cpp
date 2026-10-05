@@ -45,9 +45,15 @@ ViewModeButton viewModeButton(const app::Settings& settings, bool flatView,
   if (settings.geometryView && surfaceAvailable && !flatView) {
     return {settings.shapePieceCylinders ? "2D" : "3D", true, true};
   }
-  // Everywhere else it is exactly the board's own flat/solid toggle it always was,
-  // including its enabled state: greyed while SHAPE is on but has no surface to become.
-  return {flatView ? "2D" : "3D", !settings.geometryView, false};
+  // Everywhere else it is exactly the board's own flat/solid toggle it always was. Its
+  // enabled state greys out exactly where a shape is actually standing in for the flat
+  // board (`geometryView` on a variant that *has* a surface) - not merely wherever
+  // `geometryView` happens to be left on, which can be true on a variant with no surface
+  // at all (SHAPE has no way to turn itself off switching to e.g. standard or cube5):
+  // there is nothing for it to have replaced there, so disabling the toggle would only
+  // break the ordinary flat/solid board for no shape to show in its place (reported
+  // directly: "your edits have disabled the normal 2D mode... on cube5 or standard").
+  return {flatView ? "2D" : "3D", !(settings.geometryView && surfaceAvailable), false};
 }
 
 namespace {
