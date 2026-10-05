@@ -12,16 +12,21 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <numbers>
 
 #include "app/session.hpp"
+#include "app/shell.hpp"
 #include "io/fen.hpp"
 #include "render/board_renderer.hpp"
 #include "render/offscreen_target.hpp"
 #include "render/vulkan_context.hpp"
 #ifdef CB_HAVE_IMGUI
+#include <SDL3/SDL.h>
+
 #include "render/overture_scene.hpp"  // derivedSurfaceAt, for the geometry view (M17)
 #include "render/play_surface.hpp"
+#include "render/ui.hpp"
 #endif
 #include "support/variants.hpp"
 #include "view/theme.hpp"
@@ -719,7 +724,7 @@ TEST_CASE("the renderer draws straight into an image it does not own", "[render]
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cmd, &bi);
 
-    REQUIRE(renderer->record(cmd, *target, set, cam, {}, {}, frame).has_value());
+    REQUIRE(renderer->record(cmd, *target, set, cam, {}, {}, {}, frame).has_value());
 
     // The renderer leaves the image a colour attachment; the test wants it readable.
     VkImageMemoryBarrier2 b{};
@@ -774,6 +779,106 @@ TEST_CASE("the renderer draws straight into an image it does not own", "[render]
 
   vkDestroyImage(gpu().ctx.device(), image, nullptr);
   vkFreeMemory(gpu().ctx.device(), mem, nullptr);
+}
+
+TEST_CASE("the background callback draws behind the board, not over it",
+          "[render][gpu]") {
+  // The board's own pass takes a `background` callback invoked before its viewport and
+  // draws. A solid fill there must be covered by the board's opaque geometry; the same
+  // fill submitted as the late `overlay` must instead cover the board. No ImGui here - a
+  // raw attachment clear is enough to prove the ordering - and the ImGui field itself is
+  // driven end to end in the test below.
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+
+  constexpr std::uint32_t w = 256;
+  constexpr std::uint32_t h = 192;
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("standard"));
+  const Position p = Position::startPosition(v);
+  const view::PositionView snap = view::PositionView::capture(p);
+  const view::ViewConfig cfg = view::ViewConfig::forBoard(v.dims);
+  const view::OrbitCamera cam =
+      view::OrbitCamera::frame(view::boundsOf(view::layout(v.dims, cfg)));
+  const InstanceSet set = BoardRenderer{}.buildInstances(snap, cfg);
+
+  auto target = OffscreenTarget::create(gpu().ctx, w, h);
+  REQUIRE(target.has_value());
+  auto renderer = BoardRenderer::create(gpu().ctx);
+  REQUIRE(renderer.has_value());
+
+  const auto read = [&](const std::function<void(VkCommandBuffer)>& overlay,
+                        const std::function<void(VkCommandBuffer)>& background) {
+    REQUIRE(renderer->render(*target, set, cam, overlay, background).has_value());
+    auto px = target->readPixels();
+    REQUIRE(px.has_value());
+    Image img;
+    img.width = target->width();
+    img.height = target->height();
+    img.rgba = std::move(*px);
+    return img;
+  };
+
+  const Image::Rgba magenta{255, 0, 255, 255};
+  const auto fill = [&](VkCommandBuffer cmd) {
+    VkClearAttachment att{};
+    att.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    att.colorAttachment = 0;
+    att.clearValue.color.float32[0] = 1.0f;
+    att.clearValue.color.float32[1] = 0.0f;
+    att.clearValue.color.float32[2] = 1.0f;
+    att.clearValue.color.float32[3] = 1.0f;
+    VkClearRect rect{};
+    rect.rect = {{0, 0}, {w, h}};
+    rect.layerCount = 1;
+    vkCmdClearAttachments(cmd, 1, &att, 1, &rect);
+  };
+
+  (void)gpu().ctx.takeValidationMessages();
+  const Image none = read({}, {});
+  const Image early = read({}, fill);
+  const Image late = read(fill, {});
+
+  // A pixel well inside the board: every neighbour in `none` is board, not the ground.
+  const auto byte = [](float c) {
+    return static_cast<std::uint8_t>(std::lround(std::clamp(c, 0.0f, 1.0f) * 255.0f));
+  };
+  const view::Theme theme = BoardRenderer{}.theme();
+  const Image::Rgba ground{byte(theme.ink.r), byte(theme.ink.g), byte(theme.ink.b), 255};
+  const auto solidAt = [&](std::uint32_t x, std::uint32_t y) {
+    for (int dy = -3; dy <= 3; ++dy) {
+      for (int dx = -3; dx <= 3; ++dx) {
+        const auto sx = static_cast<std::uint32_t>(static_cast<int>(x) + dx);
+        const auto sy = static_cast<std::uint32_t>(static_cast<int>(y) + dy);
+        if (none.at(sx, sy) == ground) return false;
+      }
+    }
+    return true;
+  };
+  std::uint32_t bx = w / 2;
+  std::uint32_t by = h / 2;
+  bool found = false;
+  for (std::uint32_t y = 4; y + 4 < h && !found; ++y) {
+    for (std::uint32_t x = 4; x + 4 < w; ++x) {
+      if (solidAt(x, y)) {
+        bx = x;
+        by = y;
+        found = true;
+        break;
+      }
+    }
+  }
+  CAPTURE(found);
+  REQUIRE(found);
+
+  // Behind the board: the fill is invisible where the board sits.
+  CHECK(early.at(bx, by) == none.at(bx, by));
+  // But it did run: a frame corner has no board, so the fill shows there.
+  CHECK(early.at(0, 0) == magenta);
+  // Over the board: the same fill drawn last covers the board - the bug being fixed.
+  CHECK(late.at(bx, by) != none.at(bx, by));
+
+  CAPTURE(gpu().ctx.takeValidationMessages());
+  REQUIRE(gpu().ctx.validationErrorCount() == 0);
+  REQUIRE(writePpm(early, capturePath("background-behind")).has_value());
 }
 
 #ifdef CB_HAVE_IMGUI
@@ -977,6 +1082,119 @@ TEST_CASE("the shape tints its seam rails into the board mesh", "[render]") {
   const InstanceSet bare = renderer.buildInstances(snap, cfg, &seams);
   CHECK(carriesRail(bare) == 0);
 }
+
+TEST_CASE("the board screen's real ambient field is submitted behind the board",
+          "[render][gpu]") {
+  // The synthetic fill above proves the callback ordering; this proves the real wiring -
+  // `Ui::build` fills the field's dedicated list and `Ui::recordBackground` submits it -
+  // by comparing the field drawn before the board against the same field drawn after it.
+  // With the field behind, the board's opaque geometry hides part of it; drawn last, the
+  // field covers the board instead, so strictly more field pixels survive.
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct SdlGuard {
+    ~SdlGuard() { SDL_Quit(); }
+  } sdlGuard;
+  constexpr int kSize = 256;
+  SDL_Window* window =
+      SDL_CreateWindow("field-test", kSize, kSize * 3 / 4, SDL_WINDOW_HIDDEN);
+  REQUIRE(window != nullptr);
+  struct WinGuard {
+    SDL_Window* window;
+    ~WinGuard() { SDL_DestroyWindow(window); }
+  } winGuard{window};
+
+  auto shell = app::Shell::create(
+      {"standard"}, std::filesystem::path(CB_BINARY_DIR) / "field-test.conf");
+  REQUIRE(shell != nullptr);
+  shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
+    try {
+      return test::loadVariant(name);
+    } catch (const std::exception& e) {
+      return fail(ErrorCode::ParseError, e.what());
+    }
+  });
+  REQUIRE(shell->startGame("standard").has_value());
+
+  auto ui = Ui::create(gpu().ctx, window, view::Theme::manifold());
+  REQUIRE(ui.has_value());
+  Ui& u = **ui;
+
+  const VariantSpec& v = shell->session()->variant();
+  const view::ViewConfig cfg = view::ViewConfig::forBoard(v.dims);
+  const view::OrbitCamera cam =
+      view::OrbitCamera::frame(view::boundsOf(view::layout(v.dims, cfg)));
+  const InstanceSet set =
+      BoardRenderer{}.buildInstances(shell->session()->snapshot(), cfg);
+
+  auto target = OffscreenTarget::create(gpu().ctx, kSize, kSize * 3 / 4);
+  REQUIRE(target.has_value());
+  auto renderer = BoardRenderer::create(gpu().ctx);
+  REQUIRE(renderer.has_value());
+
+  const auto read = [&](const std::function<void(VkCommandBuffer)>& overlay,
+                        const std::function<void(VkCommandBuffer)>& background) {
+    REQUIRE(renderer->render(*target, set, cam, overlay, background).has_value());
+    auto px = target->readPixels();
+    REQUIRE(px.has_value());
+    Image img;
+    img.width = target->width();
+    img.height = target->height();
+    img.rgba = std::move(*px);
+    return img;
+  };
+  const auto diffCount = [](const Image& a, const Image& b) {
+    std::size_t n = 0;
+    for (std::size_t i = 0; i < a.rgba.size(); i += 4) {
+      if (std::memcmp(&a.rgba[i], &b.rgba[i], 4) != 0) ++n;
+    }
+    return n;
+  };
+
+  (void)gpu().ctx.takeValidationMessages();
+  Image none{}, bestNone{}, bestEarly{}, bestLate{};
+  std::size_t bestGain = 0;
+  std::size_t fieldPixels = 0;
+  // A handful of field frames: bodies orbit, so at least one puts a stroke over the
+  // board, which is the case the fix has to get right.
+  for (int frame = 0; frame < 24; ++frame) {
+    u.tick(0.15f);
+    u.newFrame();
+    (void)u.build(*shell, 60.0f);
+    u.endFrame();
+    none = read({}, {});
+    const Image early = read({}, [&](VkCommandBuffer c) { u.recordBackground(c); });
+    const Image late = read([&](VkCommandBuffer c) { u.recordBackground(c); }, {});
+    const std::size_t earlyDiff = diffCount(early, none);
+    const std::size_t lateDiff = diffCount(late, none);
+    if (earlyDiff > 0) fieldPixels = earlyDiff;
+    if (lateDiff > earlyDiff && lateDiff - earlyDiff > bestGain) {
+      bestGain = lateDiff - earlyDiff;
+      bestNone = none;
+      bestEarly = early;
+      bestLate = late;
+    }
+  }
+
+  // The field reaches the frame at all through `recordBackground`...
+  REQUIRE(fieldPixels > 0);
+  // ...and the board occludes it: drawn first it loses pixels to the board, drawn last it
+  // does not.
+  REQUIRE(bestGain > 0);
+  CHECK(diffCount(bestEarly, none) < diffCount(bestLate, none));
+
+  CAPTURE(gpu().ctx.takeValidationMessages());
+  REQUIRE(gpu().ctx.validationErrorCount() == 0);
+  // Three frames of the same moment, for a human: the board alone, the field drawn behind
+  // it (the fix), and the field drawn over it (the bug). `field-behind` must show the
+  // board intact where `field-over` shows the wireframe lying across it.
+  REQUIRE(writePpm(bestNone, capturePath("field-none")).has_value());
+  REQUIRE(writePpm(bestEarly, capturePath("field-behind")).has_value());
+  REQUIRE(writePpm(bestLate, capturePath("field-over")).has_value());
+}
+
 #endif  // CB_HAVE_IMGUI
 
 #endif  // CB_HAVE_VULKAN

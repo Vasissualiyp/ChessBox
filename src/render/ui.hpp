@@ -120,11 +120,28 @@ class Ui {
   /// Finish the frame and record its draw commands into the board's render pass.
   void endFrame();
   void record(VkCommandBuffer cmd);
+  /// Record the board screen's ambient field into the board's own render pass, before the
+  /// board's draws, so it is painted behind the board rather than over it (M18
+  /// correction). A no-op when the current screen has no field - every screen but the
+  /// board.
+  void recordBackground(VkCommandBuffer cmd);
 
  private:
   Ui() = default;
   void applyStyle();
   Result<void> loadFonts();
+  /// The interface's own multisample-matched pipeline for a standalone draw list. Dear
+  /// ImGui's backend builds its one pipeline at the sample count it was initialised with
+  /// (single-sample, for the overlay pass), and a pipeline's sample count must match the
+  /// attachment it draws into, so drawing the field inside the board's 4-sample pass
+  /// needs a second pipeline built from the same shaders at the board's sample count.
+  Result<void> buildBoardFieldPipeline(VkFormat colorFormat);
+  /// Clear the field's dedicated draw list and give it the frame's clip rect and font
+  /// texture, ready for `buildGameHud` to fill. Called once per frame, before any screen.
+  void resetBoardFieldList();
+  /// Wrap a standalone draw list in a minimal ImDrawData and submit it with the field's
+  /// multisample-matched pipeline.
+  void recordDrawList(VkCommandBuffer cmd, ImDrawList* list);
 
   UiRequest buildGameHud(app::Shell& shell, float fps);
   /// The two-pane frame every menu screen sits in: the drifting field, the screen's
@@ -316,6 +333,15 @@ class Ui {
   /// fewer bodies, further out and fainter, so it never competes with the pieces being
   /// played.
   DepthField boardField_{true};
+  /// The field's own draw list, separate from ImGui's frame-wide background list so it
+  /// can be submitted before the board - the coordinate labels and every menu share that
+  /// list and must stay on the late overlay path. Null until the first frame.
+  std::unique_ptr<ImDrawList> boardFieldList_;
+  VkShaderModule boardFieldVert_{VK_NULL_HANDLE};
+  VkShaderModule boardFieldFrag_{VK_NULL_HANDLE};
+  VkDescriptorSetLayout boardFieldSetLayout_{VK_NULL_HANDLE};
+  VkPipelineLayout boardFieldLayout_{VK_NULL_HANDLE};
+  VkPipeline boardFieldPipeline_{VK_NULL_HANDLE};
   /// Which variant the new-game screen is showing details for.
   std::string pickedVariant_;
   /// That variant's own one-line description, and the name it was read for, so the file

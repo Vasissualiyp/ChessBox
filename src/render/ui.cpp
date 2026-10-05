@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cmath>
 #include <filesystem>
+#include <span>
 #include <vector>
 
 #include <SDL3/SDL.h>
@@ -21,6 +22,7 @@
 #include "render/piece_mesh.hpp"
 #include "render/play_surface.hpp"
 #include "render/ui_widgets.hpp"
+#include "shaders.hpp"
 #include "view/seams.hpp"
 
 namespace cb::render {
@@ -58,6 +60,20 @@ std::filesystem::path findFont(const char* name) {
     if (std::filesystem::exists(p, ec)) return p;
   }
   return {};
+}
+
+Result<VkShaderModule> makeShader(const VulkanContext& ctx,
+                                  std::span<const std::uint8_t> spv) {
+  VkShaderModuleCreateInfo sci{};
+  sci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+  sci.codeSize = spv.size();
+  sci.pCode = reinterpret_cast<const std::uint32_t*>(spv.data());
+  VkShaderModule m = VK_NULL_HANDLE;
+  if (const VkResult r = vkCreateShaderModule(ctx.device(), &sci, nullptr, &m);
+      r != VK_SUCCESS) {
+    return fail(ErrorCode::Internal, "cannot create the field shader: " + describe(r));
+  }
+  return m;
 }
 
 /// The shell's own screens - the main menu and the panels it opens into. They move as
@@ -214,7 +230,10 @@ Result<std::unique_ptr<Ui>> Ui::create(const VulkanContext& ctx, SDL_Window* win
   info.Queue = ctx.queue();
   info.DescriptorPool = ui->pool_;
   info.MinImageCount = 2;
-  info.ImageCount = 2;
+  // Four, not two: the field and the overlay are two RenderDrawData calls per frame, and
+  // the backend's vertex/index buffers round-robin over ImageCount. Two frames in flight
+  // times two passes needs four slots for a reused buffer to be a frame old, not one.
+  info.ImageCount = 4;
   info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
   // The interface is drawn into the same pass as the board, so it declares the same
   // attachment formats. One render path, not two.
@@ -223,8 +242,146 @@ Result<std::unique_ptr<Ui>> Ui::create(const VulkanContext& ctx, SDL_Window* win
   if (!ImGui_ImplVulkan_Init(&info)) {
     return fail(ErrorCode::Unsupported, "cannot initialise the interface renderer");
   }
+  if (auto r = ui->buildBoardFieldPipeline(targetFormat); !r.has_value()) {
+    return fail(r.error().code, r.error().message);
+  }
   ui->initialised_ = true;
   return ui;
+}
+
+Result<void> Ui::buildBoardFieldPipeline(VkFormat colorFormat) {
+  const auto vs = makeShader(*ctx_, spv::imgui_field_vert_spv_span());
+  if (!vs.has_value()) return fail(vs.error().code, vs.error().message);
+  boardFieldVert_ = *vs;
+  const auto fs = makeShader(*ctx_, spv::imgui_field_frag_spv_span());
+  if (!fs.has_value()) return fail(fs.error().code, fs.error().message);
+  boardFieldFrag_ = *fs;
+
+  // The interface's frame-wide background list is filled with the field plus coordinate
+  // labels and every menu, so it cannot be submitted early; the field gets its own list
+  // and this is the pipeline that draws it, matching ImGui's own vertex layout and blend
+  // state but at the board pass's sample count.
+  VkDescriptorSetLayoutBinding binding{};
+  binding.binding = 0;
+  binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  binding.descriptorCount = 1;
+  binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  VkDescriptorSetLayoutCreateInfo dlci{};
+  dlci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  dlci.bindingCount = 1;
+  dlci.pBindings = &binding;
+  if (const VkResult r = vkCreateDescriptorSetLayout(ctx_->device(), &dlci, nullptr,
+                                                     &boardFieldSetLayout_);
+      r != VK_SUCCESS) {
+    return fail(ErrorCode::Internal,
+                "cannot create the field set layout: " + describe(r));
+  }
+
+  VkPushConstantRange push{};
+  push.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+  push.offset = 0;
+  push.size = sizeof(float) * 4;
+  VkPipelineLayoutCreateInfo plci{};
+  plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  plci.setLayoutCount = 1;
+  plci.pSetLayouts = &boardFieldSetLayout_;
+  plci.pushConstantRangeCount = 1;
+  plci.pPushConstantRanges = &push;
+  if (const VkResult r =
+          vkCreatePipelineLayout(ctx_->device(), &plci, nullptr, &boardFieldLayout_);
+      r != VK_SUCCESS) {
+    return fail(ErrorCode::Internal, "cannot create the field layout: " + describe(r));
+  }
+
+  // ImDrawVert: pos, uv, colour, matching the backend's own vertex input exactly.
+  VkVertexInputBindingDescription vb{};
+  vb.binding = 0;
+  vb.stride = sizeof(ImDrawVert);
+  vb.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+  VkVertexInputAttributeDescription attrs[3]{};
+  attrs[0] = {0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(ImDrawVert, pos)};
+  attrs[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(ImDrawVert, uv)};
+  attrs[2] = {2, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(ImDrawVert, col)};
+  VkPipelineVertexInputStateCreateInfo vi{};
+  vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+  vi.vertexBindingDescriptionCount = 1;
+  vi.pVertexBindingDescriptions = &vb;
+  vi.vertexAttributeDescriptionCount = 3;
+  vi.pVertexAttributeDescriptions = attrs;
+
+  VkPipelineInputAssemblyStateCreateInfo ia{};
+  ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+  ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  VkPipelineViewportStateCreateInfo vp{};
+  vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+  vp.viewportCount = 1;
+  vp.scissorCount = 1;
+  VkPipelineRasterizationStateCreateInfo rs{};
+  rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+  rs.polygonMode = VK_POLYGON_MODE_FILL;
+  rs.cullMode = VK_CULL_MODE_NONE;
+  rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+  rs.lineWidth = 1.0f;
+  VkPipelineMultisampleStateCreateInfo ms{};
+  ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+  ms.rasterizationSamples = OffscreenTarget::kSampleCount;
+  VkPipelineDepthStencilStateCreateInfo ds{};
+  ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+  VkPipelineColorBlendAttachmentState blend{};
+  blend.blendEnable = VK_TRUE;
+  blend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+  blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+  blend.colorBlendOp = VK_BLEND_OP_ADD;
+  blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+  blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+  blend.alphaBlendOp = VK_BLEND_OP_ADD;
+  blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                         VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+  VkPipelineColorBlendStateCreateInfo cb{};
+  cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+  cb.attachmentCount = 1;
+  cb.pAttachments = &blend;
+  const VkDynamicState dynamics[2]{VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+  VkPipelineDynamicStateCreateInfo dy{};
+  dy.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+  dy.dynamicStateCount = 2;
+  dy.pDynamicStates = dynamics;
+
+  VkPipelineShaderStageCreateInfo stages[2]{};
+  stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+  stages[0].module = boardFieldVert_;
+  stages[0].pName = "main";
+  stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+  stages[1].module = boardFieldFrag_;
+  stages[1].pName = "main";
+
+  VkPipelineRenderingCreateInfo rendering{};
+  rendering.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+  rendering.colorAttachmentCount = 1;
+  rendering.pColorAttachmentFormats = &colorFormat;
+  rendering.depthAttachmentFormat = OffscreenTarget::kDepthFormat;
+  VkGraphicsPipelineCreateInfo gpi{};
+  gpi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+  gpi.pNext = &rendering;
+  gpi.stageCount = 2;
+  gpi.pStages = stages;
+  gpi.pVertexInputState = &vi;
+  gpi.pInputAssemblyState = &ia;
+  gpi.pViewportState = &vp;
+  gpi.pRasterizationState = &rs;
+  gpi.pMultisampleState = &ms;
+  gpi.pDepthStencilState = &ds;
+  gpi.pColorBlendState = &cb;
+  gpi.pDynamicState = &dy;
+  gpi.layout = boardFieldLayout_;
+  if (const VkResult r = vkCreateGraphicsPipelines(ctx_->device(), VK_NULL_HANDLE, 1,
+                                                   &gpi, nullptr, &boardFieldPipeline_);
+      r != VK_SUCCESS) {
+    return fail(ErrorCode::Internal, "cannot create the field pipeline: " + describe(r));
+  }
+  return {};
 }
 
 Result<void> Ui::loadFonts() {
@@ -927,6 +1084,9 @@ void Ui::drawGhost(app::Shell& shell) {
 }
 
 UiRequest Ui::build(app::Shell& shell, float fps) {
+  // Start the frame with an empty field list. Only the board screen fills it; every other
+  // screen, and cinema, leaves it empty so `recordBackground` submits nothing.
+  resetBoardFieldList();
   // Cinema is the board and the framing look, nothing else: no screen, no rails, no
   // transition. The caller records this pass, so drawing only the look here is what keeps
   // the furniture out while still compositing the grade and vignette over the board.
@@ -1032,8 +1192,11 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
 
   // The ambient field, much quieter than the menus': wireframes only, a wider ring so the
   // bodies stay out towards the frame rather than washing over the board, and a low
-  // opacity. The board is the subject; this is only the room it sits in (M18.4).
-  boardField_.draw(ImGui::GetBackgroundDrawList(), ImVec2(0.0f, 0.0f),
+  // opacity. The board is the subject; this is only the room it sits in (M18.4). It goes
+  // to its own list, not ImGui's shared background list, so `recordBackground` can submit
+  // it early - inside the board's pass, behind the board (M18 correction). The
+  // coordinate labels further down stay on the shared list and the late overlay path.
+  boardField_.draw(boardFieldList_.get(), ImVec2(0.0f, 0.0f),
                    ImVec2(vp->Size.x, vp->Size.y), t, iconStyle_, false, true, 0.80f);
 
   // File and rank labels. On the flat board they sit on the near edges rather than on its
@@ -1650,12 +1813,62 @@ void Ui::record(VkCommandBuffer cmd) {
   if (data != nullptr) ImGui_ImplVulkan_RenderDrawData(data, cmd);
 }
 
+void Ui::resetBoardFieldList() {
+  if (boardFieldList_ == nullptr) {
+    boardFieldList_ = std::make_unique<ImDrawList>(ImGui::GetDrawListSharedData());
+  }
+  // The list lives outside any window, so it is reset by hand the way ImGui resets its
+  // own lists every frame. The clip rect and font texture are what ImGui's per-window
+  // lists get in `NewFrame`, without which the field would be clipped to nothing.
+  boardFieldList_->_ResetForNewFrame();
+  boardFieldList_->PushClipRectFullScreen();
+  boardFieldList_->PushTextureID(ImGui::GetIO().Fonts->TexID);
+}
+
+void Ui::recordDrawList(VkCommandBuffer cmd, ImDrawList* list) {
+  if (list == nullptr || list->VtxBuffer.Size == 0) return;
+  // A minimal ImDrawData around the one list. The projection comes from the frame that
+  // was just rendered, so the field's screen coordinates match the interface's.
+  ImDrawData* frame = ImGui::GetDrawData();
+  ImDrawData data;
+  data.Valid = true;
+  if (frame != nullptr) {
+    data.DisplayPos = frame->DisplayPos;
+    data.DisplaySize = frame->DisplaySize;
+    data.FramebufferScale = frame->FramebufferScale;
+  } else {
+    const ImGuiIO& io = ImGui::GetIO();
+    data.DisplayPos = ImVec2(0.0f, 0.0f);
+    data.DisplaySize = io.DisplaySize;
+    data.FramebufferScale = io.DisplayFramebufferScale;
+  }
+  data.AddDrawList(list);
+  ImGui_ImplVulkan_RenderDrawData(&data, cmd, boardFieldPipeline_);
+}
+
+void Ui::recordBackground(VkCommandBuffer cmd) {
+  recordDrawList(cmd, boardFieldList_.get());
+}
+
 Ui::~Ui() {
   if (initialised_) {
     vkDeviceWaitIdle(ctx_->device());
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
+  }
+  const VkDevice device = ctx_ != nullptr ? ctx_->device() : VK_NULL_HANDLE;
+  if (device != VK_NULL_HANDLE) {
+    if (boardFieldPipeline_ != VK_NULL_HANDLE)
+      vkDestroyPipeline(device, boardFieldPipeline_, nullptr);
+    if (boardFieldLayout_ != VK_NULL_HANDLE)
+      vkDestroyPipelineLayout(device, boardFieldLayout_, nullptr);
+    if (boardFieldSetLayout_ != VK_NULL_HANDLE)
+      vkDestroyDescriptorSetLayout(device, boardFieldSetLayout_, nullptr);
+    if (boardFieldVert_ != VK_NULL_HANDLE)
+      vkDestroyShaderModule(device, boardFieldVert_, nullptr);
+    if (boardFieldFrag_ != VK_NULL_HANDLE)
+      vkDestroyShaderModule(device, boardFieldFrag_, nullptr);
   }
   if (pool_ != VK_NULL_HANDLE) vkDestroyDescriptorPool(ctx_->device(), pool_, nullptr);
 }

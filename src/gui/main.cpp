@@ -669,9 +669,16 @@ int captureFrame(const std::string& variantName, const std::string& path,
     const std::function<void(VkCommandBuffer)> drawUi = [&](VkCommandBuffer cmd) {
       (*ui)->record(cmd);
     };
+    // The board screen's ambient field is submitted before the board, inside its own
+    // pass, so the board is drawn over it rather than under it (M18 correction). Every
+    // other screen leaves the field list empty and this is a no-op.
+    const std::function<void(VkCommandBuffer)> drawBackground = [&](VkCommandBuffer cmd) {
+      (*ui)->recordBackground(cmd);
+    };
     // The interface pass is always recorded now: in cinema it holds only the grade and
     // vignette, and outside cinema it is exactly the frame it always was.
-    if (auto ok = renderer->render(*target, instances, camera, drawUi, frame);
+    if (auto ok =
+            renderer->render(*target, instances, camera, drawUi, drawBackground, frame);
         !ok.has_value()) {
       std::fprintf(stderr, "%s\n", ok.error().format().c_str());
       return std::nullopt;
@@ -1539,6 +1546,15 @@ int main(int argc, char** argv) {
       (void)cmd;
 #endif
     };
+    // The board screen's field is drawn before the board, in the same pass, so the board
+    // covers it (M18 correction); empty on every other screen.
+    const auto background = [&](VkCommandBuffer cmd) {
+#ifdef CB_HAVE_IMGUI
+      (*ui)->recordBackground(cmd);
+#else
+      (void)cmd;
+#endif
+    };
 
     // Acquire a swapchain image and record the whole frame straight into it (ADR-0018):
     // no offscreen image, no blit. Two frames may be in flight, so the previous frame can
@@ -1551,7 +1567,7 @@ int main(int argc, char** argv) {
     }
     if (frame->valid()) {
       if (auto ok = renderer->record(frame->commandBuffer, *frame->target, instances,
-                                     camera, overlay, boardRect, frame->slot);
+                                     camera, overlay, background, boardRect, frame->slot);
           !ok.has_value()) {
         std::fprintf(stderr, "render failed: %s\n", ok.error().format().c_str());
         break;

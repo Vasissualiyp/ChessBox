@@ -799,6 +799,74 @@ it no longer can - the board draws after and over the field within the same pass
 because any body happens to miss it. `field_`/the main menu is pixel-for-pixel unchanged.
 `tools/test.sh --build render` green.
 
+### Status: in-game ambient field drawn behind the board (2026-10-05, opencode)
+
+`boardField_` now really is behind the board: it is painted at the top of the board's own
+render pass, before the board's viewport and draws, so the board's opaque geometry covers
+it. The menu's `field_` and the coordinate labels are untouched - still on
+`ImGui::GetBackgroundDrawList()` in the late overlay pass - and the menu is byte-identical.
+
+- **The spec's literal step 1 does not survive MSAA.** The board's first pass targets
+  `target.msaaColorView()` (4x), while Dear ImGui's one pipeline is built at
+  `info.MSAASamples = VK_SAMPLE_COUNT_1_BIT` because the late overlay draws into the
+  *resolved* single-sample image. Invoking the overlay in the board pass - which is the
+  shape of the specified fix - fails validation with
+  `VUID-vkCmdDrawIndexed-multisampledRenderToSingleSampled-07285/07286` (pipeline 1 sample,
+  colour and depth attachments 4). Reproduced by temporarily moving the `overlay(cmd)`
+  call up, then reverted.
+- **What shipped instead: a second, multisample-matched pipeline owned by `Ui`,** so the
+  field can be drawn into the 4-sample attachment using the *same shader* as ImGui.
+  `src/render/shaders/imgui_field.vert/.frag` are byte-for-byte copies of the backend's
+  `glsl_shader.vert/.frag`, compiled by the existing `glslc`/`EmbedSpirv` step and built
+  with `rasterizationSamples = OffscreenTarget::kSampleCount`, ImGui's own `ImDrawVert`
+  vertex layout and blend state, a descriptor-set layout with one combined image sampler,
+  and the same 4-float vertex push-constant range. The pipeline layout is deliberately
+  *compatible* with the backend's (`vkCmdBindDescriptorSets`/`vkCmdPushConstants` are
+  issued by the backend against its own layout), so `ImGui_ImplVulkan_RenderDrawData` can
+  drive it. `Ui::recordDrawList(cmd, list)` wraps the list and calls
+  `ImGui_ImplVulkan_RenderDrawData(&data, cmd, boardFieldPipeline_)`; the overlay keeps
+  passing `VK_NULL_HANDLE` and the backend's single-sample pipeline, unchanged.
+- **`ImDrawData`/`ImDrawList` shape (ImGui 1.91.4, vendored via nix).** `ImDrawData::CmdLists`
+  is an `ImVector<ImDrawList*>` with `CmdListsCount` kept separately; the wrapper uses the
+  public `ImDrawData::AddDrawList(list)` helper, which maintains both and the totals. The
+  dedicated list is `std::make_unique<ImDrawList>(ImGui::GetDrawListSharedData())`, and each
+  frame it is reset with `_ResetForNewFrame()`, `PushClipRectFullScreen()` and
+  `PushTextureID(ImGui::GetIO().Fonts->TexID)` - without those it is clipped to nothing.
+  `Ui::build` resets it first thing every frame, so cinema and every non-board screen leave
+  it empty and `recordBackground` is a no-op there.
+- **`BoardRenderer::render`/`record` gained a `background` callback** alongside `overlay`
+  (default-constructed = no change), invoked immediately after the first pass's
+  `vkCmdBeginRendering` with the frame's full viewport/scissor (hoisted above the pass),
+  before the board's own viewport/scissor and instance draws. `src/gui/main.cpp` passes
+  `Ui::recordBackground` at both call sites, next to the overlay. `info.ImageCount` went
+  `2 -> 4` because the backend's vertex/index buffers round-robin over it and there are now
+  two `RenderDrawData` calls per frame with two frames in flight.
+- **Tests.** `tests/render/test_offscreen_render.cpp` gained two. The first renders an
+  ordinary board with a `background` callback that clears the whole attachment to magenta
+  with `vkCmdClearAttachments`: a pixel solidly inside the board stays the board's colour
+  (and a corner turns magenta), while the same clear submitted as `overlay` paints over the
+  board - no ImGui context needed, it pins the ordering itself. The second drives the real
+  `Ui`/`boardField_`: builds a `Game`-screen frame through `Ui::build` and compares the real
+  field submitted by `recordBackground` against the board alone and against the same field
+  submitted late, over 24 field frames, requiring the field to reach the frame and the
+  board to occlude strictly more of it than the late path. Both wrote their frames to
+  `render-captures/field-{none,behind,over}.ppm`.
+- **Results.** `tools/test.sh --build render` green (117 cases, 4.92M assertions);
+  `tools/precommit.sh` green. The menu `--shot` is **byte-identical** before and after the
+  change (`cmp` on the two captures), which is stronger than visually unchanged.
+- **The capture, actually looked at.** `field_over.png` is the bug: light wireframe rings
+  and lines lie straight across the board's dark squares and the pieces. `field_behind.png`
+  is the same moment with the fix: the board is clean and the rings are cut off by its
+  silhouette - the left ring disappears behind the near edge instead of crossing it. The
+  raw frame has no board-crossing field body at the default `--shot` clock, which is why the
+  occlusion-specific frames come from the real-`Ui` test; `field-{behind,over}` are the same
+  field frame rendered both ways.
+- **Open / caveat.** The field is now part of the board's 4x MSAA attachment, so its
+  anti-aliasing is resolved at 4x rather than ImGui's own 1x fringe - a hair smoother than
+  the menu's copy of the same field. That is the only look change, it is confined to
+  `boardField_`, and it is a consequence of drawing in the board's pass rather than a
+  separate decision; no ADR, because it does not constrain anything outside this correction.
+
 ## M18.5 Audio v1
 
 **Want.** The game is completely silent. `Settings` already carries `volumeMaster`/

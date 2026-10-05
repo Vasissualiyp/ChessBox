@@ -185,10 +185,14 @@ class BoardRenderer {
       const std::vector<view::TimelineLink>& links = {}) const;
   /// Render one frame into `target`, leaving the colour image in TRANSFER_SRC_OPTIMAL.
   /// `overlay` records extra commands inside the same render pass, which is how the UI
-  /// is drawn over the board without a second path.
+  /// is drawn over the board without a second path. `background` records commands at the
+  /// very start of that pass, before the board's own viewport and draws, so an ambient
+  /// field can be painted behind the board rather than over it; an empty one changes
+  /// nothing.
   Result<void> render(const OffscreenTarget& target, const InstanceSet& instances,
                       const view::OrbitCamera& camera,
                       const std::function<void(VkCommandBuffer)>& overlay = {},
+                      const std::function<void(VkCommandBuffer)>& background = {},
                       BoardRect boardRect = {});
 
   /// Record one frame into a command buffer the caller owns and submits. Nothing is
@@ -200,6 +204,7 @@ class BoardRenderer {
   Result<void> record(VkCommandBuffer cmd, const OffscreenTarget& target,
                       const InstanceSet& instances, const view::OrbitCamera& camera,
                       const std::function<void(VkCommandBuffer)>& overlay,
+                      const std::function<void(VkCommandBuffer)>& background,
                       BoardRect boardRect, std::uint32_t frame);
 
   Result<Image> renderToImage(const OffscreenTarget& target, const view::PositionView& p,

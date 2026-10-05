@@ -1523,12 +1523,13 @@ InstanceSet BoardRenderer::buildInstances(
 Result<void> BoardRenderer::render(const OffscreenTarget& target, const InstanceSet& set,
                                    const view::OrbitCamera& camera,
                                    const std::function<void(VkCommandBuffer)>& overlay,
+                                   const std::function<void(VkCommandBuffer)>& background,
                                    BoardRect boardRect) {
   // The synchronous path runs on frame slot 0: it submits and waits, so there is never a
   // second frame overlapping it.
   Result<void> outcome{};
   const auto submitted = ctx_->submitAndWait([&](VkCommandBuffer cmd) {
-    if (auto r = record(cmd, target, set, camera, overlay, boardRect, 0);
+    if (auto r = record(cmd, target, set, camera, overlay, background, boardRect, 0);
         !r.has_value()) {
       outcome = fail(r.error().code, r.error().message);
       return;
@@ -1567,6 +1568,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
                                    const InstanceSet& set,
                                    const view::OrbitCamera& camera,
                                    const std::function<void(VkCommandBuffer)>& overlay,
+                                   const std::function<void(VkCommandBuffer)>& background,
                                    BoardRect boardRect, std::uint32_t frame) {
   // The contact shadows and the flourish ride the same buffer, immediately after the
   // opaque ones, so each blended pass is one more draw group rather than a second buffer.
@@ -1686,7 +1688,26 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     ri.pColorAttachments = &color;
     ri.pDepthAttachment = &depth;
 
+    // The full frame, used both by the ambient background drawn first and by the late
+    // overlay pass: both cover the whole target, while the board itself is confined to
+    // `board`.
+    const VkViewport full{0,
+                          0,
+                          static_cast<float>(target.width()),
+                          static_cast<float>(target.height()),
+                          0.0f,
+                          1.0f};
+    const VkRect2D fullScissor{{0, 0}, {target.width(), target.height()}};
+
     vkCmdBeginRendering(cmd, &ri);
+    // Whatever is already out there is painted before the board, not over it. The ambient
+    // field lands in the same pass, ahead of the board's own viewport and draws, so the
+    // board's opaque geometry simply covers it where the board actually sits.
+    if (background) {
+      vkCmdSetViewport(cmd, 0, 1, &full);
+      vkCmdSetScissor(cmd, 0, 1, &fullScissor);
+      background(cmd);
+    }
     // The board gets its own viewport - the area the interface leaves free - while the
     // overlay is drawn across the whole frame.
     VkViewport boardViewport{board.x, board.y, board.width, board.height, 0.0f, 1.0f};
@@ -1771,14 +1792,6 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
       }
     }
     vkCmdEndRendering(cmd);
-
-    const VkViewport full{0,
-                          0,
-                          static_cast<float>(target.width()),
-                          static_cast<float>(target.height()),
-                          0.0f,
-                          1.0f};
-    const VkRect2D fullScissor{{0, 0}, {target.width(), target.height()}};
 
     // Defocus, in two separable passes that ping-pong between the target's two colour
     // images and therefore leave the result back in the first one. Skipped entirely when
