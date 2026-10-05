@@ -1912,6 +1912,112 @@ The 3-D labels are off; the flat 2-D labels and the seam rails are untouched.
   there. The shape capture still shows the two hue-ramped seam rings. `tools/precommit.sh`
   green (format, build, arch, unit, property).
 
+### Revision: both sides of a seam ring, and the Klein slide's premature reset (2026-10-05)
+
+Two bugs reported together, both in `src/render/play_surface.cpp`, both specific to the
+glued-ring mechanics M17.21 built on.
+
+**1. Only one side of a seam ring is tinted.** Reported directly: on `cylinder`, only one
+of the two edges that meet at the wrap loop carries the rail colour - a cylinder's seam
+reads as a line down one side of the join and nothing on the other.
+
+`surfaceRail` (`play_surface.cpp:135`) only ever checks `i == 0`/`j == 0` (a cell's own low
+corner) against the `SeamMap`'s `Side::Min` face. Its comment reasons that the Min end and
+the Max end are "the same physical ring... so tinting both would double the rail rather
+than move it" - true of the exact corner *locus* (file 0's low corner and file (nx-1)'s high
+corner really do sit at one coincident 3-D point, since the parametrisation is periodic) but
+false of the *mesh*: each cell's patch is built with its own vertex copies, so the cell at
+`file == nx - 1` has its own high-corner row sitting at that same point, and today it is
+never visited - `surfaceRail` early-returns before ever checking a non-zero corner index,
+so that cell's own near-seam vertices never get a chance to blend in the colour. The result
+is exactly the report: colour fades in from one side of the join and snaps to plain board
+colour on the other, instead of reading as one ring. (`SeamMap::build`, `src/view/
+seams.cpp`, already generates a `Side::Max` face for every cell in that column too, with the
+*same* colour as its `Side::Min` partner - confirmed by reading it: both ends of one pair
+share one `canonical = min(cell, partner)` for the ramp-position/dimming computation, so
+there is no second colour to reconcile, only a second corner to visit.)
+
+Fix: `surfaceRail` should match `Side::Max` at a cell's *high* corner
+(`i == kSurfaceSubdiv`/`j == kSurfaceSubdiv`) exactly as it matches `Side::Min` at the low
+corner, each on its own cell, each independent of the other (not "either side", both when
+both apply - they are on different cells, not the same corner, so there is nothing to
+double). No change to `SeamMap`, no change to the colour, no change to the Min-corner path -
+purely extending the one function to also look at the other end.
+
+**2. The Klein slide resets before the shape has actually come home, when `kleinShift` is
+nonzero.** Reported directly: dragging/following continuously around the Klein bottle's
+rank axis does not stay smooth through a whole lap the way it should - it visibly resets,
+and the right fix isn't the generic "two laps" `wrapSlide` already assumes but something
+tied to the board's own size.
+
+The reset is `wrapSlide`'s own job working correctly against the *wrong period*. In
+`PlaySurface::build` (`play_surface.cpp:213-214`), the rank slide wraps at a fixed `2 * nz`
+cells - "two laps... where a seam reverses a coordinate" (the comment's own words), which is
+exactly right when `kleinShift == 0` (the shipped default) but stops being right the moment
+it isn't. Read `kleinSurf` (`src/render/overture_scene.cpp:298-336`) to see why: the
+cross-section angle sampled at a given `(u, v)` is `lemniscateAngle(u + phase * v)`, where
+`phase = kleinShift / nx` (`shape_sequence.cpp:88`, `pose.collapsePhase`). Going once round
+`v` (one lap) does two things at once: it rotates the cross-section by `kleinTwist` half-
+turns (the `chi` term, a function of `v` alone - this is the one `wrapSlide`'s "two laps"
+already accounts for), *and* it shifts the effective `u` sampled by `phase` - a spiral, by
+the comment's own words at `kleinSurf`'s call site ("the square lines spiral round the tube
+rather than the whole cylinder turning rigidly"). The embedding only returns to its exact
+starting point once **both** have come full circle: the twist after a multiple of `2 /
+gcd(kleinTwist, 2)` laps (1 or 2, which is what "two laps" already safely covers for any
+integer twist), and the spiral only after a multiple of `nx / gcd(nx, kleinShift)` laps -
+which for a shift that shares no common factor with `nx` (an 8-wide board shifted by 1
+square, say) is **`nx` laps**, not 2. Wrapping the raw slide at `2 * nz` cells when the true
+period is `nx` times longer snaps the accumulator back to a value that *looks* like the
+start but isn't - the spiral has not finished - which is the visible reset.
+
+This is exactly what was reported: *"N is the number of squares per dimension,
+perpendicular to rotation"* - rotating around the rank axis, the perpendicular dimension is
+file, and the period genuinely scales with `nx`, not with a constant.
+
+Fix: in `PlaySurface::build`, when the surface kind is `Klein`, widen the rank slide's wrap
+period from `2 * fnz` to `2 * fnz * fnx` - a conservative multiple that is always a multiple
+of the true period for *any* integer `kleinTwist`/`kleinShift` (it does not need to be the
+exact minimal period; `wrapSlide`'s whole purpose, per its own comment, is only to stop a
+long drag grinding the float down to noise, so a larger-but-still-bounded window costs
+nothing). Every other kind (`Tube`, `Torus`, non-orientable `Band`) has no such shift term
+and keeps its existing period unchanged - this is scoped to `Klein` alone, gated the same
+way the existing `kind` switch already is. The file slide's own period (`2 * fnx`, used by
+every kind) needs no change: `lemniscateAngle` is already exactly one-lap periodic in its
+full argument (`u + phase * v`), and sliding `u` alone, at fixed `v`, moves that argument by
+exactly what `u` moves - the shift term rides along unaffected, so the existing "two laps,
+always safe" logic for the file axis was never wrong. `searchSlide`'s own candidate grid
+(the align/follow camera's search, same file) also needs no change: it only cares about the
+cross-section's *orientation* for picking a camera-facing offset, which is the `chi`/twist
+term alone, already correctly bounded by the existing `2 * nz` - the shift affects *which*
+file lands where, not which way the tube faces, so widening its search window would only
+make the align feature slower for no visible gain.
+
+**Tests.**
+- Seam rail: extend the existing differential test (seam rails agree with `SeamMap`) to
+  check the *second* corner too - on `cylinder`/`torus`/`klein`, the high-corner row of the
+  `nx - 1`/`nz - 1` cells carries the same colour as the low-corner row of the `0` cells on
+  the same ring, not just one or the other. A `--shot` of `cylinder --geometry` with
+  `showSeams` on, inspected directly (not just asserted), should show one continuous ring,
+  not a line that fades on one side.
+- Klein slide: a property test that samples `PlaySurface::build` at `pose.slideV = k * nz`
+  for `k = 0 .. nx` (with `kleinShift` set to a value coprime with `nx`, e.g. 1) and asserts
+  the resulting corner positions only repeat at `k` a multiple of the true period derived
+  above (today's code would show them repeating at `k = 2`, which should go red first) -
+  and a companion that `kleinShift = 0` reproduces the exact same corner positions as before
+  this change, at every `k`, bit for bit (the default experience must not move at all).
+- `tools/test.sh --build render` green; validation-clean captures of `klein --geometry`
+  with `kleinShift` left at its default (0, unaffected) and, if there is a `--shot` flag or
+  settings override already in the codebase for setting it (check before adding one), at a
+  nonzero value through a fuller slide range, inspected directly for a clean, unbroken
+  spiral rather than a jump.
+
+**Acceptance.** A cylinder's (and torus's, and Klein's) seam reads as one coloured ring from
+both sides of the join, matching the flat view's legend. Dragging or following continuously
+around a Klein bottle's rank axis with a nonzero `kleinShift` no longer snaps partway
+through - the reset point moves out to the true period, and the default (`kleinShift = 0`)
+experience is pixel-for-pixel unchanged. `tools/test.sh --build render` and `--build app`
+green.
+
 Spec'd in full in
 [`M17.12-shapes-above-two-dimensions.md`](M17.12-shapes-above-two-dimensions.md): slide and
 invert for `torus3d`/`hyper4` (currently ignored by `buildStacked`), a ghost-based answer to
