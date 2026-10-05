@@ -1473,6 +1473,45 @@ pose with no shift and no slide.
 boundary, not half a cell apart - confirmed by a crop, looked at closely, not just a shot
 taken.
 
+**Status, item 4 (2026-10-06, opencode).** Investigation only - **no production code was
+changed**, because the comparison the item asks for shows no half-cell mismatch: the rail
+is already on the crossing. The numbers, at the shipped default (`kleinShift = 0`,
+`kleinTwist = 1`, `formed = 1`, `kCoverage = 0.9`, `kSurfaceSubdiv = 4`, 8x8 `klein`):
+
+- **`SeamMap`** marks the file seam on files 0/7 (`Min`/`Max`, glued) and the rank seam on
+  ranks 0/7. **`surfaceRail`** tints the patch corner at `u/v = 0.00625` (file-0 `i=0`,
+  rank-0 `j=0`) and `0.99375` (file-7 `i=4`, rank-7 `j=4`) - `0.05` of a cell inside the
+  seam, exactly `kCoverage`'s own inset, and the *patch corner*, not the cell centre. The
+  figure-eight passes through its own origin (the pinch) at `u = 0`, `0.5`, `1`; `u = 0`
+  is the file-7/file-0 lattice boundary - the same corner.
+- **Offsets.** Rail corner to the crossing at the same rank: `0.0788` world = `0.086`
+  cell = `4.5 px` = `0.14` square at 1920x1080. The two rims of one seam sit `0.17`-`0.28`
+  cell apart - the `kCoverage` groove between adjacent patches. Nothing is near `0.5`
+  cell. The spec's ruled-out hypothesis (the continuous pinch at `u = 0`) was right, and
+  the discrete reading is right too.
+- **A real half-cell bug, but not this one.** Locating the three did find a genuine
+  cell-centre/edge confusion in `PlaySurface::nearestBoundary` (the M17.19 glide
+  waypoint): it returns `pointAt(a.file + 0.5*step, ...)` where `pointAt`'s coordinate is
+  an edge at integers and a centre at `f + 0.5`, so the waypoint lands on the *source
+  seat's centre* instead of the shared edge. Measured on `torus` for a file step: `1.45`
+  world from the true edge (ratio to source `0.75`; the true edge is exactly equidistant,
+  `1.00`); its projection on the chord collapses onto the source centre (`-0.17`..`0.0`
+  on `klein`, where the shared edge projects to `0.5`). The one-line `+ 0.5f` fix went
+  red-then-green. But it also stops the torus rank glide in the M17.19 look-ahead test
+  from clipping - because the buggy waypoint was putting the gliding piece *inside* the
+  tube - so it perturbs the M17.20 anti-clip choreography and wants its own spec, not an
+  item-4 drive-by. It is not read by the rail, so it cannot be the reported symptom.
+- **Visual.** Captures under `build/m18_item4_check/` (gitignored): default, `--ghost
+  0.55`, top-down, and an axis-isolation pass (file rail red, rank rail green) diffed
+  against `showSeams` off. The file rail runs along the visible self-intersection neck and
+  the rank rail's figure-eight crosses it exactly there - the rail and the pinch are one
+  locus.
+- **Tests.** No test changed on the green tree: `tools/test.sh --build render` 128 cases,
+  `--build app` 68 cases, `tools/precommit.sh` all pass. The candidate regression test for
+  the glide bug (waypoint projected into the middle half of the a->b chord, exactly
+  equidistant on a torus) is recorded here rather than committed, since it pins the
+  unlanded `nearestBoundary` fix.
+
 **Scope note for all four items.** These are independent; land and verify each on its own
 rather than batching them into one large, hard-to-review change. Items 2 and 3 share a
 staging helper and are the most mechanical; item 1 is explicitly research-grade and may
