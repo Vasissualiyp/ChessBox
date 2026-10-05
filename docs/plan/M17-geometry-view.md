@@ -2018,6 +2018,40 @@ through - the reset point moves out to the true period, and the default (`kleinS
 experience is pixel-for-pixel unchanged. `tools/test.sh --build render` and `--build app`
 green.
 
+### Status: both sides of a seam ring, and the Klein slide's reset, fixed (2026-10-05, opencode)
+
+Both fixes are in `src/render/play_surface.cpp`; `SeamMap` and the surface functions were
+not touched.
+
+- **Seam rail, both sides.** `surfaceRail` now matches the seam at the corner that meets the
+  join on *that* cell: `Side::Min` at the low corner (`i`/`j == 0`), `Side::Max` at the high
+  corner (`== kSurfaceSubdiv`), each independent, so the `nx-1`/`nz-1` cell's own
+  high-corner vertices are tinted with the same colour as the `0` cell's low-corner ones.
+  No colour, `SeamMap` or Min-path change.
+- **Klein rank wrap.** The rank slide's wrap window widens from `2 * fnz` to `2 * fnz * fnx`
+  **only for `Klein` and only when `pose.collapsePhase != 0`**. The widened window is a
+  multiple of the true spiral period for any integer `kleinTwist`/`kleinShift` (no gcd
+  needed); gating on the shift is the one deviation from the spec's sketch, and it is what
+  keeps the shipped `kleinShift = 0` path bit-for-bit identical - an unconditional widening
+  changes the `k >= 2` sampling the companion test pins. Every other kind and the file slide
+  keep their existing windows.
+- **Tests.** The seam-rail differential test now checks both corners - the high-corner row
+  of the `nx-1`/`nz-1` cells carries the `Side::Max` colour matching the `0` cells'
+  `Side::Min` row, on `cylinder`/`torus`/`mobius`/`klein`. New property test
+  `a Klein bottle's rank slide period scales with its square shift`: with a coprime shift the
+  corners repeat only at `k % nx == 0` (red at `k = 2` before the fix), and a companion
+  asserts `collapsePhase = 0` reproduces the pre-change positions bit-for-bit at every `k`.
+  `tools/test.sh --build render app` green (186 cases, 4.96M assertions);
+  `tools/precommit.sh` green (format, build, arch, unit, property).
+- **Verification.** A `--shot` of `cylinder --geometry` at 1600x1200 with seams on, captured
+  before and after the `surfaceRail` change and diffed (`build/m17seam_check/`): the changed
+  pixels are confined to the seam line's bbox `(607,479)-(956,903)`. Looked at closely, the
+  before frame is a white seam with faint colour on one side only; the after frame is one
+  continuous hue-ramped cyan-green-blue rail reading from both sides of the join. There is
+  no headless flag for `kleinShift` (the capture path hardcodes its own default settings), so
+  the nonzero-shift spiral is pinned by the property test rather than a capture; `--slide-v`
+  alone uses the default shift and is unchanged.
+
 Spec'd in full in
 [`M17.12-shapes-above-two-dimensions.md`](M17.12-shapes-above-two-dimensions.md): slide and
 invert for `torus3d`/`hyper4` (currently ignored by `buildStacked`), a ghost-based answer to
@@ -2362,3 +2396,134 @@ alternative.
   per-frame loop's morph trigger either. The fix is believed correct on the strength of the
   code review and the unit test's teeth, not on a watched recording - **please confirm it
   looks right the next time you toggle SHAPE in play.**
+
+## M17.25 Icon-faced cylinder pieces, so a flipped seat still reads
+
+Reported directly: on a Mobius strip or Klein bottle, some pieces come out reversed, and
+the sculptural 3-D pieces (the knight's wedge, especially - anything with a clear "facing")
+are hard to read once that happens. Repurpose the existing 2D/3D button, while SHAPE is on,
+to switch between the ordinary pieces and a new double-sided puck built from the piece's
+flat icon, so a reversed seat still shows a legible, recognisable piece from either side.
+
+**Root cause of the reversal, so this is built against the real mechanism, not a guess.**
+`PlaySurface::build` (`src/render/play_surface.cpp:358-374`) gives every seat a frame from
+a continuity-walked tangent field (`exField`) and `ey = cross(normal, ex)`, then
+`seat.quat = quatOf(ex, ey, normal)` - always a proper, right-handed rotation; a piece mesh
+is never literally mirrored. But a non-orientable surface has no globally consistent
+tangent field, so the walk has to put its one unavoidable flip *somewhere* (M17.18 already
+fixed where - at the glued seam, not at the Klein pinch). On either side of that line `ex`
+points the opposite way, so a seat's whole frame is rotated roughly 180 degrees from its
+neighbour just across it. A sculptural archetype with a strong directional read (`Wedge`'s
+knight head, `Monolith`'s cross) suddenly faces the "wrong" way there - not broken, just
+confusing, exactly as reported. A flat top-down icon, the kind already used for the 2-D
+board, reads as what piece it is from a glance regardless of a 180-degree in-plane spin -
+glyphs survive a half-turn far better than a sculpted head does - so building the shape
+view's alternate piece out of the *existing* icon art, rather than a new sculptural look,
+directly addresses the actual confusion rather than something adjacent to it.
+
+**Build**
+
+1. **Setting and the button.** New `Settings::shapePieceCylinders` (bool, default `false`,
+   written to disk alongside the other shape settings). The 2D/3D button
+   (`src/render/ui.cpp:1523`) is currently hard-disabled whenever `geometryView` is on ("a
+   shape has no 2D rendering to fall back to") - that disabling was only ever about *board*
+   rendering. Branch on `shell.settings().geometryView`: off, the button is exactly what it
+   is today (flat vs. solid board, disabled in SHAPE); on, the button re-enables and instead
+   shows `shapePieceCylinders ? "2D" : "3D"`, toggling that setting - the same label
+   language the player already knows, now naming the piece style instead of the board.
+   Nothing about the disabled-reason comment for the *board* case changes; this is a second,
+   independent meaning gated on the opposite branch of the same `if`.
+2. **The mesh.** A puck per archetype, extruded from that archetype's **Primitive** icon
+   set specifically (`pieceIcon(IconStyle::Primitive, archetype)` in
+   `src/render/piece_icon.{hpp,cpp}`), not Faceted. Primitive is already documented as
+   "two or three convex shapes each, never more than eight points" with no cutouts - every
+   `PieceIcon` it returns has an empty `cut` field, unlike Faceted (the tower's
+   crenellations, the wedge's eye, the horn's ring are real polygon-with-holes cutouts
+   there). A convex, hole-free outline triangulates correctly with a plain fan from its
+   first vertex; reproducing Faceted's cutouts in 3-D would mean a real polygon-with-holes
+   triangulator for a handful of extra notches, which is out of scope here - Primitive
+   already reads fine at icon scale and is the deliberate choice, not a shortcut taken
+   silently.
+   - For each of the archetype's sub-polygons (drawn independently today, e.g. `Dome` is
+     base + body + collar + head as four separate convex shapes - see `pieceIcon`'s
+     `PieceIcon::polys`), fan-triangulate a top cap at local `z = +halfThick` and a bottom
+     cap at `z = -halfThick`, both from the *same* 2-D points (the icon's own 100x100,
+     y-down box, recentred so the icon's own centroid sits at local `x = y = 0`) - not a
+     mirrored copy, the same outline stamped on both faces, so the piece reads as the same
+     icon whichever face is towards the camera. Close the rim between the two caps with a
+     thin quad strip around the outline, normal facing outward, so the puck has a genuine
+     side wall rather than two coincident caps with nothing between them.
+   - One extruded mesh per archetype (the same seven a variant can name, plus the `Slab`
+     fallback `pieceIcon` already falls back to for an unanticipated one), appended into
+     the *same* shared vertex/index buffers `MeshLibrary::build()` already fills, each with
+     its own `MeshRange` - a new `MeshRange cylinderRanges[Archetype::Count]` alongside the
+     existing `ranges[Archetype::Count]` on `MeshLibrary`, built in the same function, no
+     second GPU buffer.
+3. **Instancing and placement.** `BoardRenderer`'s surface-piece path
+   (`emitSurfacePiece`, `src/render/board_renderer.cpp:822-851`, and its two call sites at
+   the seat loop and the travelling piece) currently places a piece's *foot* on the
+   surface: `body.center = centre + normal * kHalf`, the mesh rising from its own local
+   `z = 0`. A puck that has to protrude on both sides instead centres *on* the surface:
+   when `options_.shapePieceCylinders` is set, `body.center = centre` (no `kHalf` offset),
+   against the new `cylinderRanges` mesh instead of `ranges` - everything else about the
+   instance (`quat`, `fit`-based scale, colour, alpha, the check tint) is unchanged, so
+   GHOST, the capture flourish and the contact shadow all keep working exactly as they do
+   today; only which mesh is bound and where its local origin sits differ. The final draw
+   loop (`record`, ~`board_renderer.cpp:1734`) picks `cylinderRanges` instead of `ranges`
+   for the whole frame's batches when the setting is on - one option, not a per-instance
+   branch, since every surface piece switches together.
+   - Scoped to the surface/shape path only. The flat board and the ordinary 3-D (non-shape)
+     board are untouched - this setting has no effect unless `geometryView` is also on, and
+     the button that drives it is only reachable there in the first place.
+
+**Tests**
+
+- `MeshLibrary::build()` produces a non-empty, valid `cylinderRanges` entry for every
+  `Archetype` that `pieceIcon` returns a non-empty set for (the existing "every archetype
+  produces a usable mesh" test, extended rather than duplicated) - index bounds inside the
+  shared buffer, a closed manifold-ish rim (no dangling edges: every rim edge's two
+  triangles share it).
+- A property test that the puck's silhouette, viewed from directly along `+normal` and
+  directly along `-normal`, matches the archetype's own Primitive `IconPoly` outline up to
+  the known recentring/scale - i.e. the same icon really is on both faces, not a mirrored
+  pair (seeded directly by the reported bug: a mirrored pair would still "work" for this
+  test's naive form, so assert the two caps' projected outlines are the *same* polygon, not
+  merely congruent).
+- `decoForScreen`-style settings plumbing test: `Settings::shapePieceCylinders` round-trips
+  through save/load, defaults to `false`, and `coordinateLabelsShown`-style, a small pure
+  predicate (if one is warranted once the button's branch is written) is unit-testable
+  without a device.
+- `--shot` of `klein --geometry` with `shapePieceCylinders` on, cropped in on a seat right
+  at the flip locus and its neighbour just across it: both should show the same recognisable
+  icon the right way up, where today's sculptural pieces visibly disagree. A matching
+  capture with the setting off is pixel-identical to today's `klein --geometry` shot - the
+  default must not move anything.
+- `tools/test.sh --build render` and `--build app` green.
+
+**Acceptance**
+
+1. While SHAPE is on, the 2D/3D button is live (not greyed out) and toggles
+   `shapePieceCylinders`, labelled consistently with the existing 2D/3D language.
+2. With it on, every piece on the shape is a puck carrying its own Primitive icon on both
+   faces, sized to its seat the same way the sculptural pieces are (`fit`), protruding
+   visibly above and below the surface rather than standing only on top.
+3. On `klein`/`mobius`, a piece just across the flip locus from another of the same type
+   reads as the same recognisable piece on both sides of the line - the originally reported
+   confusion is gone by inspection, not just by the silhouette-matching test above.
+4. With the setting off (the default), nothing changes anywhere - flat board, ordinary 3-D
+   board and the shape view's sculptural pieces are all pixel-identical to before this
+   milestone.
+
+**Risks and non-goals**
+
+- Faceted icons' cutouts (tower crenellations, wedge eye, horn ring) are not reproduced in
+  3-D by this milestone - the puck always uses Primitive geometry regardless of the
+  player's `pieceIcons` setting, which continues to govern the flat board exactly as today.
+  A faithful Faceted extrusion is future work if the plainer look is not enough.
+- This does not change `seat.quat`, the tangent-field walk, or where the one unavoidable
+  flip sits (M17.18's territory) - it only changes what gets drawn with that frame, so it
+  does not need to and must not touch `play_surface.cpp`'s geometry beyond reading `quat`/
+  `normal`/`fit` exactly as the sculptural path already does.
+- Not offered outside the shape view: a flat or ordinary 3-D board has no non-orientable
+  seam to be confusing about, so the button's repurposed meaning only exists while SHAPE is
+  already on.

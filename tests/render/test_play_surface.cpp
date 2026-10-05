@@ -319,6 +319,65 @@ TEST_CASE("the board slides round its own surface", "[render]") {
   }
 }
 
+TEST_CASE("a Klein bottle's rank slide period scales with its square shift", "[render]") {
+  // M17.22 revision. With no square shift the rank seam only reverses a coordinate, and
+  // two laps bring the board home - the old `2 * nz` window. A nonzero `kleinShift` adds
+  // an independent spiral: `kleinSurf` samples `lemniscateAngle(u + (shift / nx) * v)`,
+  // so the embedding only returns after `nx / gcd(nx, shift)` laps, `nx` when the shift
+  // is coprime with the width. Wrapping the raw slide at the old two laps snapped the
+  // accumulator back while the spiral was still open - the reported reset.
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("klein"));
+  const int nx = static_cast<int>(v.dims.extent(0));
+  const int nz = static_cast<int>(v.dims.extent(1));
+  REQUIRE(nx == 8);
+  const int shift = 1;  // coprime with nx: the true period is nx laps
+  const auto build = [&](int k, int s) {
+    SurfacePose p;
+    p.slideV = static_cast<float>(k * nz);
+    p.collapsePhase = static_cast<float>(s) / static_cast<float>(nx);
+    return PlaySurface::build(v, p);
+  };
+  const auto sameCorners = [&](const PlaySurface& a, const PlaySurface& b, float tol) {
+    if (a.patches().size() != b.patches().size()) return false;
+    for (std::size_t c = 0; c < a.patches().size(); ++c) {
+      for (int ii = 0; ii <= kSurfaceSubdiv; ++ii) {
+        for (int jj = 0; jj <= kSurfaceSubdiv; ++jj) {
+          if (dist(cornerOf(a.patches()[c], ii, jj), cornerOf(b.patches()[c], ii, jj)) >
+              tol) {
+            return false;
+          }
+        }
+      }
+    }
+    return true;
+  };
+  const PlaySurface home = build(0, shift);
+  for (int k = 1; k <= nx; ++k) {
+    CAPTURE(k);
+    // Only a full true period comes home; the old two-lap window made this true at k = 2.
+    CHECK(sameCorners(build(k, shift), home, 1e-3f) == (k % nx == 0));
+  }
+  // The shipped default (no shift) is the pre-change board at every slide, bit for bit:
+  // its wrap is `k mod 2` laps, and the fix must not touch that path at all.
+  for (int k = 0; k <= nx; ++k) {
+    const PlaySurface got = build(k, 0);
+    const PlaySurface want = build(k % 2, 0);
+    REQUIRE(got.patches().size() == want.patches().size());
+    for (std::size_t c = 0; c < want.patches().size(); ++c) {
+      for (int ii = 0; ii <= kSurfaceSubdiv; ++ii) {
+        for (int jj = 0; jj <= kSurfaceSubdiv; ++jj) {
+          const view::Vec3 a = cornerOf(got.patches()[c], ii, jj);
+          const view::Vec3 b = cornerOf(want.patches()[c], ii, jj);
+          CAPTURE(k, c, ii, jj);
+          CHECK(a.x == b.x);
+          CHECK(a.y == b.y);
+          CHECK(a.z == b.z);
+        }
+      }
+    }
+  }
+}
+
 TEST_CASE("sliding the ranks is offered only where the ranks are glued", "[render]") {
   // A cylinder's rank edges are free, so sliding along them would translate the whole
   // tube through space and change nothing about the board - a control that did that
@@ -1507,31 +1566,54 @@ TEST_CASE("the shape's seam rails sit on the flat view's seams", "[render]") {
     for (const SurfaceSeat& seat : surf.seats()) {
       const Coord co = v.dims.toCoord(seat.cell);
       for (int axis = 0; axis < 2; ++axis) {
-        // What the flat view says here: a glued seam on this axis at its *Min* end, which
-        // is the wrap edge (the Max end is the same physical seam one cell round).
+        // What the flat view says here, both ends of the ring: a glued seam at the cell's
+        // own *Min* face and one at its *Max* face. The Min end of the coordinate-0 cell
+        // and the Max end of the coordinate-(extent-1) cell sit at one coincident 3-D
+        // point (the parametrisation is periodic), but each cell has its own vertex
+        // copies, so the high corner has to be tinted on its own or the ring fades in
+        // from one side and snaps off on the other (M17.21 revision).
         bool gluedMin = false;
-        view::Rgba want{};
+        view::Rgba wantMin{};
+        bool gluedMax = false;
+        view::Rgba wantMax{};
         for (const view::SeamFace& f : seams.at(seat.cell)) {
-          if (f.screenAxis == static_cast<std::uint8_t>(axis) && f.side == Side::Min &&
-              f.kind == view::SeamKind::Glued) {
+          if (f.screenAxis != static_cast<std::uint8_t>(axis) ||
+              f.kind != view::SeamKind::Glued) {
+            continue;  // a mirror leads nowhere; no hue
+          }
+          if (f.side == Side::Min) {
             gluedMin = true;
-            want = f.color;
+            wantMin = f.color;
+          } else {
+            gluedMax = true;
+            wantMax = f.color;
           }
         }
-        // The wrap ring is the coordinate-0 row, and a rail exists only where that row is
-        // really a glued seam. A mirror leads nowhere and gets nothing.
+        // A rail exists only where the wrap row is really a glued seam. The low corner
+        // belongs to the coordinate-0 cell, the high corner to the coordinate-(extent-1)
+        // one.
         const int coord = axis == 0 ? co[0] : co[1];
-        const bool onRing = gluedMin && coord == 0;
+        const int extent =
+            static_cast<int>(v.dims.extent(static_cast<std::size_t>(axis)));
+        const bool lowRing = gluedMin && coord == 0;
+        const bool highRing = gluedMax && coord == extent - 1;
         for (int i = 0; i < kSurfaceSubdiv + 1; ++i) {
           for (int j = 0; j < kSurfaceSubdiv + 1; ++j) {
             const SurfaceRail r = surfaceRail(seams, seat.cell, axis, i, j);
-            const bool edge = (axis == 0 ? i : j) == 0;
-            CAPTURE(seat.file, seat.rank, axis, i, j, onRing, edge);
-            if (onRing && edge) {
+            const int corner = axis == 0 ? i : j;
+            const bool lowEdge = corner == 0;
+            const bool highEdge = corner == kSurfaceSubdiv;
+            CAPTURE(seat.file, seat.rank, axis, i, j, lowRing, highRing);
+            if (lowRing && lowEdge) {
               CHECK(r.weight == 1.0f);
-              CHECK(r.color.r == want.r);
-              CHECK(r.color.g == want.g);
-              CHECK(r.color.b == want.b);
+              CHECK(r.color.r == wantMin.r);
+              CHECK(r.color.g == wantMin.g);
+              CHECK(r.color.b == wantMin.b);
+            } else if (highRing && highEdge) {
+              CHECK(r.weight == 1.0f);
+              CHECK(r.color.r == wantMax.r);
+              CHECK(r.color.g == wantMax.g);
+              CHECK(r.color.b == wantMax.b);
             } else {
               CHECK(r.weight == 0.0f);
             }

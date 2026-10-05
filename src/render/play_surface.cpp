@@ -135,14 +135,24 @@ bool PlaySurface::slidesAlongRanks(const VariantSpec& v) noexcept {
 SurfaceRail surfaceRail(const view::SeamMap& seams, CellId cell, int axis, int i, int j) {
   SurfaceRail out;
   if (axis != 0 && axis != 1) return out;
-  // The rail runs along the wrap edge, which is the low end of the coordinate-0 row on
-  // the shape's parametrisation: file 0's Min edge, rank 0's Min edge.
-  if ((axis == 0 ? i : j) != 0) return out;
+  // The rail runs along a wrap edge, and there are two corners that meet there: the low
+  // end of the coordinate-0 row is that cell's Min face, the high end of the
+  // coordinate-(extent-1) row is the next cell's Max face. The two sit at one coincident
+  // physical point, but the board is built from per-cell vertex copies, so each corner
+  // has to be tinted on its own cell - checking only the Min corner left the far side of
+  // the join plain and the ring faded in from one side (M17.21 revision).
+  const int corner = axis == 0 ? i : j;
+  Side want;
+  if (corner == 0) {
+    want = Side::Min;
+  } else if (corner == kSurfaceSubdiv) {
+    want = Side::Max;
+  } else {
+    return out;
+  }
   for (const view::SeamFace& f : seams.at(cell)) {
     if (static_cast<int>(f.screenAxis) != axis) continue;
-    // The Min end is the wrap ring; the Max end is the same physical ring one cell round,
-    // so tinting both would double the rail rather than move it.
-    if (f.side != Side::Min) continue;
+    if (f.side != want) continue;
     if (f.kind != view::SeamKind::Glued) continue;  // a mirror leads nowhere; no hue
     out.color = f.color;
     out.weight = 1.0f;
@@ -211,7 +221,19 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
   // Two laps is `2 * nx` cells along the files and `2 * nz` along the ranks, so a full
   // drag carries a1 all the way round and home rather than snapping after two squares.
   const float su = wrapSlide(pose.slideU, 2.0f * fnx) / fnx;
-  const float sv = slidesAlongRanks(v) ? wrapSlide(pose.slideV, 2.0f * fnz) / fnz : 0.0f;
+  // The rank window is two laps for every warp whose rank seam only reverses a coordinate
+  // (its twist closes after one or two). A Klein bottle with a nonzero square shift is
+  // the exception: `kleinSurf` samples `lemniscateAngle(u + collapsePhase * v)`, an
+  // independent spiral that only closes after `nx / gcd(nx, shift)` laps, so the old
+  // two-lap window snapped the raw slide back while the spiral was still open (M17.22
+  // revision). Widen it to the conservative `2 * nz * nx` - a multiple of the true period
+  // for any integer twist or shift, so no gcd is needed - but only where the shift is
+  // really there, so the shipped `kleinShift = 0` board keeps its exact old window. The
+  // file slide needs no change: `lemniscateAngle` is one-lap periodic in `u + phase * v`,
+  // and sliding `u` at fixed `v` moves that argument by exactly what `u` moves.
+  float rankWrap = 2.0f * fnz;
+  if (kind == app::SurfaceKind::Klein && pose.collapsePhase != 0.0f) rankWrap *= fnx;
+  const float sv = slidesAlongRanks(v) ? wrapSlide(pose.slideV, rankWrap) / fnz : 0.0f;
   pose.slideU = 0.0f;
   pose.slideV = 0.0f;
   s.kind_ = kind;
