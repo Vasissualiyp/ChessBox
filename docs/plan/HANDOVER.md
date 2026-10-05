@@ -1,33 +1,36 @@
-# Handover — next steps (Wave 1)
+# Handover — next steps
 
-Written 2026-09-30 for an agent picking this up on another machine. Read
-[`AGENTS.md`](../../AGENTS.md) first, then [`00-roadmap.md`](00-roadmap.md); this page is only
-"what is done, what is next, and where".
+Written 2026-09-30, last refreshed 2026-10-04. Read [`AGENTS.md`](../../AGENTS.md) first,
+then [`00-roadmap.md`](00-roadmap.md); this page is only "what is done, what is next, and
+where". The numbered sections below (1-8) are a dated log of how Wave 1 and M18 actually got
+built, kept for the reasoning; this top section is the thing to trust for current status.
 
-## Where this is
+## Where this is (as of 2026-10-04)
 
-M0–M6 are complete. Wave 1 (clippable visuals) is most of the way through; the work is
-committed and the fast suite is green at the time of writing.
+**Wave 1 is fully complete**: M11, M12.1-M12.3 and M12.6 (the marketing runner), M13, M16.2,
+and M17 (play on the shape) - including M17.20-M17.24, a run of camera-correctness bug fixes
+found by actually using the shipped work (the chase anti-clip mismatch, the Approach/Return
+camera losing the board, the SHAPE morph drifting off-centre). **M18** (production polish -
+not a release-sequence wave, see its own header) is also fully complete: M18.1-M18.6, plus a
+revision round on M18.4 and M18.6 from direct playtest feedback (the ambient background's
+containment/rotation/the quintic's return, a speed setting for the morph). Every item was
+implemented by opencode from a Claude-written spec and independently re-verified (rebuild,
+the relevant test tags, and a visual capture inspected directly) before being committed -
+see each milestone's own "Status" section in `M17-geometry-view.md`/`M12-broadcast.md`/
+`M18-production-polish.md` for the detail and any deviations.
 
-**Committed and green:**
+**One open item, well-scoped:** M12.6's "Watch a game" interactive menu action (a library
+entry that plays a canonical game through the same `GameRunner` the `--play` CLI flag
+already uses) is specced but not yet built - see `M12-broadcast.md`'s own "Getting it in
+front of a user" note and the **Next** pointer at the end of this file.
 
-- M11 the move camera — pure `view::moveCamera`, `routeRuns`, transported orientation,
-  grid-axis cuts, `Session::camera()` integration, picking lock, `docs/camera.md`,
-  ADR-0016/0017. Tests: purity, the frame-the-cell oracle, the turn, the cut, a safe-zone
-  sweep over `klein`/`cube5`/`hyper4`/`t6`.
-- M12.1 cinema mode and M12.2 clip export — `--cinema`, `--follow`, `--move-t`,
-  `--clip DIR --frames --t0 --t1`.
-- M13.1/2/3/5 generic overtures — `app::overtureSignature`, `derivedSurfaceAt`,
-  `derivedOvertureScene`, the demo move, selection in `Ui`, `docs/overtures.md`.
-- M13.4 the D ≥ 3 derived grid — `derivedGridOverture` (landed with this handover; compiles
-  and the render/view tests pass, **not yet eyeballed** - see "Verifying a derived overture").
-- M16.2 build pipeline — `tools/package.sh` (self-contained prefix + headless smoke test),
-  `tools/steam_upload.sh` + `packaging/steam/`.
-- M4.8 partial — 4× MSAA, `--bench-frame`, `Settings::frameCap`, fence instead of
-  `vkQueueWaitIdle` in `present`.
-- M4.9 partial — quintic memo, built-scene cache, adaptive subdivision.
+**Known, deliberately deferred, not blocking anything:** `torus3d_twist`'s own 3-D shell
+shape (M17.12/M17.22 - the flat-lattice variant plays correctly; only its *shape view* is
+deferred, as research-grade); the SHAPE morph's `formed = 0` mirror-flip (M18.6 - the morph
+itself works, only its very first frame is a reflection rather than the bit-exact flat
+board). Neither is on the critical path to Wave 2; pick either up only if asked.
 
-**Not committed / minor:** nothing outstanding in the tree at handover.
+**Not committed / minor:** nothing outstanding in the tree at the time of this refresh.
 
 ## The next steps, in order
 
@@ -221,5 +224,40 @@ shadows, M18.3 a cinema vignette/grade, M18.4 the ambient background redone (the
 geometries - torus, Klein, Möbius, cube, hypercube; explicitly not the quintic - drawn as
 quiet wireframes instead of filled confetti, brought to the game screen too), M18.5 audio v1
 (SDL3's own audio API, procedurally synthesised SFX, no licensed assets needed, no music yet).
-Full build/test/acceptance detail is in the spec file; none of it has been dispatched for
-implementation yet.
+Full build/test/acceptance detail is in the spec file. **Built 2026-10-04**, all six items
+plus the M18.4/M18.6 revision round below - see each section's own "Status" note in the
+spec file for what was built and any deviations.
+
+### M18.4/M18.6 revision round (2026-10-04)
+
+Found by directly playing with the shipped M18 work, not by review: the SHAPE morph
+(M18.6) was off-centre at the end of its roll - which turned out to be a genuine camera bug
+one layer below M18.6 itself, fixed as **M17.24** in `M17-geometry-view.md` (the camera was
+framed on the shape once, at the toggle instant, and never revisited as the shape's own
+bounds kept changing through the roll) - plus a request for a morph-speed setting, and three
+pieces of feedback on M18.4's background (the quintic wanted back in as one shape among the
+six rather than staying fully retired, the clutter's own breathing motion could carry it back
+toward the centre it was supposed to avoid, and every body traced one fixed rotation path
+instead of a real tumble). All four are built, independently re-verified and committed; see
+`M17-geometry-view.md`'s M17.24 section and the two "Revision" subsections in
+`M18-production-polish.md` (under M18.4 and M18.6) for the detail.
+
+**One verification gap worth knowing about:** M17.24 and the morph-speed setting only
+affect the live interactive loop, not `--shot`/`--clip` captures - there is no
+synthetic-input tool in this environment to script a SHAPE toggle in a running window and
+capture it over time, so both were verified by code review and by tests built against the
+underlying pure functions, not by a watched recording. Flagged explicitly in both commits;
+worth a human confirming the live feel next time SHAPE is used in play.
+
+## Next
+
+The one open, well-scoped item: M12.6's **"Watch a game"** interactive menu action (see
+`M12-broadcast.md`'s "Getting it in front of a user" note). Spec it with full
+implementation precision (menu entry location, which bundled game file plays until the user
+supplies a real canonical one, determinism/reuse of the existing `GameRunner`) before
+dispatching - the existing M12.6 text states the want but not the exact build, the way every
+other dispatch this session has needed.
+
+Beyond that, Wave 1 and M18 are done; the next real work is Wave 2 (M14 onboarding,
+M10.2-M10.3 the baseline opponent, M16.2-M16.3 the demo, M7 the editors) per the roadmap's
+release sequence - see `00-roadmap.md`.

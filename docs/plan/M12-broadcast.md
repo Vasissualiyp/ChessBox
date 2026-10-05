@@ -542,3 +542,99 @@ cases - `gui-play-flat`, `gui-play-shape` (torus a1-a5 wraps the rank seam, vali
 `gui-default-resolution` (reads the PPM header at 1920x1080 and at an explicit 640x480).
 `--play FILE --clip DIR` twice was also diffed by hand on 1- and 2-move torus games. Green:
 `tools/test.sh --build render app`, the 26 `gui-*` ctests, and `tools/precommit.sh`.
+
+---
+
+## M12.8 "Watch a game" (the interactive runner, deferred half of M12.6)
+
+**Want.** M12.6's own "Getting it in front of a user" note named this and deferred it:
+*"A 'Watch a game' / 'Demo' action built from the same runner, so a capture — and later the
+packaged demo (M16.3) — can play a canonical game with one command."* `--play FILE` already
+drives `GameRunner` deterministically for a capture; this is the same runner, driven by the
+interactive loop's real clock instead of a fixed `t`, reachable from the main menu with no
+command line at all.
+
+**What it is.** A read-only session: the engine plays a bundled game file move by move, with
+the ordinary move camera and (on a glued variant) the M17.19 shape-follow choreography,
+while the player watches and cannot move a piece. Not a new screen in the UI sense — the
+board renders exactly as `Screen::Game` already does — but a mode the session is in, the way
+`shotInFlight()` already locks picking during a shot.
+
+**Build.**
+
+- **`app::Session` gains a watching mode.** A `GameRunner` member (or owned pointer,
+  constructed from a loaded `GameFile`), a `watching()` accessor, and a `stopWatching()`
+  that clears it and returns to the ordinary session state the way leaving pause already
+  does. While watching: clicks on the board are refused (same discipline `shotInFlight()`
+  already uses for picking — reuse that gate rather than adding a second one), and the
+  session's own `playChecked`/move-application path is driven by `GameRunner::step()`
+  instead of a player action.
+- **Driving it in the interactive loop** (`src/gui/main.cpp`): once watching starts, each
+  frame checks whether the current move's animation (and, on a shape, the
+  `ShapeMoveSequence` choreography) has settled; once settled, hold for a dwell
+  (`Settings::??` — reuse whatever dwell concept `GameRunner`'s own capture-path dwell
+  already names, or add one setting if none is exposed yet; do not invent a second "how
+  long between moves" number if `--dwell`'s underlying constant can be shared) and then call
+  `GameRunner::step()` for the next move. On `GameRunner::done()`, stop watching and return
+  to the main menu — do not loop the game, and do not leave the board sitting on the final
+  position with no way out (see the "how to stop" bullet below regardless of whether it
+  finished or the player exited early).
+- **Which game file plays.** For this v1, bundle a fixed, small set of game files as actual
+  game content (not test fixtures reused by name — write real, deliberately chosen
+  showcase games; `tests/data/games/*.cbgame`'s existing files are test fixtures for
+  `GameRunner`'s own tests and should not silently become the game's first piece of shipped
+  content). At minimum one glued-board game (to show the shape choreography) and one flat
+  one. If more than one is bundled, the "Watch a game" menu entry opens a short picker
+  (reuse the library's own list-and-detail widget style, not a new one) rather than only
+  ever playing a fixed first file; if exactly one is bundled for this first pass, skip the
+  picker and play it directly — note which choice was made in the status note.
+- **The menu entry.** `Ui::buildMainMenu` (`src/render/ui_menus.cpp`) gains a `menuEntry`
+  row — "Watch a game" reads better placed right after "New game" (the renumbering of the
+  rows below it is mechanical, `menuEntry`'s `index` argument is already explicit per row).
+  Starting it: resolve the variant from the chosen file (same resolution `--play`/`open`
+  already use), start that game via `Shell::startGame`, then hand the loaded session to
+  `GameRunner` and begin watching.
+- **How to stop.** A visible "STOP WATCHING" control (reuse the existing in-game button row
+  style) and a keyboard escape both return to the main menu — picking does not, since that
+  is already refused while watching, and a player must not be left with no way out short of
+  waiting for the whole game to finish.
+- **Cinema or not.** Default to the ordinary game HUD (not forced cinema) so a first-time
+  "watch" still shows the player the interface they will use themselves — cinema is what
+  `--cinema`/the capture path already offers for marketing footage; this menu action is
+  about *showing a player what the game can do*, not producing a trailer. State this
+  explicitly rather than silently picking the wrong default.
+- **Determinism is not required here.** Unlike `--play --clip`, this is driven by the real
+  interactive clock and is not expected to reproduce byte-for-byte between runs (the ambient
+  ease/dwell timing is real wall time) — do not add a determinism test for the interactive
+  path; `--play`'s own determinism contract is untouched and already tested.
+
+**Tests.**
+
+- A headless/no-GPU test that starting "watch" with a bundled game file transitions the
+  session into the watching state, that a board click is refused while watching (reusing
+  whatever `shotInFlight`-style assertion the existing picking-lock test already uses as a
+  template), and that `GameRunner::done()` correctly ends the mode.
+- A validation-clean `--shot`/`--screen` capture of the main menu showing the new row (or
+  of the watching state itself, if a capture flag is added to reach it headlessly — check
+  whether one is needed or whether the existing `--play --shot` path already covers what a
+  capture of this state would show).
+- If a picker is built (more than one bundled file), a test that it lists all bundled files
+  and that choosing one starts watching that file specifically.
+
+**Acceptance.**
+
+1. From the main menu, "Watch a game" plays a bundled game automatically, through the
+   ordinary move camera and shape choreography, with no player input accepted on the board.
+2. A visible control and a keyboard escape both return to the main menu at any point.
+3. The game ends and returns to the main menu on its own when the file's last move is
+   played, with no loop.
+4. `tools/test.sh --build app render` green; the existing `--play`/`GameRunner` determinism
+   tests are unaffected.
+
+**Risks and non-goals.** Not the packaged demo (M16.3) — this is the mechanism M16.3 will
+later reuse, not the demo build itself. Not a replacement for `--play --clip`'s
+deterministic export, which stays the marketing/clip path. The bundled game file(s) are
+real content, not throwaway fixtures — writing a good one (or picking one from variants
+already shipped) is as much the task as the code; do not ship a trivial two-move game just
+to have *something* to watch if a better one is easy to construct from what the engine
+already knows how to play.
