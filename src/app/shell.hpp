@@ -71,6 +71,16 @@ struct AttractStep {
   /// levels visibly spread apart into the nested shells as the beat plays (M13.9
   /// revision: "klein morphs to torus, then the torus copies itself into shells").
   float spreadFrom{-1.0f};
+  /// Carry the previous beat's own end-of-game position onto this beat's board (M13.9
+  /// Part F), through `embedOnto`, instead of starting this beat's `moves` from the
+  /// variant's own declared start. `moves` then has to be a legal continuation of the
+  /// *embedded* position, not of the variant's own opening - verified the same way every
+  /// other beat is, by loading it. False (the default) starts this beat fresh, which is
+  /// still the right choice whenever the previous beat's board cannot carry the pieces
+  /// this one needs (Klein and the 3-D torus field no bishop or queen at their own start
+  /// for exactly this reason - see `defaultAttractSequence`'s own comment) or whenever a
+  /// cut is meant to be a hard reset (the loop's own wrap back to cylinder).
+  bool continuesPosition{false};
 };
 using AttractSequence = std::vector<AttractStep>;
 

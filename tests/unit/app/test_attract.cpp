@@ -9,9 +9,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "app/embed.hpp"
 #include "app/shell.hpp"
 #include "game/game.hpp"
 #include "io/fen.hpp"
@@ -67,18 +69,33 @@ TEST_CASE("every attract beat is a real, legal game for its variant",
   REQUIRE(seq.front().variant == "standard");
   REQUIRE(seq[1].variant == "cylinder");
   REQUIRE(seq[1].formedFrom > 0.0f);
+  // `continuesPosition` beats are not legal from their own variant's start - they are a
+  // legal continuation of whatever the previous beat's game ended on, carried across
+  // through `embedOnto` exactly as `Shell::startAttractStep` carries it (M13.9 Part F).
+  // Tracking the previous beat's own variant and finished game mirrors that directly,
+  // rather than re-deriving the rule a second way.
+  std::optional<VariantSpec> prevVariant;
+  std::optional<Game> prevGame;
   for (const AttractStep& step : seq) {
     CAPTURE(step.variant);
     const VariantSpec v = test::loadVariant(step.variant);
     GameFile file;
     file.variant = step.variant;
     file.variantId = v.variantId();
-    file.startFen = toFen(Position::startPosition(v));
+    file.startFen = step.continuesPosition && prevGame.has_value()
+                        ? toFen(embedOnto(prevGame->position(), *prevVariant, v))
+                        : toFen(Position::startPosition(v));
     file.moves = step.moves;
-    Game game(v);
+    // `prevVariant` is reassigned *before* `Game` is built against it, so the game's own
+    // internal pointer lands on this stable, loop-external storage - not the local `v`
+    // above, which would dangle the instant this iteration ends (the same pitfall the
+    // CLI's own `embed` command hit and fixed).
+    prevVariant = v;
+    Game game(*prevVariant);
     const auto ok = applyGameFile(file, game);
     REQUIRE(ok.has_value());
     CHECK(game.moveHistory().size() == step.moves.size());
+    prevGame = std::move(game);
   }
 }
 
@@ -237,16 +254,30 @@ TEST_CASE("every cut in the sequence lands on the previous shape's own end-of-st
   CHECK(torus.formedFrom == view::kTorusRollEnd);
   CHECK(torus.formedTarget == 1.0f);
 
+  // Position continuity (M13.9 Part F): torus is a real continuation of cylinder's own
+  // game, the one pair of beats both the geometry and the piece rosters can carry it
+  // through; neither standard nor cylinder itself has anything earlier to continue.
+  CHECK_FALSE(standard.continuesPosition);
+  CHECK_FALSE(cylinder.continuesPosition);
+  CHECK(torus.continuesPosition);
+
   // Torus ends fully formed (a plain ring); Klein starts at its own ring-formed waypoint
   // - no fold, no twist yet - the same picture torus's own end state is.
   CHECK(kleinIn.formedFrom == view::kKleinRingEnd);
   CHECK(kleinIn.formedTarget == 1.0f);
+  // Klein's own king/rook/knight army cannot carry torus's bishops and queen (the same
+  // reason Mobius was dropped), so the fold-in is its own independent line, not a
+  // continuation.
+  CHECK_FALSE(kleinIn.continuesPosition);
 
   // Klein's second beat eases back down to that same ring-formed waypoint - undoing the
-  // fold and the twist it just played - rather than starting fresh or snapping.
+  // fold and the twist it just played - rather than starting fresh or snapping. It *does*
+  // continue klein-in's own game: nothing is cut between the two, so the pieces should
+  // not jump back to Klein's own start.
   CHECK(kleinOut.variant == "klein");
   CHECK(kleinOut.moves.empty());
   CHECK(kleinOut.formedTarget == view::kKleinRingEnd);
+  CHECK(kleinOut.continuesPosition);
 
   // The 3-D torus is explicitly pinned fully formed (not inherited from Klein's own
   // `kKleinRingEnd`, which does not mean the same thing on a stacked shape) and starts
@@ -254,6 +285,9 @@ TEST_CASE("every cut in the sequence lands on the previous shape's own end-of-st
   CHECK(shells.formedFrom == 1.0f);
   CHECK(shells.spreadFrom == 0.0f);
   CHECK(shells.spreadTarget == 1.0f);
+  // Its own king/rook/knight army, same reasoning as Klein's fold-in; the loop's own wrap
+  // back to cylinder afterwards is a hard reset too (checked in the loop test above).
+  CHECK_FALSE(shells.continuesPosition);
 
   // Standard has nothing to morph from - the sequence's own cold open.
   CHECK(standard.variant == "standard");

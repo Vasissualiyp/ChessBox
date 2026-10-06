@@ -5,8 +5,11 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 
+#include "app/embed.hpp"
+#include "io/fen.hpp"
 #include "io/game_file.hpp"
 #include "io/variant_toml.hpp"
 #include "view/morph.hpp"
@@ -452,23 +455,24 @@ AttractSequence defaultAttractSequence() {
   // dropped (M13.9 revision, Part I); `hyper4_8x8.toml` and `embedOnto` remain,
   // independently tested but unreferenced here. A Mobius beat was tried here too
   // (standard -> Mobius -> cylinder -> ...) and then dropped: Mobius has no pawn piece
-  // type, and carrying a position through it for real continuity (the still-open Part F
-  // question) would drop the pawns permanently with no way to bring them back for any
-  // later beat - a real, lasting cost for a shape this sequence does not need. Every
-  // line is real, legal opening play, verified through the engine's own legality:
-  // `startWatching` replays it move by move and a bad move fails the load.
+  // type, and carrying a position through it for real continuity would drop the pawns
+  // permanently with no way to bring them back for any later beat - a real, lasting cost
+  // for a shape this sequence does not need. Every line is real, legal play, verified
+  // through the engine's own legality: `startWatching` replays it move by move and a bad
+  // move fails the load.
   //
   // Every cut between shapes is a real, continuous geometry morph, not a hard swap - the
-  // whole point of this revision. Cylinder's own end state (`formed = 1`, an open tube)
-  // is bit-for-bit the torus morph's own `kTorusRollEnd` waypoint (`view/morph.hpp`), so
-  // the torus beat starts there and eases the ring closed. The torus beat's own end state
-  // is bit-for-bit the Klein morph's own `kKleinRingEnd` waypoint - a plain ring, no
-  // fold, no twist - so the Klein beat starts there and eases the fold, then the twist. A
-  // second, move-free Klein beat eases `formed` back down to that same `kKleinRingEnd`
-  // waypoint - undoing the fold and the twist, "morph to torus temporarily" - before the
-  // cut into the 3-D torus, which opens with every level collapsed onto that one ring
-  // (`spreadFrom = 0`) and spreads them apart over the beat - "copy the middle torus a
-  // few times." Only the very first beat (`standard`) has nothing to morph from.
+  // whole point of the first half of this revision. Cylinder's own end state
+  // (`formed = 1`, an open tube) is bit-for-bit the torus morph's own `kTorusRollEnd`
+  // waypoint (`view/morph.hpp`), so the torus beat starts there and eases the ring
+  // closed. The torus beat's own end state is bit-for-bit the Klein morph's own
+  // `kKleinRingEnd` waypoint - a plain ring, no fold, no twist - so the Klein beat starts
+  // there and eases the fold, then the twist. A second, move-free Klein beat eases
+  // `formed` back down to that same `kKleinRingEnd` waypoint - undoing the fold and the
+  // twist, "morph to torus temporarily" - before the cut into the 3-D torus, which opens
+  // with every level collapsed onto that one ring (`spreadFrom = 0`) and spreads them
+  // apart over the beat - "copy the middle torus a few times." Only the very first beat
+  // (`standard`) has nothing to morph from.
   //
   // The sequence opens on the literal `standard` board, then hard-cuts into the cylinder
   // beat already part-way up its roll. This is the documented workaround for the M18.6
@@ -476,18 +480,61 @@ AttractSequence defaultAttractSequence() {
   // black nearest the camera and white far off, the reverse of a normal board, so the
   // trailer starts on a clean board and picks the roll up in motion instead. See the
   // status note in `docs/plan/M13-overtures.md`.
+  //
+  // Part F, resolved: cylinder and torus carry one real, continuous game between them
+  // (`continuesPosition`, `embedOnto`) - cylinder plays its own ten-ply opening, then
+  // torus's own ten plies are a real continuation of *that exact position*, not a fresh
+  // independent line. It stops there rather than reaching Klein or the 3-D torus, for the
+  // same reason Mobius was dropped, just discovered the hard way instead of reasoned out
+  // in advance: Klein and `torus3d_8x8` both field only king, rook and knight at their
+  // own start (no bishop, no queen, no pawn) because - their own files say so - a bishop
+  // or queen on either shape gives check from almost anywhere once every rank and file
+  // (and, on the 3-D torus, every level) wraps. Embedding a normal opening's bishops and
+  // queen onto either one reliably produces exactly that: a forced-or-near-forced
+  // position, confirmed directly, not assumed, via the CLI's own new `embed` command
+  // against both shapes. Klein and the 3-D torus therefore keep their own independently
+  // authored lines, played on the restricted armies their own files actually field - real
+  // continuity where the geometry supports it, a clean reset where it does not, exactly
+  // the same judgement Mobius was dropped on. Klein's own two beats *do* carry a position
+  // between themselves (`continuesPosition` on the second), since nothing is cut there -
+  // it is the same variant both beats stand on, so the pieces should not visibly jump at
+  // a fold that is not a shape cut. The loop's own wrap from the 3-D torus back to
+  // cylinder stays a hard reset: carrying a king/rook/knight-only position onto a board
+  // that wants pawns would be worse than starting fresh, and the geometry cut there was
+  // already a hard one (`formedFrom = 0.30`, unrelated to whatever the 3-D torus beat
+  // ended on).
+  //
+  // Every line below is ten plies (five moves a side), long enough to show real
+  // development and not just an opening tag. Picking them was not just "any legal line
+  // reaches ten plies": transplanting a normal opening's armies onto a rank-periodic
+  // board is its own hazard independent of piece roster - `torus.toml`'s own comment
+  // explains why its start array sits four ranks apart rather than in the usual corners
+  // ("rank 1 and rank 8 are *adjacent*... White is already in an inescapable check").
+  // Cylinder's own ten plies end with both kings stepped one square off their home rank
+  // (`Ke2`, `Ke7`) for exactly that reason - confirmed empirically, the same discipline
+  // as everywhere else in this file, after a first attempt that left both kings at home
+  // folded to one legal move the instant it was embedded onto the rank-periodic torus.
   AttractSequence seq;
-  seq.push_back({.variant = "standard", .moves = {"e2e4", "e7e5"}, .formedFrom = 1.0f});
+  seq.push_back({.variant = "standard",
+                 .moves = {"e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5", "c2c3", "g8f6",
+                           "d2d3", "d7d6"},
+                 .formedFrom = 1.0f});
   seq.push_back({.variant = "cylinder",
-                 .moves = {"e2e4", "e7e5", "g1f3", "b8c6"},
+                 .moves = {"e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "a7a6", "b5a4", "g8f6",
+                           "e1e2", "e8e7"},
                  .formedFrom = 0.30f});
   seq.push_back({.variant = "torus",
-                 .moves = {"d1d5", "e5d5", "h1h5", "a5a1"},
-                 .formedFrom = view::kTorusRollEnd});
+                 .moves = {"d2d3", "d7d6", "c2c3", "b7b5", "a4b3", "c8e6", "b1d2", "g7g6",
+                           "h2h3", "h7h6"},
+                 .formedFrom = view::kTorusRollEnd,
+                 .continuesPosition = true});
   // Klein hides its far side, so it ghosts and draws flat icon pucks throughout both of
-  // its beats (M13.9 revision, Part H), not just the fold-in.
+  // its beats (M13.9 revision, Part H), not just the fold-in. It does not continue
+  // torus's game (see the comment above) - this is its own line, on its own
+  // king/rook/knight army, from its own declared start.
   seq.push_back({.variant = "klein",
-                 .moves = {"a1a5", "e5a5", "b1c3", "a5a1"},
+                 .moves = {"b1c3", "f5e3", "d1e1", "h5h7", "c3b5", "e3d5", "b5d4", "h7h6",
+                           "d4f5", "d5f6"},
                  .ghostTarget = 0.35f,
                  .formedFrom = view::kKleinRingEnd,
                  .flatPieces = true});
@@ -495,10 +542,14 @@ AttractSequence defaultAttractSequence() {
                  .moves = {},
                  .formedTarget = view::kKleinRingEnd,
                  .ghostTarget = 0.35f,
-                 .flatPieces = true});
+                 .flatPieces = true,
+                 .continuesPosition = true});
+  // Its own line too, on its own king/rook/knight army, for the same reason Klein's is.
   seq.push_back({.variant = "torus3d_8x8",
                  .moves = {"(0,0,0)-(0,0,1)", "(0,1,2)-(0,1,1)", "(1,0,0)-(0,2,0)",
-                           "(0,1,1)-(0,0,1)"},
+                           "(0,1,1)-(0,0,1)", "(3,0,0)-(3,1,0)", "(3,1,2)-(3,2,2)",
+                           "(2,0,0)-(1,1,0)", "(2,1,2)-(2,2,2)", "(1,1,0)-(1,1,1)",
+                           "(2,2,2)-(2,1,3)"},
                  .ghostTarget = 0.35f,
                  .formedFrom = 1.0f,
                  .flatPieces = true,
@@ -511,10 +562,23 @@ Result<void> Shell::startAttractStep(std::size_t index) {
     return fail(ErrorCode::OutOfRange, "attract step out of range");
   }
   const AttractStep step = attract_[index];
+  // Continuity (M13.9 Part F): carry the previous beat's own end-of-game position onto
+  // this beat's board before `startGame` below replaces the session that position lives
+  // in. `fromVariant` is copied rather than referenced, because `embedOnto` only reads it
+  // during the call - the copy just has to outlive that one call, not the new session.
+  std::optional<Position> embedded;
+  std::optional<VariantSpec> fromVariant;
+  if (step.continuesPosition && session_ != nullptr) {
+    fromVariant = session_->variant();
+    embedded = session_->game().position();
+  }
   if (auto ok = startGame(step.variant); !ok.has_value()) return ok;
   // Build the game file from the session's own started position, so its FEN always
   // matches the variant and no author has to keep one in sync (M13.9).
   GameFile file = toGameFile(session_->variant(), session_->game());
+  if (embedded.has_value()) {
+    file.startFen = toFen(embedOnto(*embedded, *fromVariant, session_->variant()));
+  }
   file.moves = step.moves;
   if (auto ok = session_->startWatching(std::move(file), settings_.watchDwell);
       !ok.has_value()) {

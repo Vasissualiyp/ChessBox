@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "app/embed.hpp"
 #include "game/game.hpp"
 #include "io/ascii_board.hpp"
 #include "io/fen.hpp"
@@ -57,6 +58,8 @@ void printHelp() {
                "  moves                list legal moves\n"
                "  move <text>          play a move, e.g. e2e4 or e7e8q\n"
                "  undo                 take back the last move\n"
+               "  embed <name>         carry the position onto another variant's board\n"
+               "                       (app::embedOnto), by shared axis and piece name\n"
                "  save <file>          write the game (variant, start, moves)\n"
                "  open <file>          load a game file, replacing the current game\n"
                "  perft <depth>        count leaf nodes\n"
@@ -266,6 +269,32 @@ int main(int argc, char** argv) {
         reportError("no such legal move: '" + text + "'");
         if (batch) break;
       }
+    } else if (cmd == "embed") {
+      std::string what;
+      in >> what;
+      const std::filesystem::path direct(what);
+      const std::filesystem::path path =
+          what.find('/') == std::string::npos && !std::filesystem::exists(direct)
+              ? std::filesystem::path("variants") / (what + ".toml")
+              : direct;
+      auto v = loadVariantFile(path);
+      if (!v.has_value()) {
+        reportError(v.error().format());
+        if (batch) break;
+        continue;
+      }
+      // Build the new session first, so the embedding lands on *its* stable VariantSpec
+      // address, not the local `*v` that is about to be moved out from under it (Position
+      // and MoveGen hold a pointer to their variant - the same reason the struct above
+      // isn't movable).
+      auto next = std::make_unique<Session>(std::move(*v));
+      const Position embedded = app::embedOnto(s->position, s->variant, next->variant);
+      next->start = embedded;
+      next->position = embedded;
+      s = std::move(next);
+      history.clear();
+      std::cout << "embedded onto " << s->variant.name << '\n'
+                << toFen(s->position) << '\n';
     } else if (cmd == "undo") {
       if (history.empty()) {
         reportError("nothing to undo");
