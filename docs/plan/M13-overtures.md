@@ -772,3 +772,112 @@ checked: any piece carry across a cut, because the carry is not active - the seq
 still the per-beat canonical-start one, and the captures above show that, unchanged. Like
 `torus3d_8x8`, `hyper4_8x8` is auto-scanned into the New Game library (no curated list),
 so it is player-visible even though nothing uses it yet.
+
+### Revision: a proper game screen instead of a menu backdrop, 2-D pieces where the shape
+### needs them, and the hypercube dropped (2026-10-05, feedback)
+
+Three more corrections, after watching Part E run:
+
+1. **This should be a real game environment, not a menu backdrop.** Part E composited
+   the trailer board behind the main menu's own panel (`pauseFrame`, board left, menu
+   right) - the wrong shape entirely. The trailer should land on the ordinary game
+   screen, full board, full camera orbit - exactly what "Watch a game" already gives a
+   bundled game, since it already *is* a real, running `Session`/`Game` (M12.8's watch
+   machinery is what drives every beat). The player should be free to orbit and zoom
+   while the pieces play themselves, the same way watching a bundled game already works.
+2. **2-D icon pieces only where the shape needs them.** Switch `shapePieceCylinders` on
+   for the Klein and 3-D torus beats only (both already ghost, for the same underlying
+   reason: those are the two shapes where a sculptural piece, or a piece half-hidden
+   behind a nearer shell, is hardest to read at a glance - M17.25's icon pucks exist
+   exactly for this). Cylinder and torus keep the ordinary sculptural pieces.
+3. **Drop the hypercube beat.** The sequence ends on the 3-D torus; no `hyper4` beat.
+   `hyper4_8x8.toml`/`embedOnto` stay exactly where Part F left them - untouched, still
+   independently tested, simply unused by the shipped sequence now. Don't remove them.
+
+**Part G (do first): land the trailer on `Screen::Game`, not the menu.**
+
+`Shell::startGame` already lands on `Screen::Game` by default (same place "watch a
+bundled game" ends up) - `Shell::startAttractStep` (`src/app/shell.cpp`, ~line 480-501)
+currently *undoes* that itself, forcing `screen_`/`previous_` back to `Screen::MainMenu`
+right after `startGame` runs (the "Attract runs behind the menu: `startGame` moved us to
+the game, put us back" lines). Delete those two lines - let the beat land on
+`Screen::Game` like every other `startGame` call does, nothing more to do there.
+
+Unwind the MainMenu-specific plumbing Part E added for the backdrop case, now dead
+weight:
+- `Shell::showsBoard()`'s `case Screen::MainMenu: return attracting() && session_ !=
+  nullptr;` (`shell.cpp`, ~line 177-180) - revert to `false`, matching every screen
+  `showsBoard()` doesn't list. Attract no longer runs while `screen() ==
+  Screen::MainMenu`, so this case can never fire true again.
+- `Ui::buildMainMenu`'s `overBoard = shell.showsBoard(); pauseFrame(...) : drawShellFrame(...)`
+  branch (`src/render/ui_menus.cpp`) - revert to always `drawShellFrame`, and remove the
+  bottom-left "STOP TRAILER" overlay window Part E added directly in this function (it
+  drew over the menu specifically because attract used to run *on* the menu; it no
+  longer does).
+- `Shell::stopAttract()` (`shell.cpp`, ~line 516) doesn't change `screen_` at all today,
+  because it never needed to - attract never left `Screen::MainMenu` before. Now it must:
+  add the same `go(Screen::MainMenu)` `Shell::stopWatching()` already does
+  (`shell.cpp:437-440` is the pattern), so leaving the trailer returns to the ordinary
+  menu exactly like leaving a watched game does.
+
+Then give the trailer its *own* exit control on the screen it now actually uses. Read
+`Ui::buildGameHud`'s bottom-left controls block (`src/render/ui.cpp`, ~line 1468-1481):
+while `shell.watching()`, it shows a single "STOP WATCHING" button plus a "move N of M -
+Esc leaves the game" caption, calling `Shell::stopWatching()`. An attract beat also sets
+`session_->watching()` true internally (it is a watch run under the hood), so this
+branch will fire during a trailer beat too, and calling `stopWatching()` there would stop
+only the current beat's inner watch, not the whole sequence - the wrong control for the
+wrong mode. Check `shell.attracting()` **first** (the same precedence the Esc handler in
+`src/gui/main.cpp` already uses) and show a sibling "STOP TRAILER" / "Esc leaves the
+trailer" pair calling `Shell::stopAttract()` instead, falling through to the existing
+ordinary-watch branch otherwise. `main.cpp`'s own Esc handling already checks
+`attracting()` before `watching()` (Part E) and needs no change.
+
+Camera: nothing to change here beyond what Part E already did. `cameraMode = "off"` /
+`followStrength = 0` (set in `applyAttractLook`) only disables *automatic* move-chasing;
+the player's own orbit/zoom input is a separate path, already live on `Screen::Game` the
+same way it is for an ordinary game or a watched one - which is exactly what "camera
+controls" means here, and it falls out of landing on the real game screen rather than
+needing new code of its own.
+
+**Part H: 2-D pieces on the Klein and 3-D torus beats.**
+
+Add a field to `AttractStep` (`src/app/shell.hpp`, next to `formedTarget`/`ghostTarget`)
+- `bool flatPieces{false}` (name it for what it does). In `defaultAttractSequence()`, set
+it `true` on the Klein and `torus3d_8x8` steps only - the same two that already set a
+`ghostTarget` below 1. In `Shell::startAttractStep`, set
+`settings_.shapePieceCylinders = step.flatPieces` when a beat starts (a discrete style
+switch, not something to ease the way `formed`/`ghost` are - it can simply snap at the
+cut, there is no continuous "half icon, half sculpture" to animate toward).
+
+**Part I: drop the hypercube beat.**
+
+Remove the `hyper4` entry from `defaultAttractSequence()` (`shell.cpp`, ~line 451-479).
+The sequence is `standard -> cylinder -> torus -> klein -> torus3d_8x8`, looping back to
+`cylinder` (five steps, not six). Update every test that hard-codes the old step count or
+step identities (`tests/unit/app/test_attract.cpp`'s `REQUIRE(seq.size() == 6)` and the
+beat-by-beat checks) to match. Leave `variants/hyper4_8x8.toml` and `app::embedOnto` in
+the tree untouched - independently correct, independently tested, simply not referenced
+by the sequence any more.
+
+**Tests.** Part G: a `Shell`-level test that starting the sequence lands on
+`Screen::Game` (not `Screen::MainMenu`), `showsBoard()` is true there the same way it is
+for an ordinary game, and `stopAttract()` returns to `Screen::MainMenu`. Part H: the
+default sequence's Klein and `torus3d_8x8` steps have `flatPieces == true` and every
+other step has it `false`; a `Shell`-level check that `settings().shapePieceCylinders`
+actually flips as `advanceAttract` cuts between beats. Part I: the existing loop test
+(`"the attract sequence plays every shape and loops back forever"`) updated to the new
+five-step sequence, still proving the wrap, not just the shorter count.
+
+**Acceptance.** Pressing "Watch trailer" moves the game onto the ordinary game screen -
+full board, no menu panel beside it - and the player can freely orbit/zoom while it
+plays. The Klein and 3-D torus beats show icon-puck pieces; cylinder and torus show the
+ordinary sculptural ones. The sequence never visits `hyper4`. A visible control plus Esc
+returns to the ordinary main menu (the quintic field) from anywhere in the sequence.
+
+**Risks and non-goals.** Still no new camera choreography - the player's manual orbit is
+not "camera motion" in the sense the user means to build later; nothing here adds
+automatic framing beyond what `frameBoard` already does on a cut. The still-open
+continuity question (Part F, parked) is untouched by this revision - dropping `hyper4`
+removes one transition from that future problem but does not resolve the `torus`/`klein`
+wrap-contact issue for the beats that remain.
