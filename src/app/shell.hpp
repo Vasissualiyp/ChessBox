@@ -45,6 +45,29 @@ struct WatchGame {
   GameFile file;
 };
 
+/// One geometry beat of the main-menu attract sequence (M13.9): a variant, a short legal
+/// game played on it, and where the flat/shape and ghost poses rest for the beat. The
+/// moves are in the engine's long-algebraic notation; the engine proves them legal when
+/// the beat starts, so a bad line is a load failure rather than a silent misplay.
+struct AttractStep {
+  std::string variant;
+  std::vector<std::string> moves;
+  float formedTarget{1.0f};
+  float ghostTarget{1.0f};
+  /// The `geometryFormed` a beat starts from, when it is meant to reveal. Negative (the
+  /// default) means "leave the pose wherever the previous beat left it", so every beat
+  /// but a reveal is already formed. The cylinder beat uses this to begin part-way up the
+  /// roll rather than at the rank-mirrored flat end (M13.9, the M18.6 mirror workaround).
+  float formedFrom{-1.0f};
+};
+using AttractSequence = std::vector<AttractStep>;
+
+/// The shipped trailer sequence (M13.9 part D): the standard board, then one short game
+/// per shape - cylinder -> torus -> Klein -> 3-D torus -> hypercube - looping. Free so a
+/// capture or a test can name it. The cylinder beat is the flat-to-shape reveal (started
+/// part-way up the roll, the M18.6 mirror workaround); the rest start already formed.
+[[nodiscard]] AttractSequence defaultAttractSequence();
+
 /// The curated first-run path, standard first, exotic last. A front door, not a gate -
 /// the full library stays available.
 [[nodiscard]] const std::vector<CuratedVariant>& curatedVariants();
@@ -158,6 +181,22 @@ class Shell {
   /// to the main menu when the file runs out.
   void advanceWatching(float dt);
 
+  /// Begin the main-menu attract sequence (M13.9): a looping run of short games, each on
+  /// a different shape, played behind the menu. The shell stays on `Screen::MainMenu`;
+  /// the variant switches happen underneath. Does nothing when the sequence is empty or
+  /// its first variant will not load.
+  void startAttract(AttractSequence sequence);
+  /// Leave attract mode. The running game is stopped and the opaque board restored, so a
+  /// game started afterwards does not inherit the trailer's ghosted pose.
+  void stopAttract();
+  [[nodiscard]] bool attracting() const noexcept { return !attract_.empty(); }
+  /// Which beat of the sequence is playing, for a status line or a test.
+  [[nodiscard]] std::size_t attractStep() const noexcept { return attractIndex_; }
+  /// Drive one interactive frame of the attract sequence. Returns true when this tick
+  /// started a new beat - the first step, or a cut to the next variant - so the front end
+  /// can push renderer options and re-frame the camera for the shape now loaded.
+  bool advanceAttract(float dt);
+
   /// A variant's advertised difficulty, for the library's order and its colours.
   /// Resolved through the loader once and remembered; a name that will not load is
   /// `Other` rather than an error, because the picker must still be able to draw it.
@@ -221,6 +260,10 @@ class Shell {
  private:
   Shell() = default;
 
+  /// Start beat `index`: switch to its variant, load its short game into the watch
+  /// runner, and return to the main menu. Fails when the variant will not load.
+  Result<void> startAttractStep(std::size_t index);
+
   std::vector<std::string> library_;
   std::filesystem::path settingsPath_;
   Settings settings_;
@@ -246,6 +289,9 @@ class Shell {
   mutable std::map<std::string, Difficulty> difficulty_;
   /// The bundled showcase games for "Watch a game" (M12.8).
   std::vector<WatchGame> bundled_;
+  /// The main-menu attract sequence, empty when none is running (M13.9).
+  AttractSequence attract_;
+  std::size_t attractIndex_{0};
 };
 
 }  // namespace cb::app

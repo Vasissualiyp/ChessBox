@@ -647,6 +647,58 @@ TEST_CASE("a three- and four-dimensional variant plays on its own shape", "[rend
   CHECK(PlaySurface::build(test::loadVariant("cube5")).empty());
 }
 
+TEST_CASE("an eight-by-eight three-dimensional torus plays on the nested shells",
+          "[render]") {
+  // M13.9. The D >= 3 dispatch used to be gated on the literal name "torus3d", so a
+  // second 3-torus - the trailer's 8x8x4, and `torus3d_twist` before it - fell back to
+  // the flat lattice. The gate is now structural: three dimensions, every axis periodic.
+  // The shape construction is `torus3d`'s, but each in-plane coordinate is normalised by
+  // its own board extent, so an 8-wide axis wraps the tube once instead of nearly twice.
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("torus3d_8x8"));
+  REQUIRE(v.dims.dims() == 3);
+  CHECK(hasPlaySurface(v));
+  const PlaySurface s = PlaySurface::build(v);
+  REQUIRE(s.seats().size() == v.dims.cellCount());
+  REQUIRE(s.patches().size() == v.dims.cellCount());
+  CHECK(s.seats().size() == 256u);
+
+  // The file coordinate is periodic with the board's own extent: one full lap past the
+  // first cell lands exactly back on it, and it is *not* the old four-cell period that
+  // would fold the 8-wide board onto itself.
+  const auto at = [&](float file) {
+    std::array<float, kMaxDims> axis{};
+    axis[0] = file;
+    axis[1] = 0.5f;
+    axis[2] = 0.5f;
+    OvVec3 p;
+    REQUIRE(playShapeAt(v, axis, p));
+    return view::Vec3{p.x, p.y, p.z};
+  };
+  CHECK_THAT(dist(at(0.5f), at(8.5f)), WithinAbs(0.0f, 1e-4f));
+  CHECK(dist(at(0.5f), at(4.5f)) > 0.25f);
+
+  // Each level is its own nested shell: the four cells at one file and rank sit at four
+  // strictly growing radii from the core, so the level axis reads as depth.
+  std::array<float, 4> radius{};
+  for (int level = 0; level < 4; ++level) {
+    std::array<float, kMaxDims> axis{};
+    axis[0] = 0.5f;
+    axis[1] = 0.5f;
+    axis[2] = static_cast<float>(level) + 0.5f;
+    OvVec3 p;
+    REQUIRE(playShapeAt(v, axis, p));
+    radius[static_cast<std::size_t>(level)] = std::sqrt(p.x * p.x + p.z * p.z);
+  }
+  for (int level = 1; level < 4; ++level) {
+    CHECK(radius[static_cast<std::size_t>(level)] >
+          radius[static_cast<std::size_t>(level - 1)]);
+  }
+
+  // `torus3d_twist` gains the same play shape for free - the welcome consequence of the
+  // structural gate, noted rather than chased (M13.9).
+  CHECK(hasPlaySurface(test::loadVariant("torus3d_twist")));
+}
+
 TEST_CASE("a stacked square is a patch of the surface, not a tangent quad", "[render]") {
   // M17.12 part A. `buildStacked` used to place one flat quad per cell from the cell's
   // centre plus a tangent-plane frame (`axisFrame`). Where the embedding curves, or is

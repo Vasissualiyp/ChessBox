@@ -140,8 +140,19 @@ UiRequest Ui::buildMainMenu(app::Shell& shell) {
   const view::Theme& t = theme_;
   auto* display = static_cast<ImFont*>(fontDisplay_);
 
+  // While the attract sequence plays a real game behind the menu (M13.9), the frame is
+  // laid out exactly as the pause screen lays itself over a position: the board keeps the
+  // left half behind a thin scrim, the menu takes the right. `pauseFrame` is that layout,
+  // and it draws no opaque ground, so the board shows through - `drawShellFrame`'s ground
+  // would paint over it. With no board the menu is the whole screen and keeps the ambient
+  // field, as it always did.
+  const bool overBoard = shell.showsBoard();
   ImVec2 menuMin, menuMax;
-  drawShellFrame(shell, menuMin, menuMax);
+  if (overBoard) {
+    pauseFrame(request, menuMin, menuMax);
+  } else {
+    drawShellFrame(shell, menuMin, menuMax);
+  }
   const PaneMove move = paneMove();
   beginPane("##mainmenu", menuMin, menuMax, move.scale, move.alpha, px(46.0f),
             !ghosting_);

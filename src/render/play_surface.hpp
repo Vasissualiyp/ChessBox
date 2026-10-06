@@ -10,6 +10,7 @@
 #include "variant/variant.hpp"
 #include "view/camera.hpp"
 #include "view/layout.hpp"
+#include "view/morph.hpp"
 #include "view/move_anim.hpp"
 #include "view/move_camera.hpp"
 #include "view/seams.hpp"
@@ -34,19 +35,12 @@ void frameGeometryCamera(app::Session& session, const BoardOptions& options,
 inline constexpr float kMorphFollowRate = 30.0f;
 [[nodiscard]] float morphFollowBlend(float dt) noexcept;
 
-/// The base speed of the flat<->shape morph's own ramp (M18.6): at 1.0 the live
-/// `geometryFormed` crosses from flat to formed in half a second, and
-/// `Settings::geometryFormSpeed` multiplies that rate.
-inline constexpr float kFormMorphRate = 2.0f;
-/// One frame's advance of the live flat<->shape morph (M18.6): move `formed` toward
-/// `target` (0 or 1) by `dt * kFormMorphRate * formSpeed`, stopping exactly on the target
-/// rather than approaching it asymptotically, so the SHAPE toggle settles in a definite
-/// time and the camera's settle frame is exact (M17.24). `formSpeed` of 1 reproduces the
-/// shipped pacing; larger is faster, smaller slower. `Settings` clamps the speed to
-/// 0.25..4 so a zero cannot stall the roll. Pure, so the per-frame step is testable
-/// without a live window.
-[[nodiscard]] float advanceFormMorph(float formed, float target, float dt,
-                                     float formSpeed) noexcept;
+/// The flat<->shape morph's ramp is `view::advanceFormMorph`, re-exported here because a
+/// renderer caller names it through this header (`main.cpp`'s SHAPE toggle). It moved
+/// down to the view layer in M13.9 so the app shell's attract driver can share the one
+/// definition instead of duplicating the rate.
+using view::advanceFormMorph;
+using view::kFormMorphRate;
 
 /// The play board's own ribbon stretch (M18 revision, item 2): half the library screen's,
 /// which is about as little as the surface will take and still play. This is the value

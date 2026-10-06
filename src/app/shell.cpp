@@ -2,12 +2,14 @@
 #include "app/shell.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 
 #include "io/game_file.hpp"
 #include "io/variant_toml.hpp"
+#include "view/morph.hpp"
 
 namespace cb::app {
 
@@ -172,6 +174,10 @@ bool Shell::showsBoard() const noexcept {
     case Screen::PieceMoves:
     case Screen::PauseQuitConfirm:
       return session_ != nullptr;
+    // The attract sequence plays a real game behind the menu (M13.9), so the board is
+    // drawn there too - the existing board path, no new renderer code.
+    case Screen::MainMenu:
+      return attracting() && session_ != nullptr;
     case Screen::Settings:
       return session_ != nullptr && previous_ != Screen::MainMenu;
     default:
@@ -181,7 +187,9 @@ bool Shell::showsBoard() const noexcept {
 
 bool Shell::showsCheckWarning() const noexcept {
   // The warning belongs to the board. Every screen that keeps the board behind it gets
-  // it; a game left on the main menu does not, however checked it was when abandoned.
+  // it; the attract sequence's board does not, however checked the position it happens to
+  // be showing - it is ambient menu footage, not a game the player is playing (M13.9).
+  if (screen_ == Screen::MainMenu) return false;
   return showsBoard() && session_ != nullptr && session_->game().inCheck();
 }
 
@@ -438,6 +446,104 @@ bool Shell::watching() const noexcept {
 void Shell::advanceWatching(float dt) {
   if (session_ == nullptr || !session_->watching()) return;
   if (!session_->advanceWatching(dt)) go(Screen::MainMenu);
+}
+
+AttractSequence defaultAttractSequence() {
+  // Standard -> cylinder -> torus -> Klein bottle -> 8x8x4 3-D torus -> 4-D hypercube,
+  // then round again. Every line is real, legal opening play, verified through the
+  // engine's own legality: `startWatching` replays it move by move and a bad move fails
+  // the load. The two shape beats that hide their far side (Klein, the 3-D torus) ghost
+  // to 0.35; the rest stay opaque.
+  //
+  // The sequence opens on the literal `standard` board, then hard-cuts into the cylinder
+  // beat already part-way up its roll. This is the documented workaround for the M18.6
+  // rank-mirrored flat board at `geometryFormed = 0`: the reveal's flat end would show
+  // black nearest the camera and white far off, the reverse of a normal board, so the
+  // trailer starts on a clean board and picks the roll up in motion instead. See the
+  // status note in `docs/plan/M13-overtures.md`.
+  AttractSequence seq;
+  seq.push_back({"standard", {"e2e4", "e7e5"}, 1.0f, 1.0f, 1.0f});
+  seq.push_back({"cylinder", {"e2e4", "e7e5", "g1f3", "b8c6"}, 1.0f, 1.0f, 0.30f});
+  seq.push_back({"torus", {"d1d5", "e5d5", "h1h5", "a5a1"}});
+  seq.push_back({"klein", {"a1a5", "e5a5", "b1c3", "a5a1"}, 1.0f, 0.35f});
+  seq.push_back(
+      {"torus3d_8x8",
+       {"(0,0,0)-(0,0,1)", "(0,1,2)-(0,1,1)", "(1,0,0)-(0,2,0)", "(0,1,1)-(0,0,1)"},
+       1.0f,
+       0.35f});
+  seq.push_back({"hyper4",
+                 {"(0,0,0,0)-(0,0,0,1)", "(0,2,0,0)-(1,1,0,0)", "(2,0,0,0)-(2,0,0,1)",
+                  "(0,3,0,0)-(0,1,0,0)"}});
+  return seq;
+}
+
+Result<void> Shell::startAttractStep(std::size_t index) {
+  if (index >= attract_.size()) {
+    return fail(ErrorCode::OutOfRange, "attract step out of range");
+  }
+  const AttractStep step = attract_[index];
+  if (auto ok = startGame(step.variant); !ok.has_value()) return ok;
+  // Build the game file from the session's own started position, so its FEN always
+  // matches the variant and no author has to keep one in sync (M13.9).
+  GameFile file = toGameFile(session_->variant(), session_->game());
+  file.moves = step.moves;
+  if (auto ok = session_->startWatching(std::move(file), settings_.watchDwell);
+      !ok.has_value()) {
+    message_ = ok.error().format();
+    return fail(ok.error().code, ok.error().message);
+  }
+  // A revealing beat starts part-way or from flat; any other beat keeps the pose the last
+  // one left, so the shape cuts rather than re-rolling every time.
+  if (step.formedFrom >= 0.0f) settings_.geometryFormed = step.formedFrom;
+  // Attract runs behind the menu: `startGame` moved us to the game, put us back.
+  screen_ = Screen::MainMenu;
+  previous_ = Screen::MainMenu;
+  attractIndex_ = index;
+  return {};
+}
+
+void Shell::startAttract(AttractSequence sequence) {
+  stopAttract();
+  if (sequence.empty()) return;
+  attract_ = std::move(sequence);
+  attractIndex_ = 0;
+  // The beats own their starting pose (`formedFrom`); the first one is the flat-to-shape
+  // reveal. Clear the ghost so a beat before the first ghosting one starts opaque.
+  settings_.geometryGhost = 1.0f;
+  if (auto ok = startAttractStep(0); !ok.has_value()) attract_.clear();
+}
+
+void Shell::stopAttract() {
+  if (attract_.empty()) return;
+  attract_.clear();
+  attractIndex_ = 0;
+  if (session_ != nullptr) session_->stopWatching();
+  // The Klein and 3-D beats ghost the board; restore the opaque default so whatever the
+  // player does next does not inherit the trailer's pose.
+  settings_.geometryGhost = 1.0f;
+}
+
+bool Shell::advanceAttract(float dt) {
+  if (attract_.empty() || session_ == nullptr) return false;
+  const AttractStep& step = attract_[attractIndex_];
+  if (session_->watching()) session_->advanceWatching(dt);
+  settings_.geometryFormed = view::advanceFormMorph(
+      settings_.geometryFormed, step.formedTarget, dt, settings_.geometryFormSpeed);
+  settings_.geometryGhost = view::advanceFormMorph(
+      settings_.geometryGhost, step.ghostTarget, dt, settings_.geometryFormSpeed);
+  constexpr float kSettle = 1e-3f;
+  const bool settled =
+      std::abs(settings_.geometryFormed - step.formedTarget) <= kSettle &&
+      std::abs(settings_.geometryGhost - step.ghostTarget) <= kSettle;
+  // A beat ends only when its game has run out *and* the pose has stopped moving, so a
+  // cut never lands mid-roll.
+  if (session_->watching() || !settled) return false;
+  const std::size_t next = (attractIndex_ + 1) % attract_.size();
+  if (auto ok = startAttractStep(next); !ok.has_value()) {
+    attract_.clear();
+    return false;
+  }
+  return true;
 }
 
 void Shell::pause() {

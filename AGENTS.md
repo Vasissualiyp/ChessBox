@@ -130,6 +130,8 @@ tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID 
 ./build/dev/src/gui/chessbox_gui klein                 # any variant in variants/
 ./build/dev/src/gui/chessbox_gui cube5 --shot out.ppm --script "click c1"
 ./build/dev/src/gui/chessbox_gui --shot out.ppm --screen settings   # any screen
+./build/dev/src/gui/chessbox_gui --shot o.ppm --screen menu --t 3.0   # the main-menu attract
+                                 # sequence (M13.9), 3s into its loop
 ./build/dev/src/gui/chessbox_gui torus --shot o.ppm --screen newgame --t 0.6  # an overture
 ./build/dev/src/gui/chessbox_gui torus --clip frames/ --screen newgame       # a frame sequence
                                  # (--frames N --t0 a --t1 b; mux with ffmpeg externally)

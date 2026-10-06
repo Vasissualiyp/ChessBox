@@ -569,15 +569,18 @@ void drawWireShape(ImDrawList* dl, WireShape shape, ImVec2 centre, float scale, 
   }
 }
 
-Deco decoForScreen(int screen) noexcept {
+Deco decoForScreen(int screen, bool boardBehind) noexcept {
   switch (static_cast<app::Screen>(screen)) {
     // The main menu carries the quintic cross-section itself - the one dedicated,
     // dominant object, drawn from `drawManifold`. It is not a clutter body: reduced to a
     // sparse wireframe among the field it reads as noise, which is why the field's
     // vocabulary stops at five.
     case app::Screen::Welcome:
-    case app::Screen::MainMenu:
       return Deco::Manifold;
+    // While the attract sequence plays a real game behind the menu (M13.9), the board
+    // replaces the manifold rather than sharing the screen with it.
+    case app::Screen::MainMenu:
+      return boardBehind ? Deco::None : Deco::Manifold;
     // The library's object is the selected variant's *overture*, which the screen draws
     // itself - see Ui::drawOvertureObject. The turning lattice it replaces said only how
     // many boards a variant had; an overture says what shape they are on.

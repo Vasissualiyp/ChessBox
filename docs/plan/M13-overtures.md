@@ -435,3 +435,89 @@ is explicitly trailer-scoped, per the user's own words ("just for this trailer")
 not add it to any curated/"start here" list or other player-facing surface beyond what
 this task needs. The `formed = 0` mirror and the `hyper4` snap are known, pre-existing,
 documented limits (M18.6) that this task works around, not fixes.
+
+### Status: M13.9 built (2026-10-05, opencode)
+
+**Built, in the four lettered parts, each green before the next.**
+
+**A - the trailer variant and the structural gate.** `variants/torus3d_8x8.toml` is an
+8x8x4 (256 cells) all-periodic torus, `torus3d.toml`'s construction at the
+sequence's 8x8 scale, commented as trailer-scoped. The D >= 3 play-shape dispatch is no
+longer keyed on `v.name == "torus3d"`: a new `allAxesPeriodic` reads
+`boundaryKind(axis, Side::Max) == Periodic` for all three axes, and both `playShapeAt`'s
+3-D branch and (through `playShapePosition`) `hasPlaySurface` now follow structure. Because
+the old formula divided the file/rank coordinates by the hardcoded `kE = 4`, each is now
+normalised by the board's own extent: `torus3d` (extent 4) is bit-identical, and the
+8-wide board wraps the tube once instead of ~1.9 times and folding its tiles onto each
+other. `torus3d_twist` gains a working play shape for free, as the spec predicted.
+
+**B - the sequence and its driver.** `AttractStep{variant, moves, formedTarget,
+ghostTarget, formedFrom}`, `AttractSequence`, `defaultAttractSequence()`, and on `Shell`
+`startAttract`/`stopAttract`/`advanceAttract`/`attracting`/`attractStep`. Each beat is a
+full `startGame`/`Session::startWatching` (the M12.8 watch machinery, reused), and
+`advanceAttract` eases `geometryFormed` and `geometryGhost` toward the beat's targets and
+cuts only once the game has run out *and* the pose has settled. The easing helper
+`advanceFormMorph`/`kFormMorphRate` moved down to a new header-only `src/view/morph.hpp`,
+re-exported from `render/play_surface.hpp`, so the app layer can share the one definition
+rather than duplicate it (app L95 may not include render L100).
+
+**C - the main menu.** `Shell::showsBoard()` returns true for `MainMenu` only while
+attracting; `decoForScreen(screen, boardBehind)` returns `None` for the menu when a board
+is behind it (default unchanged, every other screen unchanged). The menu build now uses
+`pauseFrame`'s layering - board left behind a thin scrim, menu right - instead of
+`drawShellFrame`, whose opaque ground would paint over the board; `Screen::Paused` and
+`Screen::Settings`-over-a-game already worked exactly this way. The interactive loop starts
+the sequence on `MainMenu`, drives `advanceAttract` every frame, stops it the moment the
+player navigates away, and on every cut pushes `optionsFor` and re-frames the camera with
+the same `geometryView`/`cameraMode="route"`/`followStrength` the "watch a different game"
+handler already forces. Input handling is untouched. One extra: `showsCheckWarning()` is
+suppressed on `MainMenu`, because the attract board is ambient footage and a red check
+vignette there reads as an error, not a game warning.
+
+**D - content.** `standard` (opener) -> `cylinder` -> `torus` -> `klein` (ghost 0.35) ->
+`torus3d_8x8` (ghost 0.35) -> `hyper4`, looping. Every beat's 2-4 ply are real, legal
+opening moves and are proven so by an `applyGameFile` test and by the runner replaying
+them; the Ruy line, a torus seam capture, a Klein rook capture and a 3-D rook/knight
+exchange are the lines. `hyper4`'s `formed` snap is inherited and untouched, per the
+caveat.
+
+**The `formed = 0` mirror: the documented fallback was shipped, not the opening.** A
+capture of the cylinder beat at `formed = 0` (before the fallback) shows the flat board
+with black nearest the camera and white far off - the reverse of an ordinary board, the
+M18.6 rank-mirror bug. Rather than ship that, the sequence opens on the literal `standard`
+variant for two plies, then hard-cuts into the cylinder beat already at
+`geometryFormed = 0.30`, rolling the last 0.70 in motion. The standard opener is a separate
+beat (`formedFrom = 1`), so the sequence is six steps, not five, and the reveal is a cut
+plus a short roll rather than a full 0 -> 1 ramp - the fallback the spec names.
+
+**Tests.** `tools/test.sh --build render` (138 cases) and `--build app` (73) green after
+Part C, plus `[attract]` (4 cases / 42 assertions): every beat's file replays legally,
+the sequence visits all beats in order and wraps to step 0 while still running, `stopAttract`
+restores the opaque board, and `showsBoard` flips only on `MainMenu`. `[variants]` green
+with the new variant, `[arch]` green, `test_deco` pins the `decoForScreen` flip and its
+non-leakage, `test_play_surface` pins the 8x8 play shape, the extent-normalised one-lap
+period and the unchanged `torus3d`/`hyper4` behaviour. `ctest -R gui-(menu|settings|pause|
+board|watch|newgame)` 8/8 validation-clean, and `tools/precommit.sh` green (build, arch,
+unit, property). `tools/precommit.sh`'s format step only inspects staged files, so
+`clang-format --dry-run --Werror` was also run by hand over every touched source and is
+clean.
+
+**What could and could not be visually checked.** This is a spot-check, not end-to-end
+coverage: a live, many-minute looping sequence cannot be exercised headlessly (the dummy
+SDL video driver cannot create the Vulkan window the interactive loop needs, so the real
+loop was not run). The reviewable capture path (`--shot --screen menu --t S`) was extended
+to run the sequence for `S` seconds at a fixed step, and captures were taken and inspected:
+the standard opener (white nearest, correctly oriented), the cylinder mid-roll, the
+ghosted Klein and 3-D torus (pieces visible through the shell), and `hyper4` with its
+tesseract scaffold. A single captured frame does not ease the camera the way the live loop
+does, so its framing is approximate and occasionally crops the shape; the interactive
+framing eases home over the following frames. The `hyper4` beat was seen only as a
+fully-formed cut.
+
+**Known, unchased.** `torus3d_8x8.toml` is auto-scanned into the New Game library like any
+other file (the same as `torus3d_twist`); it is in no curated list, per the spec, but it is
+player-visible because the picker globs the directory. `startAttractStep` goes through
+`startGame`, so each beat persists settings and rewrites `lastVariant` - harmless (the
+library always opens on `standard`) but worth a lighter path if the sequence ever gets a
+settings-menu interaction. Suppressing the check vignette on the menu is a small behaviour
+change the spec did not name; the alternative (a red flash mid-trailer) read clearly worse.

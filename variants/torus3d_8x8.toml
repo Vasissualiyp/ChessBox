@@ -1,0 +1,102 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# torus3d_8x8 - an 8x8x4 three-dimensional torus. TRAILER-SCOPED, not a catalogue variant.
+#
+# This is the main-menu attract sequence's "the same board, gaining a dimension" beat
+# (M13.9). `torus3d` is 4x4x4; the sequence's 2-D beats are all 8x8, so this one is built
+# at the same 8x8 scale the trailer needs - the construction is otherwise identical to
+# `torus3d.toml` (three periodic identifications, no code). It exists for that sequence
+# and should not be read as a shipped game; `torus3d` is the 4x4x4 catalogue entry.
+
+name = "torus3d_8x8"
+description = "An eight-by-eight-by-four cube with every face glued - the same board as the 2-D shapes, one dimension up."
+difficulty = "hard"
+side_to_move = "white"
+stalemate = "draw"
+halfmove_draw_limit = 100
+
+[[axis]]
+name = "file"
+extent = 8
+
+[[axis]]
+name = "rank"
+extent = 8
+
+[[axis]]
+name = "level"
+extent = 4
+
+[[geometry.identify]]
+axis = "file"
+kind = "periodic"
+
+[[geometry.identify]]
+axis = "rank"
+kind = "periodic"
+
+[[geometry.identify]]
+axis = "level"
+kind = "periodic"
+
+[[piece]]
+name = "knight"
+symbol = "N"
+
+  [[piece.move]]
+  vector = [1, 2]
+  max = 1
+  mode = "leap"
+
+[[piece]]
+name = "bishop"
+symbol = "B"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "rook"
+symbol = "R"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "queen"
+symbol = "Q"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "king"
+symbol = "K"
+royal = true
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+
+# The same construction as `torus3d`: the armies are separated along the level axis, and
+# the back rank sits one rank short of the far edge so the periodic knights do not meet at
+# the start.
+[start]
+board = "8/8/8/8/8/8/8/RNKR4|8/8/8/8/8/8/8/8|8/8/8/8/8/8/rnkr4/8|8/8/8/8/8/8/8/8"

@@ -36,7 +36,13 @@ enum class Deco : std::uint8_t {
 
 /// Which object belongs beside which screen. A free function so the mapping is stated
 /// once and can be read without opening the menu code.
-Deco decoForScreen(int screen) noexcept;
+///
+/// `boardBehind` is true when a live board is being drawn behind this screen - the main
+/// menu during its attract sequence (M13.9), or a screen over a running game. The main
+/// menu is the only screen whose object would otherwise draw *alongside* the board; there
+/// the object gives way, because the board replaces it rather than joining it. Every
+/// other screen is unchanged whichever way this is set.
+[[nodiscard]] Deco decoForScreen(int screen, bool boardBehind = false) noexcept;
 
 /// The five geometries the background field is built from: the game's own exotic shapes,
 /// drawn as thin wireframes rather than filled polygons. The quintic is deliberately not

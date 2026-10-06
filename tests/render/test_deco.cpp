@@ -68,11 +68,24 @@ TEST_CASE("a decoration at alpha zero emits nothing", "[render]") {
 
 TEST_CASE("the main menu wears the quintic manifold object", "[render]") {
   // The original, dedicated centrepiece: the Calabi-Yau cross-section itself, not the
-  // quintic reduced to one faint wireframe among the clutter. The first M18.4 pass retired
-  // it from these screens; the correction restores it, and this pins the mapping so a
-  // later background edit cannot quietly drop it again.
+  // quintic reduced to one faint wireframe among the clutter. The first M18.4 pass
+  // retired it from these screens; the correction restores it, and this pins the mapping
+  // so a later background edit cannot quietly drop it again.
   CHECK(decoForScreen(static_cast<int>(app::Screen::MainMenu)) == Deco::Manifold);
   CHECK(decoForScreen(static_cast<int>(app::Screen::Welcome)) == Deco::Manifold);
+
+  // When a live board is being drawn behind the menu - the attract sequence (M13.9) - the
+  // board replaces the manifold rather than sharing the screen with it. Every other
+  // screen's object is unchanged either way, so this can never leak into the library, the
+  // pause section or the quit prompts.
+  CHECK(decoForScreen(static_cast<int>(app::Screen::MainMenu), true) == Deco::None);
+  for (const app::Screen s :
+       {app::Screen::Welcome, app::Screen::NewGame, app::Screen::Settings,
+        app::Screen::Editor, app::Screen::Paused, app::Screen::GameInfo,
+        app::Screen::PieceMoves, app::Screen::QuitConfirm,
+        app::Screen::PauseQuitConfirm}) {
+    CHECK(decoForScreen(static_cast<int>(s)) == decoForScreen(static_cast<int>(s), true));
+  }
 }
 
 TEST_CASE("the field's wire vocabulary is five shapes and reaches no sixth", "[render]") {

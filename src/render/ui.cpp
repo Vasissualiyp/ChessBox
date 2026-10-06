@@ -683,9 +683,9 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
   const float inE = inEase();
   const float outE = outEase();
   const float inZoom = deeper_ ? 0.55f + 0.45f * inE : 1.7f - 0.7f * inE;
-  drawDeco(dl, decoForScreen(static_cast<int>(shell.screen())), decoMin, decoMax, theme_,
-           iconStyle_, clock_, subjectFor(shell.screen()), inZoom, inE, objectYaw_,
-           objectElev_);
+  drawDeco(dl, decoForScreen(static_cast<int>(shell.screen()), shell.showsBoard()),
+           decoMin, decoMax, theme_, iconStyle_, clock_, subjectFor(shell.screen()),
+           inZoom, inE, objectYaw_, objectElev_);
   if (leaving_ != Deco::None && outE < 1.0f) {
     const float outZoom = deeper_ ? 1.0f + 0.8f * outE : 1.0f - 0.5f * outE;
     const VariantSpec* leavingSubject =

@@ -2713,6 +2713,24 @@ OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v, SurfacePose pos
   return flatBoard()(u, v);
 }
 
+namespace {
+/// Three dimensions and every axis glued: the structural test the D >= 3 play-shape
+/// dispatch keys on, rather than the variant's name (M13.9). It is exactly "the lattice
+/// is a 3-torus", which is the family `playShapeAt`'s nested-shell embedding draws.
+/// Keying on the name left every other 3-torus - `torus3d_8x8`, and `torus3d_twist`
+/// before it - on the ordinary flat lattice for no reason the geometry could state.
+[[nodiscard]] bool allAxesPeriodic(const VariantSpec& v) {
+  const DimSpec& d = v.dims;
+  for (int a = 0; a < d.dims(); ++a) {
+    if (v.geom.boundaryKind(static_cast<std::uint8_t>(a), Side::Max) !=
+        BoundaryKind::Periodic) {
+      return false;
+    }
+  }
+  return true;
+}
+}  // namespace
+
 bool hasPlaySurface(const VariantSpec& v) noexcept {
   const app::OvertureSignature sig = app::overtureSignature(v);
   // A glued two-dimensional board has a surface derived from its identifications.
@@ -2720,8 +2738,8 @@ bool hasPlaySurface(const VariantSpec& v) noexcept {
       sig.surface == app::SurfaceKind::Tube || sig.surface == app::SurfaceKind::Torus ||
       sig.surface == app::SurfaceKind::Band || sig.surface == app::SurfaceKind::Klein;
   if (sig.dims == 2 && glued) return true;
-  // Above two dimensions the shape is authored, not derived, so it is keyed by name
-  // (M17.12): `torus3d`'s nested shells, `hyper4`'s tesseract. Anything else - `cube5`,
+  // Above two dimensions the shape is authored, not derived: a three-dimensional torus
+  // gets the nested shells (M17.12), `hyper4` its tesseract. Anything else - `cube5`,
   // `t6` for now - has no play shape and stays on the ordinary lattice.
   OvVec3 ignored;
   return playShapePosition(v, 0, ignored);
@@ -2730,14 +2748,20 @@ bool hasPlaySurface(const VariantSpec& v) noexcept {
 bool playShapeAt(const VariantSpec& v, const std::array<float, kMaxDims>& axis,
                  OvVec3& out, SurfacePose pose) {
   const DimSpec& d = v.dims;
-  if (d.dims() == 3 && v.name == "torus3d") {
+  if (d.dims() == 3 && allAxesPeriodic(v)) {
     // The nested shells, at the point the library screen has fully rolled: two of the
     // three gluings close T^2 as the shell's surface, the level axis becomes the shell's
     // radius, and four levels come out as four shells about one core circle. The file and
     // rank axes are periodic, so a slide is just sampling one cell further along - the
     // same shape, differently parked (M17.22). `formed` scales the two rolls exactly as
     // the 2-D surfaces do (M18.6), so the same flat-to-shape morph reaches this shape.
-    constexpr float kE = 4.0f;
+    //
+    // The file and rank coordinates are normalised by the board's own extent, so the same
+    // construction wraps either board exactly once: `torus3d` (4 wide) divides by 4 as it
+    // always did, and `torus3d_8x8` (8 wide) divides by 8 rather than winding the tube
+    // nearly twice and overlapping its tiles (M13.9).
+    const float nx = static_cast<float>(d.extent(0));
+    const float nz = static_cast<float>(d.extent(1));
     const float form = std::clamp(pose.formed, 0.0f, 1.0f);
     // The core-circle radius is the same legibility cheat the 2-D torus uses, and the
     // same ramp keeps `formed = 0` continuous with the flat box (M18.6); at 1 it is the
@@ -2746,7 +2770,7 @@ bool playShapeAt(const VariantSpec& v, const std::array<float, kMaxDims>& axis,
     // The level is a continuous coordinate too, so a sub-grid sample - or any future
     // caller - gets a shell radius on the same scale rather than a step at each level:
     // `axis[2] - 0.5` is the integer level at a cell centre, to the bit.
-    out = shellTube((axis[0] + pose.slideU) / kE, (axis[1] + pose.slideV) / kE,
+    out = shellTube((axis[0] + pose.slideU) / nx, (axis[1] + pose.slideV) / nz,
                     kTau * form, kTau * form, 0.62f + (axis[2] - 0.5f) * 0.82f, open);
     return true;
   }

@@ -390,6 +390,20 @@ void frameBoard(app::Shell& shell) {
   render::frameGeometryCamera(*session, optionsFor(shell),
                               poseFrom(shell.settings(), session->variant()));
 }
+
+/// Put the renderer in the attract sequence's presentation (M13.9): the shape view with
+/// the route camera, exactly the look the "watch a different game" handler gives a glued
+/// variant. Camera behaviour is inherited unchanged - this states the options the shape
+/// needs and nothing else. It deliberately does not set `geometryFormed`, which the
+/// attract driver eases itself so the first beat can reveal.
+void applyAttractLook(app::Shell& shell) {
+  app::Session* session = shell.session();
+  if (session == nullptr || !render::hasPlaySurface(session->variant())) return;
+  shell.settings().geometryView = true;
+  shell.settings().cameraMode = "route";
+  session->setCameraMode("route");
+  session->setFollowStrength(1.0f);
+}
 #endif
 
 /// Tell the renderer what the engine says just happened, so the board can show it.
@@ -543,6 +557,25 @@ int captureFrame(const std::string& variantName, const std::string& path,
 #endif
   }
 
+  // Attract review (M13.9): a main-menu capture shows the sequence at the time `--t`
+  // states - 0 the flat start of the cylinder reveal, larger values the later beats - so
+  // the trailer state is reviewable with the flag the library already uses. The advance
+  // is fixed-step, the same reproducibility contract every other capture keeps. Skipped
+  // when the capture asked for a specific shape/ghost pose or a played game, so those
+  // captures keep their meaning.
+#ifdef CB_HAVE_IMGUI
+  if (screen == "menu" && !geometry && playFile.empty() && watchName.empty()) {
+    shell->startAttract(app::defaultAttractSequence());
+    constexpr float kStep = 1.0f / 60.0f;
+    for (float t = 0.0f; t < overtureT; t += kStep) {
+      if (shell->session() != nullptr) shell->session()->advanceAnimation(kStep);
+      shell->advanceAttract(kStep);
+    }
+    applyAttractLook(*shell);
+    frameBoard(*shell);
+  }
+#endif
+
   // A capture that wants to show the move camera states it rather than relying on the
   // player's settings (a capture uses defaults, where following is off). `--move-t` pins
   // the move itself, the same way `--t` pins the overture.
@@ -637,10 +670,20 @@ int captureFrame(const std::string& variantName, const std::string& path,
       // would see it - stepped back and out of focus - which is also what puts the blur
       // passes under the validation layers in `ctest -R gui-pause`. Cinema never blurs:
       // the board is the subject.
-      const float away = (shell->screen() == app::Screen::Game || cinema) ? 0.0f : 1.0f;
+      // The attract sequence's board is not a "stepped back from" game: it is the menu's
+      // own subject, sharp like the game screen's. Every other board-over-screen state
+      // keeps the pause pull-back.
+      const bool sharp = shell->screen() == app::Screen::Game ||
+                         shell->screen() == app::Screen::MainMenu || cinema;
+      const float away = sharp ? 0.0f : 1.0f;
       shell->session()->setPullBack(away);
       renderer->setBlur(away);
       if (frame.valid()) shell->session()->setBoardAspect(frame.width / frame.height);
+      // The attract board is the menu's subject and its frame is only the left half. A
+      // single capture has no later frame to ease the framing home, so state it now.
+      if (shell->screen() == app::Screen::MainMenu && optionsFor(*shell).surface) {
+        frameBoard(*shell);
+      }
       // The interactive loop eases this; a capture states it outright, so a followed
       // move is anti-clipped in a clip too (M17.17). The M12.6 runner has already stated
       // the offsets through its simulated sequence, so it skips this and only refreshes
@@ -1403,8 +1446,13 @@ int main(int argc, char** argv) {
       // `geometryFormSpeed` (M18.6 revision); the pace is no longer a bare constant.
       const float formTarget = st.geometryView ? 1.0f : 0.0f;
       const bool wasMorphing = st.geometryFormed != formTarget;
-      st.geometryFormed = render::advanceFormMorph(st.geometryFormed, formTarget, dt,
-                                                   st.geometryFormSpeed);
+      // While the attract sequence runs, its own driver owns `geometryFormed` (M13.9), so
+      // the SHAPE toggle's ramp stands down rather than fighting it and doubling the
+      // authored pace.
+      if (!shell->attracting()) {
+        st.geometryFormed = render::advanceFormMorph(st.geometryFormed, formTarget, dt,
+                                                     st.geometryFormSpeed);
+      }
       // `wasMorphing`/`nowMorphing` bracket the actual step, whatever its size, so the
       // settling frame the camera snaps on is the real one at any speed (M17.24).
       const bool nowMorphing = st.geometryFormed != formTarget;
@@ -1422,7 +1470,34 @@ int main(int argc, char** argv) {
     // has settled and its dwell has passed, and leaves for the main menu when the file
     // runs out. This is the real interactive clock, not a fixed `t` - the watching action
     // is for a person, not a reproducible capture, so nothing here is deterministic.
-    shell->advanceWatching(dt);
+    // While the attract sequence runs it owns the session's watch, so the ordinary driver
+    // stands down rather than advancing the same runner twice (M13.9).
+    if (!shell->attracting()) shell->advanceWatching(dt);
+
+    // The main-menu attract sequence (M13.9): started as soon as the app sits on the
+    // menu, driven every frame, and stopped the moment the player navigates away. A cut
+    // to a new shape needs the same options push and camera re-frame the "watch a
+    // different game" handler gives a glued variant, because the shell's own
+    // startGame/startWatching do neither.
+#ifdef CB_HAVE_IMGUI
+    if (shell->screen() == app::Screen::MainMenu) {
+      if (!shell->attracting()) {
+        shell->startAttract(app::defaultAttractSequence());
+        applyAttractLook(*shell);
+        renderer->setOptions(optionsFor(*shell));
+        frameBoard(*shell);
+        wasSurface = optionsFor(*shell).surface;
+      } else if (shell->advanceAttract(dt)) {
+        applyAttractLook(*shell);
+        renderer->setOptions(optionsFor(*shell));
+        frameBoard(*shell);
+        wasSurface = optionsFor(*shell).surface;
+      }
+    } else if (shell->attracting()) {
+      shell->stopAttract();
+      renderer->setOptions(optionsFor(*shell));
+    }
+#endif
 
     // Set once the interface has built this frame: the surface view draws the board
     // itself, so the ordinary renderer stays out of the way (M17).
