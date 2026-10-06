@@ -1157,3 +1157,86 @@ stands. Position continuity (Part F) and the camera-keyframe scaffold remain ope
 that Mobius is gone, continuity may be more tractable than this doc previously feared,
 but torus -> klein and klein -> `torus3d_8x8` were not yet checked before this revert
 interrupted that investigation.
+
+### Revision: Part F resolved, partially - continuity where the geometry allows it
+### (2026-10-06, feedback, built directly by Claude)
+
+Picked back up with a direct instruction to keep going until it works. The
+wrap-contact/king-adjacency wall this doc parked on earlier turned out to be a real
+effect, but the original diagnosis of it was wrong twice over, each time caught by
+testing against the engine rather than reasoning about it: first, the session's own
+earlier "good news" (cylinder's unmoved opening carries onto `torus` with 54 legal
+moves) was an artifact of the CLI's `fen` command silently leaving the old position in
+place after a rejected castling token - not a real result at all. Second, once that was
+fixed (a new `embed <variant>` CLI command, built for exactly this kind of check, see
+below), the real effect turned out not to be simple king-on-king adjacency: `torus.toml`
+own comment already names it - "rank 1 and rank 8 are *adjacent*... White is already in
+an inescapable check" - and a transplanted opening's queen and rooks, still sitting near
+the board's own back rank, are just as exposed to that adjacency as the kings are. The
+fix was empirical, not theoretical: cylinder's own ten-ply line ends with both kings
+stepped one square off their home rank (`Ke2`, `Ke7`), found by trying a line, embedding
+it, and reading the legal-move count back from the engine - the same discipline as
+everywhere else in this file.
+
+**The CLI gained an `embed <variant>` command** (`src/cli/main.cpp`): carries the
+loaded position onto another variant's board through `app::embedOnto`, the same function
+the trailer now uses, so a line can be authored and checked against the *exact* position
+the engine will actually start the next beat from, not a hand-typed FEN standing in for
+it. Building it surfaced a real dangling-pointer bug, independent of the trailer:
+`Position` and `MoveGen` hold a raw pointer to their `VariantSpec`, so computing the
+embedding against the old `VariantSpec` and *then* moving it into the new session (the
+obvious way to write it) corrupts the embedded position the instant the move happens -
+caught by a crash, not a logic check. Fixed by building the new session first and
+embedding against its own stable, final address; `Shell::startAttractStep` and
+`test_attract.cpp`'s own continuity check both follow the same order for the same reason.
+`chessbox_cli`'s layer now depends on `chessbox_app` (moved after it in `src/CMakeLists.txt`,
+layers are added bottom-up) to reach `embedOnto` at all.
+
+**Where continuity landed.** Cylinder and torus carry one real game between themselves -
+cylinder plays its own ten-ply opening, torus's own ten plies are a verified-legal
+continuation of *that exact position*. It does not reach Klein or the 3-D torus, and not
+for the Mobius reason (no pawn type) but a sibling of it, found the same way: both
+`klein.toml` and `torus3d_8x8.toml` field only king, rook and knight at their own start,
+and both files already say why - a bishop or queen gives check from almost anywhere once
+every axis is periodic, so the shipped army is deliberately stripped down. Embedding a
+normal opening's bishops and queen onto either produces a forced or near-forced position,
+confirmed directly against both shapes with the new `embed` command. Klein and the 3-D
+torus keep their own independently authored ten-ply lines instead, played on the army
+their own files actually field - the same judgement Mobius was dropped on, just reached
+by hitting the wall instead of reasoning around it in advance. Klein's own two beats do
+carry a position between themselves (`continuesPosition` on the fold-out beat): nothing
+is cut there, it is the same variant both beats stand on, so the pieces should not
+visibly jump at a fold that is not a shape cut. The loop's own wrap from the 3-D torus
+back to cylinder stays a hard reset, as it already was.
+
+**Every beat is ten plies now** (five moves a side), not the two to four beats carried
+since M13.9's first cut - a separate, explicit ask alongside continuity. All six lines
+were authored and checked the same way: propose a move, embed or replay to the position
+it reaches, read the engine's own legal-move count back, and only keep it once mobility
+stayed healthy (never dropping to the single-digit, near-forced counts a bad embed
+produces).
+
+**Mechanism.** `AttractStep` gained `continuesPosition` (`src/app/shell.hpp`):
+`Shell::startAttractStep` (`src/app/shell.cpp`), when set, captures the previous beat's
+own variant and finished position *before* `startGame` replaces the session, then embeds
+that captured position onto the new beat's own variant and uses the embedded FEN as the
+`GameFile`'s `startFen` instead of the variant's own declared start - `file.moves` for a
+continuing beat therefore has to be a legal continuation of the embedded position, not of
+the variant's own opening.
+
+**Tests.** `test_attract.cpp`'s "every attract beat is a real, legal game" test now
+builds the same embedded-start-position chain the real `Shell` builds, tracking the
+previous beat's variant and finished `Game` across the loop (with the same
+stable-address discipline the CLI fix needed); "every cut...lands on the previous
+shape's own end-of-stage" gained `continuesPosition` checks for every beat. No new
+render-level test was needed - continuity is a `Shell`/`GameFile` concern, not a
+geometry one.
+
+**Results.** `tools/test.sh` full suite (496 cases, all tags) and `ctest -R "^property$"`
+both green, `clang-format --dry-run --Werror` clean on every touched file. Visual
+spot-check via `--shot --screen menu --t <seconds>`: the torus beat's own move log reads
+"d7d6 c2c3 b7b5 a4b3 c8e6 b1d2..." - the real continuation moves, played on the carried
+position, not a fresh independent line - confirming the mechanism works end to end, not
+just in the headless test.
+
+The camera-keyframe authoring scaffold (the other open ask from the same round) is next.
