@@ -521,3 +521,161 @@ player-visible because the picker globs the directory. `startAttractStep` goes t
 library always opens on `standard`) but worth a lighter path if the sequence ever gets a
 settings-menu interaction. Suppressing the check vignette on the menu is a small behaviour
 change the spec did not name; the alternative (a red flash mid-trailer) read clearly worse.
+
+### Revision: a button instead of an always-on takeover, a static camera, and one
+### continuous game across every shape (2026-10-05, feedback)
+
+Three corrections, after actually seeing what shipped:
+
+1. **This should never have replaced the quintic as the menu's default.** "Implement it
+   in the main menu" meant *an entry point from* the menu, not *the menu's own state*.
+   The quintic manifold (`Deco::Manifold`) stays what a player sees on an ordinary visit
+   to `Screen::MainMenu`; the sequence only plays when asked for, the same way "Watch a
+   game" only plays a bundled game when the player picks one.
+2. **The camera must not follow the pieces.** The previous build's `applyAttractLook`
+   forced `cameraMode = "route"`/`followStrength = 1.0` - inherited from "watch a
+   different game," which is exactly the move-chasing behaviour the camera-choreography
+   work (being built separately) needs to own instead. Re-framing *at a beat's own cut*,
+   so the newly-revealed shape is actually in view, is still wanted and should stay; what
+   must go is any per-frame following of a piece mid-slide within a beat.
+3. **One continuous game.** Every beat currently starts from its own variant's canonical
+   opening and plays its own short, independent scripted line - so each "morph" is really
+   a fresh game that happens to look similar, not the same game continuing. The whole
+   six-beat sequence should be one running game: the position a beat ends on becomes the
+   position the next beat starts from, carried forward rather than reset. Chosen
+   explicitly over the alternative (continuity only within the three same-dimension 2-D
+   beats, a fresh start at each dimension change): **the position is embedded on one
+   slice** when a beat steps up in dimension - the running position's pieces land at the
+   same file/rank/level coordinates in the bigger lattice, with every newly-introduced
+   axis (level, then aeon) fixed at a single value for every carried piece, so the rest of
+   that new axis starts empty. The game is still real and still provably legal at every
+   step - nothing about this fakes a position or skips the engine's own legality check.
+
+**Part E (small, do first): the button and the static camera.**
+
+Revert the always-on trigger in `src/gui/main.cpp`'s per-frame `MainMenu` block (the
+`if (!shell->attracting()) { shell->startAttract(...); ... }` that starts a sequence the
+instant the app sits on the menu) - starting the sequence belongs behind a new menu
+action, not the per-frame loop. Add a sibling row to "Watch a game" in
+`Ui::buildMainMenu` (`src/render/ui_menus.cpp:138-197`; the existing row is built with
+`menuEntry("Watch a game", 2, t, display, width, true, scale_)` at line ~169, routing to
+`shell.go(app::Screen::Watch)` - `menuEntry`'s signature is
+`src/render/ui_widgets.hpp:124-125`). A new row immediately after it (shift every later
+row's printed index by one) that calls `shell->startAttract(defaultAttractSequence())`
+directly - this sequence has no picker step the way bundled "Watch" games do, so it does
+not need its own screen, just a button that starts it in place. Reuse the existing
+`decoForScreen`/`showsBoard` plumbing exactly as built (it already does the right thing:
+the board replaces the manifold *while a sequence is actually running*, which after this
+fix only happens after the button is pressed).
+
+Give it an exit, matching the house precedent rather than inventing a new one: while
+`shell.watching()` on `Screen::Watch`, `src/render/ui.cpp:1468-1479` shows a single
+`"STOP WATCHING"` button plus an `Esc leaves the game` caption, wired to
+`Shell::stopWatching()` (`shell.cpp:437-440`) and to `Esc` at `src/gui/main.cpp:1332`.
+Do the same for attract: a `"STOP"`-style control (visible only while
+`shell->attracting()`) calling `shell->stopAttract()`, and the equivalent `Esc` wiring.
+
+For the camera: in `applyAttractLook` (`src/gui/main.cpp`, near the function added for
+M13.9), stop forcing `cameraMode = "route"`/`followStrength = 1.0f` - set
+`cameraMode = "off"` and `followStrength` to `0.0f` instead (`Session::setCameraMode`/
+`setFollowStrength`, `src/app/session.hpp:108-113`; `"off"` means no per-frame following
+at all - confirmed at `src/gui/main.cpp:363`, `if (st.cameraMode == "off" || ... ) { ...
+skip the follow update ... }`). Keep whatever re-frames the camera *on a cut*
+(`frameBoard`, already called every time `advanceAttract`/`startAttractStep` reports a
+new beat) - that is not "following," it is making sure the new shape is visible at all,
+and removing it would leave the camera pointed at nothing after every cut.
+
+Build and verify this part alone first - it is small, low-risk, and does not depend on
+part F at all.
+
+**Part F (the continuous game): position embedding across variant switches.**
+
+A new helper - a free function, pure, independently testable, living wherever it reads
+most naturally alongside `Position`/`DimSpec` (the `app` layer already sees both; keep it
+out of `render`) - call it something like
+`Position embedOnto(const Position& from, const VariantSpec& fromVariant, const
+VariantSpec& toVariant)`. For each occupied cell in `from` (`Position::isEmpty`/`at`,
+`src/position/position.hpp:28-31` - there is no ready-made "for each occupied cell"
+iterator, the idiom used throughout the renderer is a plain loop over `cellCount()`
+checking `isEmpty`, e.g. `src/render/board_renderer.cpp:688`): decode its `CellId` to a
+`Coord` on `fromVariant.dims` (`DimSpec::toCoord`, `src/space/dim_spec.hpp:75`), build a
+`Coord` on `toVariant.dims` by **matching axes by name** (`DimSpec::axisIndex`,
+`dim_spec.hpp:57` - more robust than assuming position, though every variant in this
+sequence happens to declare file/rank/[level/[aeon]] in that same order) rather than
+blindly copying by index, carrying every axis `from` already has and setting every axis
+only `to` has to a fixed value (0 - "level 0", "aeon 0"), then re-encode with
+`DimSpec::toCell` (`dim_spec.hpp:67`) and `place` the same piece type/colour into a fresh
+`Position(toVariant)` (`position.hpp:22`, `Position::place`, `position.hpp:49`). Side to
+move carries forward too. This mapping is injective - and therefore safe, no two source
+cells ever colliding onto one target cell - exactly when every shared axis's extent in
+`toVariant` is >= its extent in `fromVariant`; state this precondition in a comment where
+the helper is defined, since it is what makes "embed on one slice" a safe operation here
+rather than a general-purpose one.
+
+Rework `Shell::startAttractStep` (`src/app/shell.cpp`, ~line 480 on): capture the
+*current* position from the session **before** calling `startGame` (which replaces
+`session_` wholesale - confirm the exact live-position accessor on `Game`,
+`src/game/game.hpp`, alongside the already-known `startPosition()`/`setStartPosition()`;
+it is not necessarily named `currentPosition()`, check before using it). After
+`startGame(step.variant)` constructs the new beat's fresh session, build the new beat's
+`GameFile` the same way as today (`toGameFile(session_->variant(), session_->game())`,
+`io/game_file.hpp:31`) but then **overwrite** `file.startFen` with
+`toFen(embedOnto(previousPosition, previousVariant, step variant's VariantSpec))`
+(`toFen`/`fromFen`, `io/fen.hpp:18,21`) rather than leaving `toGameFile`'s own
+canonical-start default - that default is exactly what currently makes every beat reset.
+The very first beat (`standard`, nothing to carry forward into it) keeps today's
+behaviour unchanged - there is no previous position for the sequence's own opening.
+`GameFile::startFen` already is a free-form string (`io/game_file.hpp:26`) - nothing
+downstream (`Session::startWatching` → `GameRunner::reset` →
+`Session::loadFen`, `session.cpp:664-672,710-739`, `game_runner.cpp:13-21`) assumes it
+matches the variant's own declared opening, so this is a drop-in substitution, not new
+plumbing.
+
+**The wrinkle this surfaces, not to be quietly worked around:** `hyper4` is a fixed
+4x4x4x4 lattice - *smaller* in file and rank than the 8x8 the rest of the sequence now
+uses, `torus3d_8x8` included. The injective-mapping precondition above fails exactly at
+the last beat: an embedded file/rank coordinate from an 8-wide board has nowhere
+legal to land on a 4-wide one. Mirror the fix this same revision already made for
+`torus3d`: a similarly trailer-scoped `variants/hyper4_8x8.toml`, file=8/rank=8/level=4
+(matching `torus3d_8x8` exactly, so that beat's embedding is a trivial identity on its
+first three axes) and aeon=2 as the one genuinely new axis (512 cells total - noticeably
+more than the 256 the hyper4 scaffold/rotation work was verified against; actually check
+this renders and performs acceptably before treating 512 as fine, rather than assuming
+it). If 512 proves to be a real problem, aeon=1 (256 cells, unchanged scale) is the
+fallback, but say so plainly rather than silently shrinking it - an aeon axis of size 1
+has nowhere for "the fourth dimension" to actually go, which is a real loss for this
+beat's own point.
+
+Every beat's scripted moves (`AttractStep::moves`) need to be real, legal continuations
+from whatever that beat's *embedded* starting position actually is - which, past the
+first beat, is no longer any variant's own canonical opening, so it cannot be guessed or
+reused from the previous build. Compute each beat's true starting FEN for real (run the
+sequence through the engine up to that point - a throwaway test or scratch tool is fine
+for authoring, same as how every other move list in this plan has been required to be
+engine-verified, never hand-guessed) before choosing that beat's next few moves.
+
+**Tests.** A unit test for `embedOnto` alone: a small source position, embedded into a
+same-dimension target (identity - every piece lands exactly where it started) and into a
+higher-dimension target (every piece's new axis is 0, the rest of that axis is empty,
+existing axes unchanged). The existing `[attract]` "every attract beat is a real, legal
+game for its variant" test (`tests/unit/app/test_attract.cpp`) no longer makes sense
+beat-by-beat against each variant's own canonical start - rewrite it to walk the whole
+sequence once, computing each beat's embedded start from the previous beat's end exactly
+as `startAttractStep` now does, and proving the whole chain legal end to end. A property
+check across the full sequence: total piece count never increases from one beat to the
+next (only captures remove pieces; embedding must never duplicate or drop one without a
+capture to explain it) - a cheap, global guard against exactly the kind of bug a
+coordinate-mapping mistake would produce.
+
+**Acceptance.** Watching the sequence start to end: the same pieces, accumulating the
+same move history, carry through every shape change - no beat's board reverts to a fresh
+opening array. The ordinary main menu is the quintic field until the new button is
+pressed; pressing it starts the sequence; a visible control plus Esc stops it and returns
+to the ordinary menu. The camera never chases a sliding piece mid-beat; it only recentres
+at a cut.
+
+**Risks and non-goals.** Camera choreography beyond "stop auto-following, keep the
+per-cut re-frame" is explicitly not this task - that is being built separately. Keep
+building and verifying part E before part F; they are independent and E is far smaller.
+`hyper4_8x8.toml` is exactly as trailer-scoped as `torus3d_8x8.toml` - same disclaiming
+comment, not added to any curated list, not a catalogue variant.
