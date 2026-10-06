@@ -1240,3 +1240,86 @@ position, not a fresh independent line - confirming the mechanism works end to e
 just in the headless test.
 
 The camera-keyframe authoring scaffold (the other open ask from the same round) is next.
+
+### Revision: the camera-keyframe authoring scaffold (M13.9 Part E)
+### (2026-10-06, feedback, built directly by Claude)
+
+The other open ask from the same round, picked up right after Part F: "you code the
+morphs, and the user then defines how the scene changes and how the camera moves as the
+game plays out." A scaffold, deliberately - the morph machinery is coded once, here;
+*where* to put a keyframe, what the camera and shape pose should look like there, and how
+fast to ease into it is left entirely to whoever plays the game and presses record. There
+is no in-game keyframe list or editor yet - the saved file is plain text and is meant to
+be hand-edited too, the same spirit `GameFile` already has.
+
+**Data model** (`src/app/camera_track.hpp`/`.cpp`, new, added to `chessbox_app`).
+`CameraCue` is where a keyframe is pinned: a variant name and a ply count into it - the
+same two numbers `Shell` already tracks for any running game, attract beat or not.
+`CameraKeyframe` is a saved `view::OrbitCamera` plus the shape pose the M13.9 attract work
+already threads through `Settings` - `geometryFormed`, `geometryGhost`,
+`geometryShellSpread`, and `geometrySlideU`/`geometrySlideV` (the "middle mouse button
+morph" the original ask named explicitly - the control that slides the board round the
+shape) - plus `flatPieces` and a per-keyframe `morphSpeed`. `CameraTrack` holds at most
+one keyframe per cue, kept sorted; `cameraTrackText`/`parseCameraTrack` serialize it as
+one `keyframe variant=... ply=... target=x,y,z ...` line per keyframe, line-oriented and
+diffable like a game file, with a line's own bad token failing that line's parse with a
+line number rather than the whole file silently losing its mind.
+
+**A track is not a timeline sampled at an arbitrary point.** A keyframe is a waypoint the
+live view eases *toward* once play reaches its own cue - `Shell::advanceCameraTrack`
+detects a cue with a keyframe different from the one last eased toward, captures the
+view's *current* camera and pose as the blend's start (not the previous keyframe's own
+endpoint - the player may have kept orbiting since), and eases over the keyframe's own
+`morphSpeed` using `view::slerpCamera` for the camera and a plain lerp for the pose
+scalars. Once the blend reaches `t = 1` it stops touching anything, handing control back
+to whatever was driving the camera before - the player's own orbit, or the attract
+sequence's own per-beat morph, which keeps running underneath and simply gets overridden
+for however long a keyframe's own blend is in flight. A cue with no keyframe is left
+alone entirely. This is what lets a track be as sparse as one keyframe for an entire
+sequence, or as dense as an author wants, with no keyframe forcing an answer for a frame
+it does not actually care about.
+
+**Session gained one new primitive**: `setOrbitCamera` (`src/app/session.hpp`), setting
+the stored camera directly rather than through an `apply()` action - the one place
+something other than a player gesture is allowed to move it, called out explicitly in its
+own doc comment rather than folded into `ActionKind` as a fake player action.
+
+**Shell's own surface**: `cameraTrack()`, `recordCameraKeyframe(speed)` (captures the
+live camera and pose at the current cue, replacing any keyframe already there),
+`eraseCameraKeyframe()`, `cameraTrackPath()` (a file beside the settings file, the same
+convention `gamesDir()` uses), and `advanceCameraTrack(dt)`. A track loads automatically
+in `Shell::create` if the file exists - a missing one is the ordinary case for every
+shell that has never recorded one, not an error - and both `recordCameraKeyframe` and
+`eraseCameraKeyframe` persist immediately, the same way a setting change does, so there is
+no separate save step for the scaffold's one editing surface to also wire up.
+
+**The front end's whole authoring surface is two keys**, `k` to record and `j` to erase,
+wired in `src/gui/main.cpp` next to the existing `u`/`r`/`g` shortcuts, gated the same way
+they are (`inGame && !twoPlayer`); `advanceCameraTrack` is called once a frame whenever a
+session is running, independent of whether the attract sequence, a watched game, or an
+ordinary played game is what's driving it - the scaffold works for any of them, not just
+the trailer, matching the original ask's own "as the game plays out," not "as the trailer
+plays out."
+
+**Tests** (`tests/unit/app/test_camera_track.cpp`, new, headless like the rest of this
+file): `CameraTrack`'s own ordering/replace/erase and the text form's round-trip, parse
+failures for an unknown field, a malformed number and a missing variant; `Shell`-level
+recording (captures the live, player-moved camera and pose, not just whatever `frame()`
+set up, and persists to the exact path a fresh shell would read back); the blend itself
+(a keyframe's own cue starts easing the camera and pose toward it, a halfway `dt` lands
+provably between the start and the target, a full `morphSpeed`-second `dt` lands on it,
+and further frames at the same cue do not re-trigger or drift); and a cue with no keyframe
+leaving the camera untouched. Camera-endpoint checks compare `eye()` with a tolerance
+rather than the raw `yaw` field, the same precedent `slerpCamera`'s own tests
+(`test_camera.cpp`) already set - an angle can wrap to an equivalent value spelled
+differently, so exact float equality on `yaw` is not the right question to ask of a slerp.
+
+**Results.** `tools/test.sh` full suite (502 cases, all tags) and `ctest -R "^property$"`
+both green, `clang-format --dry-run --Werror` clean on every touched and new file, a
+`--shot` smoke check confirming the GUI still starts and renders with the new wiring
+loaded. Both of this round's open asks are now scaffolded or resolved: continuity where
+the geometry allows it (Part F), and the camera-keyframe machinery for whoever authors a
+track next (Part E). What remains is authoring, not engineering: nobody has recorded a
+real track yet, and the in-game list/editor the scaffold's own doc comment names as
+future work - browsing, re-ordering, or nudging a keyframe without re-recording it from
+scratch - is still just the hand-edited text file.

@@ -987,7 +987,9 @@ int main(int argc, char** argv) {
           "  left click    select a piece, then a lit cell to move it\n"
           "  right drag    orbit     wheel  zoom\n"
           "  g             the board as its own shape; middle drag slides it round\n"
-          "  Esc           pause     u  undo     r  reset\n\n"
+          "  Esc           pause     u  undo     r  reset\n"
+          "  k             record a camera keyframe at the current move (M13.9 Part E)\n"
+          "  j             remove the keyframe at the current move\n\n"
           "With no variant, the game opens on the main menu.\n"
           "--shot renders one frame to a PPM and exits, with no display required;\n"
           "--screen picks which one: menu, welcome, newgame, pause, settings, editor,\n"
@@ -1389,6 +1391,17 @@ int main(int argc, char** argv) {
               }
               break;
 #endif
+            case SDLK_K:
+              // Record a camera keyframe (M13.9 Part E): whatever the camera and shape
+              // pose look like right now, saved against the current move. The scaffold's
+              // whole authoring surface is this one key plus `J` to remove one - there is
+              // no in-game list or editor yet, just the saved text file.
+              if (inGame && !twoPlayer) shell->recordCameraKeyframe();
+              break;
+            case SDLK_J:
+              // Remove the keyframe at the current move, if any.
+              if (inGame && !twoPlayer) (void)shell->eraseCameraKeyframe();
+              break;
             default:
               break;
           }
@@ -1507,6 +1520,13 @@ int main(int argc, char** argv) {
       }
     }
 #endif
+
+    // The camera-keyframe track (M13.9 Part E): a recorded keyframe at the move play has
+    // just reached eases the camera and shape pose toward it, for however long the
+    // attract sequence or a watched/played game lasts - not just during the trailer, the
+    // same way a track could be recorded over an ordinary game too. A no-op with no
+    // session or no track, so this costs nothing when the scaffold is unused.
+    if (shell->hasGame()) shell->advanceCameraTrack(dt);
 
     // Set once the interface has built this frame: the surface view draws the board
     // itself, so the ordinary renderer stays out of the way (M17).

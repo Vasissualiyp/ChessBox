@@ -89,6 +89,16 @@ std::unique_ptr<Shell> Shell::create(std::vector<std::string> library,
   // clock and are not waiting for `applySettings` (which a fresh shell has no reason to
   // call). `applySettings` keeps it in step once the player moves a control.
   shell->overtures_.setSpeed(shell->settings_.overtureSpeed);
+  // The camera track (M13.9 Part E), if one has been recorded before. Its absence is the
+  // ordinary case - every shell starts with no track - so a missing or unreadable file is
+  // not an error, just an empty track.
+  if (std::ifstream in{shell->cameraTrackPath()}; in) {
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    if (auto track = parseCameraTrack(ss.str()); track.has_value()) {
+      shell->cameraTrack_ = std::move(*track);
+    }
+  }
   return shell;
 }
 
@@ -657,6 +667,86 @@ bool Shell::advanceAttract(float dt) {
     return false;
   }
   return true;
+}
+
+CameraCue Shell::currentCue() const {
+  if (session_ == nullptr) return {};
+  return {currentVariant_, session_->game().moveHistory().size()};
+}
+
+std::filesystem::path Shell::cameraTrackPath() const {
+  return settingsPath_.parent_path() / "camera_track.txt";
+}
+
+void Shell::persistCameraTrack() const {
+  std::ofstream out(cameraTrackPath(), std::ios::trunc);
+  if (!out) return;  // a camera track is a convenience, not something play should halt on
+  out << cameraTrackText(cameraTrack_);
+}
+
+void Shell::recordCameraKeyframe(float speed) {
+  if (session_ == nullptr) return;
+  CameraKeyframe kf;
+  kf.cue = currentCue();
+  kf.camera = session_->camera();
+  kf.formed = settings_.geometryFormed;
+  kf.ghost = settings_.geometryGhost;
+  kf.shellSpread = settings_.geometryShellSpread;
+  kf.slideU = settings_.geometrySlideU;
+  kf.slideV = settings_.geometrySlideV;
+  kf.flatPieces = settings_.shapePieceCylinders;
+  kf.morphSpeed = speed;
+  cameraTrack_.set(std::move(kf));
+  persistCameraTrack();
+}
+
+bool Shell::eraseCameraKeyframe() {
+  if (session_ == nullptr) return false;
+  const bool removed = cameraTrack_.erase(currentCue());
+  if (removed) persistCameraTrack();
+  return removed;
+}
+
+void Shell::advanceCameraTrack(float dt) {
+  if (session_ == nullptr || cameraTrack_.empty()) return;
+  const CameraCue cue = currentCue();
+  if (!cameraTrackCue_.has_value() || !(*cameraTrackCue_ == cue)) {
+    cameraTrackCue_ = cue;
+    if (cameraTrack_.find(cue) != nullptr) {
+      // A new cue with a keyframe: capture the view exactly as it stands right now as the
+      // blend's own start, so the ease is from wherever play actually is, not from the
+      // *previous* keyframe's own endpoint (the player may have kept orbiting since).
+      cameraTrackFrom_ = session_->camera();
+      cameraTrackFromFormed_ = settings_.geometryFormed;
+      cameraTrackFromGhost_ = settings_.geometryGhost;
+      cameraTrackFromShellSpread_ = settings_.geometryShellSpread;
+      cameraTrackFromSlideU_ = settings_.geometrySlideU;
+      cameraTrackFromSlideV_ = settings_.geometrySlideV;
+      cameraTrackT_ = 0.0f;
+    } else {
+      cameraTrackT_ = 1.0f;  // nothing to ease toward at this cue - leave the view alone
+    }
+  }
+  if (cameraTrackT_ >= 1.0f) return;
+  const CameraKeyframe* kf = cameraTrack_.find(cue);
+  if (kf == nullptr) {  // the keyframe was erased mid-blend
+    cameraTrackT_ = 1.0f;
+    return;
+  }
+  cameraTrackT_ = std::min(1.0f, cameraTrackT_ + dt * std::max(0.01f, kf->morphSpeed));
+  const float t = cameraTrackT_;
+  session_->setOrbitCamera(view::slerpCamera(cameraTrackFrom_, kf->camera, t));
+  settings_.geometryFormed =
+      cameraTrackFromFormed_ + (kf->formed - cameraTrackFromFormed_) * t;
+  settings_.geometryGhost =
+      cameraTrackFromGhost_ + (kf->ghost - cameraTrackFromGhost_) * t;
+  settings_.geometryShellSpread =
+      cameraTrackFromShellSpread_ + (kf->shellSpread - cameraTrackFromShellSpread_) * t;
+  settings_.geometrySlideU =
+      cameraTrackFromSlideU_ + (kf->slideU - cameraTrackFromSlideU_) * t;
+  settings_.geometrySlideV =
+      cameraTrackFromSlideV_ + (kf->slideV - cameraTrackFromSlideV_) * t;
+  settings_.shapePieceCylinders = kf->flatPieces;
 }
 
 void Shell::pause() {

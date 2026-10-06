@@ -68,6 +68,12 @@ class Session {
   /// about that. Handing out the stored camera is how the board once pulled away while
   /// the pieces drawn on top of it stayed put.
   [[nodiscard]] view::OrbitCamera camera() const noexcept;
+  /// Set the stored orbit camera directly, bypassing the ordinary drag/zoom actions.
+  /// Used by the camera-keyframe track (M13.9 Part E) to drive the view from a recorded
+  /// pose instead of the player's own input - the one place something other than `apply`
+  /// is allowed to move the camera, which is why it is spelled out rather than folded
+  /// into `apply` as a new `ActionKind`: a keyframe is not a player gesture.
+  void setOrbitCamera(const view::OrbitCamera& c) noexcept { camera_ = c; }
 
   /// `camera()`'s own blend, against an arbitrary placement set and its bounds instead of
   /// the session's flat layout - what the geometry view passes, built from

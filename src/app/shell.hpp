@@ -3,10 +3,12 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "app/camera_track.hpp"
 #include "app/editor.hpp"
 #include "app/overture.hpp"
 #include "app/session.hpp"
@@ -279,6 +281,43 @@ class Shell {
   [[nodiscard]] OverturePlayer& overtures() noexcept { return overtures_; }
   [[nodiscard]] const OverturePlayer& overtures() const noexcept { return overtures_; }
 
+  // ---- the camera-keyframe track (M13.9 Part E) ----------------------------------
+  //
+  // A scaffold, not a finished authoring tool: the morph is coded once, here, and the
+  // sequence of keyframes - where to put one, what the camera and shape pose should look
+  // like, how fast to ease into it - is left to whoever plays the game and presses
+  // record. There is no in-game editor for the list itself yet; the saved file is plain
+  // text (`camera_track.hpp`) and is meant to be hand-edited too.
+
+  /// The running track: a sparse set of saved camera + shape poses, each pinned to a
+  /// point in the game, that the live view eases toward as play reaches it
+  /// (`advanceCameraTrack`). Empty until a track is loaded or a keyframe is recorded.
+  [[nodiscard]] CameraTrack& cameraTrack() noexcept { return cameraTrack_; }
+  [[nodiscard]] const CameraTrack& cameraTrack() const noexcept { return cameraTrack_; }
+
+  /// Record the current camera and shape pose as a keyframe at the current cue - the
+  /// running session's variant and its ply count right now. Does nothing with no session
+  /// running. `speed` is the new keyframe's own easing rate
+  /// (`Settings::geometryFormSpeed` units); re-recording at the same cue replaces it,
+  /// speed included. Persists the track immediately, the same way a setting change
+  /// persists (`applySettings`).
+  void recordCameraKeyframe(float speed = 2.0f);
+  /// Remove the keyframe at the current cue, if any, and persist. Returns whether one was
+  /// removed.
+  bool eraseCameraKeyframe();
+  /// Where the track is read from and written to: a file beside the settings file, the
+  /// same convention `gamesDir()` uses.
+  [[nodiscard]] std::filesystem::path cameraTrackPath() const;
+  /// Advance the track's own easing for one frame. When play has reached a cue with a
+  /// keyframe different from the one last eased toward, starts a new blend from the
+  /// view's *current* camera and shape pose toward it (`view::slerpCamera` for the
+  /// camera, a plain lerp for the pose scalars, both paced by the keyframe's own speed);
+  /// every later frame at the same cue advances that blend. A cue with no keyframe, or a
+  /// finished blend, leaves the camera and pose exactly where they are - free for the
+  /// player's own orbit, or wherever the last keyframe left them. A no-op with no session
+  /// or an empty track.
+  void advanceCameraTrack(float dt);
+
   void pause();
   void resume();
 
@@ -320,6 +359,31 @@ class Shell {
   /// The main-menu attract sequence, empty when none is running (M13.9).
   AttractSequence attract_;
   std::size_t attractIndex_{0};
+
+  /// Where the current point in the running game is, for the camera track: the session's
+  /// variant and its ply count right now.
+  [[nodiscard]] CameraCue currentCue() const;
+  /// Write the track to `cameraTrackPath()`, silently - a camera track is a convenience,
+  /// not save data a failed write should ever interrupt play over.
+  void persistCameraTrack() const;
+
+  CameraTrack cameraTrack_;
+  /// The cue the view last started easing toward, so a repeated frame at the same cue
+  /// does not restart the blend, and a cue with no keyframe is not mistaken for "nothing
+  /// changed" right after one that did have one.
+  std::optional<CameraCue> cameraTrackCue_;
+  /// The camera and pose the running blend eases *from* - captured once, when a new
+  /// target cue is first reached, so the blend's start does not drift as the player's own
+  /// orbit (or an earlier blend) keeps moving before `advanceCameraTrack` catches up.
+  view::OrbitCamera cameraTrackFrom_;
+  float cameraTrackFromFormed_{1.0f};
+  float cameraTrackFromGhost_{1.0f};
+  float cameraTrackFromShellSpread_{1.0f};
+  float cameraTrackFromSlideU_{0.0f};
+  float cameraTrackFromSlideV_{0.0f};
+  /// 0 at the start of a blend, 1 once it has fully eased in (and the idle state: a cue
+  /// with no keyframe is set to 1 immediately, meaning "nothing to do").
+  float cameraTrackT_{1.0f};
 };
 
 }  // namespace cb::app
