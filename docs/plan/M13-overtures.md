@@ -271,3 +271,167 @@ has not been eyeballed on a machine with a display.
 
 **Deferred:** rule-flavoured scenes (M13.6, a stated partial). `--shot` of a derived variant
 forces the library picker to it.
+
+## M13.9 The main-menu attract sequence: a played game that changes shape
+
+Requested directly, for trailer production: "do the game with changing geometries [in
+the main menu]... program piece moves with 'shape' morphs, start on the regular board."
+Unlike M13.1-M13.8 above, this is not the New Game screen's per-variant preview (a pure
+function of `(spec, t)` with no real game state) - it is a real, short game, actually
+played move by move, on the **main menu**, that cuts and morphs between several
+variants' own geometries while it plays. Scoped explicitly "for now": piece moves and
+shape/ghost morphs only - no new camera work. The user is building the camera
+choreography separately.
+
+### A. A trailer-scoped 8x8 nested-shell variant
+
+`cylinder`, `torus` and `klein` (`variants/*.toml`) are already 8x8 - the same file/rank
+count as `standard`. `torus3d` is 4x4x4. For the sequence's "it's the same board,
+gaining a dimension" beat to actually read that way, the 3-D step needs to match: a new
+`variants/torus3d_8x8.toml`, file=8/rank=8/level=4 (256 cells, the same scale `hyper4`
+already renders), built the same way `torus3d.toml` is - three periodic identifications,
+no code - with a comment stating plainly that it is trailer-scoped, not a catalogue
+variant (matching `torus3d_twist.toml`'s own precedent of a special-purpose 4x4x4
+variant already in the repo).
+
+That alone is not enough: the D >= 3 play-shape dispatch
+(`src/render/overture_scene.cpp`'s `playShapeAt`, the `d.dims() == 3` branch, and
+`hasPlaySurface`'s matching check) is gated by **literal variant name** -
+`v.name == "torus3d"` - not by structure. A new variant under a different name gets
+nothing and falls back to the ordinary flat lattice. Fix this by generalizing the gate
+to a structural check - three dimensions, every axis periodic (the same boundary-kind
+inspection `PlaySurface::buildStacked` already reads per axis, `src/render/
+play_surface.cpp`'s `periodicU`/`periodicV`-style checks, extended to a third axis) -
+rather than adding a second hardcoded name. This is the generalization the codebase's
+own stated ethos already argues for (`torus3d_twist.toml`'s own comment: "the gluing
+language has no dimension-specific case"), and it has a useful side effect worth noting,
+not chasing: `torus3d_twist` (shipped, 4x4x4, non-orientable) currently has no play
+shape for the identical name-gating reason, and would gain one for free. That is a
+welcome consequence of the fix, not a second task.
+
+**Tests.** `hasPlaySurface` true for the new variant; a `playShapeAt` position check at a
+couple of coordinates; `torus3d` and `hyper4`'s own existing behaviour completely
+unchanged (regression) - and `torus3d_twist` gaining a working play shape is an
+acceptable, expected side effect to note in the status write-up, not a scope violation.
+
+### B. The attract sequence: a data model, and a driver that reuses the watch machinery
+
+**Reuse, do not reinvent.** `Session::startWatching(GameFile, dwell)` /
+`advanceWatching(dt)` (`src/app/session.hpp:235-249`, impl `session.cpp:710-776`) is
+already the per-frame driver for "play scripted moves over time, with animation,
+interactively" - built for M12.8's "Watch a game," and already proven at that job. An
+attract sequence is a **looping sequence of these**, one per geometry beat, with the
+shape/ghost pose also eased per step - new orchestration layered on top, not a new
+move-timing mechanism.
+
+A plain data structure - name it for what it is, e.g. `AttractStep{ variant, moves
+(a GameFile), formedTarget, ghostTarget }`, `AttractSequence = vector<AttractStep>` - and
+a driver on `Shell`, `startAttract(AttractSequence)` / `advanceAttract(dt)`, built the
+same shape as `startWatching`/`advanceWatching` (`src/app/shell.cpp:406-441` is the
+pattern to follow, not reinvent). Per step: `startGame(step.variant)` (full variant
+switch/reset, `shell.cpp:306-325`), `session_->startWatching(step.moves, watchDwell)`,
+then every frame ease `settings_.geometryFormed`/`settings_.geometryGhost` toward the
+step's targets (`render::advanceFormMorph` already does this for `formed`
+- `src/gui/main.cpp:1390-1413` is the existing call site to read before adding a sibling
+for ghost, or reusing the same helper if it is already generic enough). Advance to the
+next step - wrapping back to 0, looping forever - once **both** the step's moves are
+exhausted (`advanceWatching` returns false) **and** the pose has settled near its
+target; never cut mid-ramp.
+
+**Two caveats to build around, not paper over** - both already documented in this
+plan's M18.6 work, not new discoveries, but easy to trip over here specifically:
+
+1. **`hyper4` has no continuous roll - it is a snap**, per M18.6's own status note
+   ("honestly a snap - there is no continuous roll to expose"). Its step's
+   `formedTarget` reaching 1 will pop, not ease, no matter what this task does. Do not
+   spend effort trying to smooth it - that is out of scope here (and already out of
+   scope in M18.6). A hard pop reading badly is a pacing/camera problem for later.
+2. **`geometryFormed = 0` is a rank-mirrored flat board**, not the ordinary flat
+   lattice (M18.6, documented, deferred - the same "180 mirror" item this plan's own
+   Klein/morph revision flagged as still unaddressed). The *first* step's flat ->
+   shape reveal - the "disguised as a regular board" opening the user asked for - may
+   therefore show visibly mirrored ranks on its very first frame, not a clean echo of
+   `standard`. **Build it, then actually look at a capture of it.** If the mirror reads
+   as wrong, the documented fallback is: open on the literal `standard` variant for the
+   sequence's first second or two, then hard-cut to the cylinder step already mid-reveal
+   (`formed > 0`) - sidestepping the open bug rather than fixing it here. State plainly
+   in the status note which of the two shipped, and why.
+
+**Variant-switch side effects.** `Shell::startGame`/`startWatching` do not themselves
+push renderer options or re-frame the camera - the existing "watch a different bundled
+game" request handler (`src/gui/main.cpp:1460-1477`) does that explicitly, at the call
+site, after `Shell::startWatching` returns, including whatever it already forces for
+`cameraMode`/`geometryAlign` on a glued variant. `advanceAttract`'s callers need the
+identical treatment on **every** cut, not just the first - read that handler as the
+pattern and inherit it as-is. Camera behaviour is explicitly out of scope for this task;
+whatever "Watch a game" already does today is what ships here too, unchanged.
+
+### C. Wire it into the main menu
+
+Today `Screen::MainMenu` draws only the ambient `Deco::Manifold` field (`decoForScreen`,
+`src/render/deco.cpp:572-600`), and `Shell::showsBoard()` (`shell.cpp:165-180`) returns
+`false` for it - no board is ever drawn on the main menu. While an attract sequence is
+running: `showsBoard()` should return `true` for `MainMenu` (so the existing board path -
+the one `Screen::Game` already uses, no new renderer code - picks it up), and
+`decoForScreen` should stop drawing `Deco::Manifold` for `MainMenu` in this state (the
+board replaces the ambient field, not alongside it). Drive it from the same per-frame
+spot `advanceWatching` already runs from (`src/gui/main.cpp:1425`): call
+`shell->advanceAttract(dt)` whenever `screen() == Screen::MainMenu` and a sequence is
+running. Start the sequence when the app opens on the main menu (always-on is simpler
+than an idle-timeout trigger and matches "implement it in the main menu" directly -
+default to it unless it conflicts with something already there).
+
+**Do not touch input handling.** Every existing `MainMenu` button (New Game, Watch,
+Settings, Quit) must keep working exactly as today, laid over the now-playing board the
+same way the pause menu already composites its UI over a live board (`Screen::Paused`) -
+reuse that layering, do not invent a new one.
+
+### D. The sequence content
+
+`cylinder` (8x8, exists) -> `torus` (8x8, exists) -> `klein` (8x8, exists, ghost target
+~0.35) -> `torus3d_8x8` (new, part A, ghost target ~0.35) -> `hyper4` (exists, 4x4x4x4,
+`formed` snaps per the caveat above) -> loop back to `cylinder`. Only the **first** step
+(`cylinder`) ramps `formed` 0 -> 1, the reveal the user described; every later step
+starts already-formed and simply cuts - repeating the flat-reveal trick at every step
+would read as slow and repetitive rather than escalating, which is the pacing judgement
+call for this part. Each step carries 2-4 ply of **real, legal** opening moves - author
+them for real and let the engine's own legality check prove it: a `GameFile` that fails
+to load or replay (`io/game_file.hpp`'s `applyGameFile`) is itself a build-time test
+failure here, not something to hand-wave past. Ghost ramps (`klein`, `torus3d_8x8`) ease
+the same way `formed` does, over the step's own duration, settling before that step's
+"moves exhausted and pose settled" advance condition can fire.
+
+### Tests
+
+A pure logic test (no GPU, same shape as `tests/unit/app/test_shell.cpp`/`test_watch.cpp`)
+stepping an `AttractSequence` through `advanceAttract(dt)` ticks: each step's variant
+loads, its moves replay legally, and after enough ticks the sequence wraps back to step
+0 and keeps going - proving the loop, not just one pass. A `showsBoard()`/
+`decoForScreen()` test confirming both flip correctly while attract is active on
+`MainMenu`, and are unchanged on every other screen (regression). Part A's own tests as
+above. Note plainly, the way M17.12 part B's status note did: a live, looping,
+many-minutes sequence cannot be exercised end-to-end headlessly, but every piece of its
+*state* (which variant is loaded, the current `formed`/`ghost` targets, whether a step
+has settled) is directly testable without a display - capture a `--shot` at a couple of
+hand-picked points in the sequence (mid-cylinder-reveal, klein-with-ghost) for a visual
+spot-check, and say plainly that is a spot-check, not full coverage.
+
+### Acceptance
+
+Launching the app and sitting on the main menu shows the sequence playing automatically:
+a real short game, the board visibly changing shape between beats, ghost visibly
+engaging on the klein and `torus3d_8x8` beats, looping back to the start without a
+restart. Every existing main-menu button still works, laid over the playing board. No
+other screen's behaviour changes - the New Game screen's own M13 overture system, Game,
+Paused and Watch are all exactly as before.
+
+### Risks and non-goals
+
+Camera is explicitly out of scope ("I'll figure out camera moves later") - ship whatever
+`Shell::startWatching`'s existing glued-variant defaults already do; do not add new
+framing, follow, or orbit behaviour. Do not touch the New Game screen's own overture
+system (M13.1-M13.8 above) - a separate, already-working code path. `torus3d_8x8.toml`
+is explicitly trailer-scoped, per the user's own words ("just for this trailer") - do
+not add it to any curated/"start here" list or other player-facing surface beyond what
+this task needs. The `formed = 0` mirror and the `hyper4` snap are known, pre-existing,
+documented limits (M18.6) that this task works around, not fixes.
