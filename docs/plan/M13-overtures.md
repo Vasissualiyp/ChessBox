@@ -1407,3 +1407,73 @@ full loop: `t=35` shows `TORUS3D_8X8` mid-sequence on the continuation line; `t=
 `CYLINDER` at ply 18 with its move log reading `7. d1d4 7.. f8c5 8. d4c5...` - the
 twenty-move `resetMoves` line, not the ten-move continuation one, confirming the wrap
 fallback fires at runtime and not just in the headless test.
+
+### Revision: material preservation and `resetMoves` superseded by looping to `standard`
+### (2026-10-06, feedback, built directly by Claude)
+
+Direct feedback on the round above, in two parts. First: "we in fact have fewer pieces in
+the torus onwards variants compared to the standard 8x8 setup" - correct, and worth
+separating into what was fixable and what was not. Second, once that distinction was laid
+out and agreed on: "I do not want you to take the already-existing variants with
+non-standard initial pieces' placements... I want you to JUST take geometry from them and
+use the standard pieces' placements." Half right, worth being precise about which half -
+`klein.toml` already declares bishop and queen as piece *types*; its restricted start
+array is not what was dropping them. What *was* fixable: `torus3d_8x8.toml` is
+TRAILER-SCOPED, not a catalogue variant, and its geometry - three plain periodic
+identifications, no flip - is fully orientable, so excluding pawns from it was never
+structural, just unexamined. It now declares `orientation_axis = "rank"` and a full pawn
+type, with a full starting army (`RNBQKBNR` + 8 pawns per side, still separated along the
+level axis the original K/R/N-only army was), confirmed loadable and mobile (163 legal
+moves from its own fresh start) before it was ever wired back into the sequence.
+
+**The trade-down was rebuilt to actually preserve material, not just reach zero bishops
+and queens by whatever route got there first.** The previous round's line lost both of
+White's knights, one of Black's, and a rook - the user's own complaint, read back against
+the committed line, was accurate. The new line keeps both rooks on both sides for the
+entire sequence (the original's worst single loss) and only White's two knights - down
+from four pieces of uncounted-for collateral to one knight and nothing else. Every
+bishop is removed by a direct sacrifice onto a king-defended square with the *king*
+recapturing, never a rook; the queens go last, finishing in a rook-for-queen trade only
+once nothing lighter reaches the square. All of it was re-derived and re-verified move by
+move against the live engine the same way every line in this file is - not reasoned about
+on paper.
+
+**A second wrapped-diagonal hazard, independent of the one Part F already found and
+documented**, turned up while verifying this new line could also be replayed as the
+loop's own re-entry fallback (`resetMoves`, from the round before this one): a bishop
+sacrifice onto f7 with the king recapturing is sound on the plain `standard` board, but
+not on `cylinder` - `cylinder`'s own file-seam lets a queen still on d1 defend f7 the long
+way round the wrap, turning the same sacrifice into a losing blunder the instant it is
+replayed on the shape instead of the flat board. Found by building the `resetMoves`
+fallback, testing it, and watching it fail at exactly that move - not predicted.
+
+**Rather than patch around that hazard move by move, the loop itself was simplified to
+make the whole problem disappear.** `AttractStep::resetMoves`, `Shell::loopEntryIndex()`
+and `attractLooped_` - all three added in the previous round specifically to give the
+loop's own re-entry beat a safe fresh-start fallback - are gone. The loop now wraps all
+the way back to `standard`, not to `cylinder`: every beat but `standard` continues the
+position right before it, so the only way every lap stays correct with one fixed `moves`
+list per beat is for every lap to replay the exact same verified chain, cold open to 3-D
+torus, start to finish. This is a strictly simpler design than the one it replaces - no
+beat needs a second, wrap-only line, and there is nothing left to keep in sync if the
+trade-down ever changes again - at the cost of replaying the (now fifty-plus-ply) opening
+in full every lap rather than skipping straight to the shape beats. `standard`'s own
+`continuesPosition` already defaulted to false (it has no predecessor, lap or not), so
+this needed no new per-beat state at all, just removing the special case.
+
+**Tests.** The loop test (`"the attract sequence plays every shape and loops back
+forever"`) now runs the Shell through a complete second lap and checks it lands back on
+`standard`, not `cylinder` - this is what actually caught the wrapped-diagonal bug above,
+failing first with a silent hang and then, once the first issue was fixed, with a clean
+`'e8f7' is not legal` before the loop-to-standard redesign made the whole class of
+failure moot. The flat-icon-style cut test now runs one full lap plus the wrap back to
+`standard` and on into `cylinder` again, checking the sculptural/icon-puck state at each.
+No render-level test changed - continuity and the loop are `Shell` concerns, not geometry
+ones, same as the previous round.
+
+**Results.** `[app],[render],[arch],[attract]` (233 cases) and the full unfiltered suite
+(502 cases, perft and the slow property suite included) both green on the final build;
+`clang-format --dry-run --Werror` clean on every touched file. Visual spot-check via
+`--shot --screen menu --t <seconds>`: the second lap's `t≈210` capture shows `STANDARD`,
+ply 1, the full thirty-two-piece army, exactly the fresh canonical start - confirming the
+loop-to-`standard` redesign works end to end, at runtime, not just in the headless test.

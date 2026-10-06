@@ -124,12 +124,14 @@ TEST_CASE("the attract sequence plays every shape and loops back forever",
   for (std::size_t i = 0; i < seq.size(); ++i) {
     CHECK(seen[i] == seq[i].variant);
   }
-  // The standard opener plays once; the last cut then loops into the first shape beat
-  // (cylinder), and the sequence is still running.
-  CHECK(seen.back() == "cylinder");
-  CHECK(seen.back() == seq[1].variant);
+  // The whole sequence loops back to its own start (M13.9 Part F, "ALL game should be
+  // continuous"): every later beat continues the position right before it, all the way
+  // back to `standard`'s own canonical start, so a lap has to replay that start too, not
+  // skip straight to the shape beats.
+  CHECK(seen.back() == "standard");
+  CHECK(seen.back() == seq[0].variant);
   CHECK(shell->attracting());
-  CHECK(shell->attractStep() == 1);
+  CHECK(shell->attractStep() == 0);
 }
 
 TEST_CASE("the attract sequence lands on the game screen and leaves for the menu",
@@ -166,8 +168,9 @@ TEST_CASE("stopping the attract restores the opaque board and leaves the menu",
   shell->startAttract(defaultAttractSequence());
   REQUIRE(shell->attracting());
   // Run into the Klein beat (index 3, after the standard opener, cylinder and torus),
-  // which ghosts the board, then stop.
-  for (int i = 0; i < 20000 && shell->attractStep() < 3; ++i) {
+  // which ghosts the board, then stop. `standard`'s own beat is the trade-down - fifty
+  // plies long - so this needs the same generous tick budget the other tests use.
+  for (int i = 0; i < 200000 && shell->attractStep() < 3; ++i) {
     shell->session()->advanceAnimation(0.02f);
     shell->advanceAttract(0.02f);
   }
@@ -225,7 +228,10 @@ TEST_CASE("the attract cut switches the pieces to the flat icon style",
   REQUIRE(runTo(5));  // 3-D torus: icon pucks on
   CHECK(shell->currentVariant() == "torus3d_8x8");
   CHECK(shell->settings().shapePieceCylinders);
-  REQUIRE(runTo(1));  // back round to cylinder: sculptural again
+  REQUIRE(runTo(0));  // the loop wraps all the way back to standard: sculptural again
+  CHECK(shell->currentVariant() == "standard");
+  CHECK_FALSE(shell->settings().shapePieceCylinders);
+  REQUIRE(runTo(1));  // and on into cylinder, same as the first lap
   CHECK(shell->currentVariant() == "cylinder");
   CHECK_FALSE(shell->settings().shapePieceCylinders);
 }
@@ -260,11 +266,6 @@ TEST_CASE("every cut in the sequence lands on the previous shape's own end-of-st
   CHECK_FALSE(standard.continuesPosition);
   CHECK(cylinder.continuesPosition);
   CHECK(torus.continuesPosition);
-  // Cylinder is also the loop's own re-entry point, and its continuation line is legal
-  // only against its one real predecessor (`standard`, reached once) - every wrap after
-  // the first needs its own fresh line instead (`resetMoves`), which the loop test above
-  // exercises directly rather than just checking it is non-empty here.
-  CHECK_FALSE(cylinder.resetMoves.empty());
 
   // Torus ends fully formed (a plain ring); Klein starts at its own ring-formed waypoint
   // - no fold, no twist yet - the same picture torus's own end state is.

@@ -7,13 +7,24 @@
 # at the same 8x8 scale the trailer needs - the construction is otherwise identical to
 # `torus3d.toml` (three periodic identifications, no code). It exists for that sequence
 # and should not be read as a shipped game; `torus3d` is the 4x4x4 catalogue entry.
+#
+# Unlike Klein, every one of this board's three identifications is a plain periodic
+# gluing with no flip, so the geometry is fully orientable - "forward" has a consistent
+# global meaning here the way it does on `torus.toml`, and there is no structural reason
+# to leave pawns out the way `torus3d.toml` (its 4x4x4 catalogue sibling) does. A full
+# army, not just king/rook/knight, carries through the M13.9 attract sequence's own
+# continuity cut (M13.9 Part F revision: "take the geometry, not the restricted army").
+# No [promotion] block, for the same reason `torus.toml` has none: no cell is a "last
+# rank" here either.
 
 name = "torus3d_8x8"
 description = "An eight-by-eight-by-four cube with every face glued - the same board as the 2-D shapes, one dimension up."
 difficulty = "hard"
 side_to_move = "white"
+en_passant = true
 stalemate = "draw"
 halfmove_draw_limit = 100
+orientation_axis = "rank"
 
 [[axis]]
 name = "file"
@@ -38,6 +49,35 @@ kind = "periodic"
 [[geometry.identify]]
 axis = "level"
 kind = "periodic"
+
+[[piece]]
+name = "pawn"
+symbol = "P"
+resets_draw_clock = true
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+  capture = "cannot"
+  forward = true
+
+  [[piece.move]]
+  vector = [1]
+  min = 2
+  max = 2
+  mode = "slide"
+  capture = "cannot"
+  forward = true
+  from_rank = 1
+  leaves_en_passant = true
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+  capture = "must"
+  forward = true
 
 [[piece]]
 name = "knight"
@@ -95,8 +135,12 @@ royal = true
   max = 1
   mode = "leap"
 
-# The same construction as `torus3d`: the armies are separated along the level axis, and
-# the back rank sits one rank short of the far edge so the periodic knights do not meet at
-# the start.
+# Full standard armies now (M13.9 Part F revision), not just king/rook/knight: the
+# geometry is what made the restricted roster seem necessary, and this geometry does not
+# actually require it (see the file's own top comment). Still separated along the level
+# axis the way the original K/R/N-only army was, white at level 0 and black at level 2 -
+# two apart on a 4-level wrap, so neither army's own back rank sits level-adjacent to the
+# other's. Black's back rank sits one rank off its pawns' far edge the same way white's
+# does, mirrored: pawns toward the centre, king row toward its own level's rank seam.
 [start]
-board = "8/8/8/8/8/8/8/RNKR4|8/8/8/8/8/8/8/8|8/8/8/8/8/8/rnkr4/8|8/8/8/8/8/8/8/8"
+board = "8/8/8/8/8/8/PPPPPPPP/RNBQKBNR|8/8/8/8/8/8/8/8|8/8/8/8/8/8/rnbqkbnr/pppppppp|8/8/8/8/8/8/8/8"

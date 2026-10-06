@@ -73,15 +73,6 @@ struct AttractStep {
   /// levels visibly spread apart into the nested shells as the beat plays (M13.9
   /// revision: "klein morphs to torus, then the torus copies itself into shells").
   float spreadFrom{-1.0f};
-  /// The line to play instead of `moves`, from this variant's own declared start, on the
-  /// one occasion `continuesPosition` cannot be honoured: the loop's own re-entry beat,
-  /// every time the sequence wraps after the first lap (`Shell::loopEntryIndex`,
-  /// `attractLooped_`). A looping sequence replays the same fixed `moves` forever, so the
-  /// re-entry beat's own continuation line - legal only against its *one* real
-  /// predecessor, reached once at the very start - cannot be replayed against whatever
-  /// the previous lap happened to end on. Empty (the default) for every beat that is
-  /// never the loop's own re-entry point, where it is never read.
-  std::vector<std::string> resetMoves{};
   /// Carry the previous beat's own end-of-game position onto this beat's board (M13.9
   /// Part F), through `embedOnto`, instead of starting this beat's `moves` from the
   /// variant's own declared start. `moves` then has to be a legal continuation of the
@@ -367,20 +358,6 @@ class Shell {
   /// The main-menu attract sequence, empty when none is running (M13.9).
   AttractSequence attract_;
   std::size_t attractIndex_{0};
-  /// Which beat index the sequence loops back to once it reaches the end - skipping the
-  /// one-time `standard` opener, when there is anything else to loop among.
-  [[nodiscard]] std::size_t loopEntryIndex() const noexcept {
-    return attract_.size() > 1 ? 1 : 0;
-  }
-  /// True from the first time the sequence wraps back to `loopEntryIndex()` onward. A
-  /// beat there can be marked `continuesPosition` for its *one* real predecessor (the
-  /// beat right before it in the sequence, reached once, at the very start) without that
-  /// also applying to every later wrap, which has a *different* predecessor each time
-  /// (whatever the last beat of the previous lap ended on) and a `moves` list authored
-  /// for only the first one. `startAttractStep` reads this to fall back to a fresh start
-  /// at the loop's own re-entry point on every wrap but the first (M13.9 Part F, the
-  /// "ALL game should be continuous" revision).
-  bool attractLooped_{false};
 
   /// Where the current point in the running game is, for the camera track: the session's
   /// variant and its ply count right now.
