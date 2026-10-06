@@ -59,6 +59,11 @@ struct AttractStep {
   /// but a reveal is already formed. The cylinder beat uses this to begin part-way up the
   /// roll rather than at the rank-mirrored flat end (M13.9, the M18.6 mirror workaround).
   float formedFrom{-1.0f};
+  /// Draw this beat's pieces as the flat icon pucks (`shapePieceCylinders`) rather than
+  /// the ordinary sculptures. A discrete style snap, not something to ease: there is no
+  /// continuous half-icon/half-sculpture state. Set on the shapes whose far side a
+  /// sculptural piece cannot be read through (M13.9 revision, Part H).
+  bool flatPieces{false};
 };
 using AttractSequence = std::vector<AttractStep>;
 
@@ -181,13 +186,13 @@ class Shell {
   /// to the main menu when the file runs out.
   void advanceWatching(float dt);
 
-  /// Begin the main-menu attract sequence (M13.9): a looping run of short games, each on
-  /// a different shape, played behind the menu. The shell stays on `Screen::MainMenu`;
-  /// the variant switches happen underneath. Does nothing when the sequence is empty or
-  /// its first variant will not load.
+  /// Begin the attract sequence (M13.9): a looping run of short games, each on a
+  /// different shape, played on the ordinary game screen like a watched game. Does
+  /// nothing when the sequence is empty or its first variant will not load.
   void startAttract(AttractSequence sequence);
-  /// Leave attract mode. The running game is stopped and the opaque board restored, so a
-  /// game started afterwards does not inherit the trailer's ghosted pose.
+  /// Leave attract mode: stop the running game, restore the opaque board so a game
+  /// started afterwards does not inherit the trailer's ghosted pose, and return to the
+  /// main menu.
   void stopAttract();
   [[nodiscard]] bool attracting() const noexcept { return !attract_.empty(); }
   /// Which beat of the sequence is playing, for a status line or a test.
@@ -260,8 +265,8 @@ class Shell {
  private:
   Shell() = default;
 
-  /// Start beat `index`: switch to its variant, load its short game into the watch
-  /// runner, and return to the main menu. Fails when the variant will not load.
+  /// Start beat `index`: switch to its variant and load its short game into the watch
+  /// runner, landing on the game screen. Fails when the variant will not load.
   Result<void> startAttractStep(std::size_t index);
 
   std::vector<std::string> library_;

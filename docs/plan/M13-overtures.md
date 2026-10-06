@@ -881,3 +881,64 @@ automatic framing beyond what `frameBoard` already does on a cut. The still-open
 continuity question (Part F, parked) is untouched by this revision - dropping `hyper4`
 removes one transition from that future problem but does not resolve the `torus`/`klein`
 wrap-contact issue for the beats that remain.
+
+### Status: M13.9 revision - parts G, H, I built (2026-10-05, opencode)
+
+All three parts are built, tested and green. Part F's `embedOnto`/`hyper4_8x8` scaffolding
+is untouched, as are M17.12 and M17.27.
+
+**Part G (trailer on the real game screen).** The backdrop layout is gone. `Shell::
+startAttractStep` no longer forces `screen_`/`previous_` back to `Screen::MainMenu` after
+`startGame`, so a beat lands on `Screen::Game` like any watched game;
+`showsBoard()`'s `MainMenu` special case is deleted; `stopAttract()` now `go(Screen::
+MainMenu)`s exactly as `stopWatching()` does; `Ui::buildMainMenu` is back to a plain
+`drawShellFrame` with the `pauseFrame`/`overBoard` branch and the `##attractstop`
+overlay removed; and `Ui::buildGameHud`'s bottom-left controls check `attracting()`
+**before** `watching()` and show a sibling "STOP TRAILER" / "Esc leaves the trailer"
+calling `stopAttract()`. One fix beyond the spec's enumerated bullets was required: the
+interactive main loop (`src/gui/main.cpp`) gated `advanceAttract` on `screen() ==
+MainMenu` and stopped attract otherwise, which would have killed the run on its first
+frame on `Game`; it now advances while on `Game` and stops only if the player navigates
+away. Esc handling needed no change (it already checks `attracting()` first).
+
+**Part H (flat icon pucks on two beats).** `AttractStep` gained `bool flatPieces{false}`
+(placed last so the existing positional aggregates are unchanged). The Klein and
+`torus3d_8x8` beats set it true - the same two that ghost; every other beat leaves it
+false. `startAttractStep` snaps `settings_.shapePieceCylinders = step.flatPieces` at each
+cut. `stopAttract()` also clears it (a small defensive addition the spec did not name,
+matching the existing `geometryGhost` reset) so a beat's pucks cannot leak into the next
+game.
+
+**Part I (hypercube dropped).** The `hyper4` entry is removed from
+`defaultAttractSequence()`; the sequence is the five beats `standard -> cylinder -> torus
+-> klein -> torus3d_8x8`. The spec's "looping back to `cylinder`" is implemented
+literally: the `standard` beat is a one-time cold open and the last beat cuts back to
+`cylinder`, not replaying the opener (`advanceAttract`'s next index). This is a
+deliberate loop-target change beyond a bare entry removal, taken because the spec states
+the loop destination twice. `variants/hyper4_8x8.toml` and `app::embedOnto` are untouched
+and still unit-tested.
+
+**Tests.** `tests/unit/app/test_attract.cpp` was updated: the old
+`REQUIRE(seq.size() == 6)` and the `MainMenu` screens are gone, the five expected variant
+names are pinned, the loop test now proves the wrap goes to `cylinder` (index 1) at the
+new length, and two new cases cover the per-beat `flatPieces` flags and the live
+`shapePieceCylinders` flip (sculptural -> pucks at Klein -> back to sculptural at the
+cylinder wrap). Results: `tools/test.sh --build app` 77 cases / 1062 assertions,
+`--build render` 138 / 5,034,444, `--build unit` 297 / 48,802, `--build arch` 9 / 156,
+`ctest -R "^property$"` passed (276 s), `gui-menu`/`gui-pause` 2/2, `clang-format
+--dry-run --Werror` clean on every touched file, and `tools/precommit.sh` completed
+clean (format/build/arch/unit/property, exit 0).
+
+**Capture review.** `--shot --screen menu` (no `--t`) is the ordinary quintic-field menu,
+unchanged. `--shot --screen menu --t 0` is the full game screen - label, board filling the
+window, no split menu panel - with the STOP TRAILER control bottom-left. A 0-20 s sweep at
+1 s steps visits `standard` (0-1 s), `cylinder` (2-4), `torus` (5-8), `klein` (9-12),
+`torus3d_8x8` (13-15), then wraps to `cylinder` from 16 s: `hyper4` never appears, and the
+wrap no longer replays `standard`. Full frames confirm `cylinder` and `torus` draw the
+ordinary sculptures, while `klein` and `torus3d_8x8` draw the flat icon pucks (and ghost).
+**What could not be checked this way:** the player's manual orbit/zoom (interactive input
+on `Screen::Game`, no display here) is unexercised, though it is the same already-live
+path an ordinary or watched game uses; the new interactive-loop driver branch in
+`main.cpp` is bypassed by the `--capture` path (which calls `advanceAttract` directly), so
+it is covered by the app/loop tests and reasoning rather than a screenshot; and the
+style/flip at a cut is shown by per-beat stills plus the unit test, not as motion.

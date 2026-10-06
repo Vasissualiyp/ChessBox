@@ -174,10 +174,6 @@ bool Shell::showsBoard() const noexcept {
     case Screen::PieceMoves:
     case Screen::PauseQuitConfirm:
       return session_ != nullptr;
-    // The attract sequence plays a real game behind the menu (M13.9), so the board is
-    // drawn there too - the existing board path, no new renderer code.
-    case Screen::MainMenu:
-      return attracting() && session_ != nullptr;
     case Screen::Settings:
       return session_ != nullptr && previous_ != Screen::MainMenu;
     default:
@@ -187,8 +183,10 @@ bool Shell::showsBoard() const noexcept {
 
 bool Shell::showsCheckWarning() const noexcept {
   // The warning belongs to the board. Every screen that keeps the board behind it gets
-  // it; the attract sequence's board does not, however checked the position it happens to
-  // be showing - it is ambient menu footage, not a game the player is playing (M13.9).
+  // it; a position left behind on the main menu - a game abandoned but kept for a later
+  // resume - does not, because it is not a warning about the screen the player is looking
+  // at. The trailer now runs on the game screen like any watched game, so a checked beat
+  // would show it too (M13.9 revision, Part G).
   if (screen_ == Screen::MainMenu) return false;
   return showsBoard() && session_ != nullptr && session_->game().inCheck();
 }
@@ -449,11 +447,13 @@ void Shell::advanceWatching(float dt) {
 }
 
 AttractSequence defaultAttractSequence() {
-  // Standard -> cylinder -> torus -> Klein bottle -> 8x8x4 3-D torus -> 4-D hypercube,
-  // then round again. Every line is real, legal opening play, verified through the
-  // engine's own legality: `startWatching` replays it move by move and a bad move fails
-  // the load. The two shape beats that hide their far side (Klein, the 3-D torus) ghost
-  // to 0.35; the rest stay opaque.
+  // Standard -> cylinder -> torus -> Klein bottle -> 8x8x4 3-D torus, then round again.
+  // Five beats: the hypercube was dropped (M13.9 revision, Part I); `hyper4_8x8.toml` and
+  // `embedOnto` remain, independently tested but unreferenced here. Every line is real,
+  // legal opening play, verified through the engine's own legality: `startWatching`
+  // replays it move by move and a bad move fails the load. The two shape beats that hide
+  // their far side (Klein, the 3-D torus) ghost
+  // to 0.35 and draw flat icon pucks; the rest stay opaque and sculptural.
   //
   // The sequence opens on the literal `standard` board, then hard-cuts into the cylinder
   // beat already part-way up its roll. This is the documented workaround for the M18.6
@@ -465,15 +465,17 @@ AttractSequence defaultAttractSequence() {
   seq.push_back({"standard", {"e2e4", "e7e5"}, 1.0f, 1.0f, 1.0f});
   seq.push_back({"cylinder", {"e2e4", "e7e5", "g1f3", "b8c6"}, 1.0f, 1.0f, 0.30f});
   seq.push_back({"torus", {"d1d5", "e5d5", "h1h5", "a5a1"}});
-  seq.push_back({"klein", {"a1a5", "e5a5", "b1c3", "a5a1"}, 1.0f, 0.35f});
+  // Klein and the 3-D torus hide their far side, so they draw flat icon pucks as well as
+  // ghosting (M13.9 revision, Part H); the trailing `-1.0f, true` sets `flatPieces` and
+  // leaves `formedFrom` at its default.
+  seq.push_back({"klein", {"a1a5", "e5a5", "b1c3", "a5a1"}, 1.0f, 0.35f, -1.0f, true});
   seq.push_back(
       {"torus3d_8x8",
        {"(0,0,0)-(0,0,1)", "(0,1,2)-(0,1,1)", "(1,0,0)-(0,2,0)", "(0,1,1)-(0,0,1)"},
        1.0f,
-       0.35f});
-  seq.push_back({"hyper4",
-                 {"(0,0,0,0)-(0,0,0,1)", "(0,2,0,0)-(1,1,0,0)", "(2,0,0,0)-(2,0,0,1)",
-                  "(0,3,0,0)-(0,1,0,0)"}});
+       0.35f,
+       -1.0f,
+       true});
   return seq;
 }
 
@@ -495,9 +497,12 @@ Result<void> Shell::startAttractStep(std::size_t index) {
   // A revealing beat starts part-way or from flat; any other beat keeps the pose the last
   // one left, so the shape cuts rather than re-rolling every time.
   if (step.formedFrom >= 0.0f) settings_.geometryFormed = step.formedFrom;
-  // Attract runs behind the menu: `startGame` moved us to the game, put us back.
-  screen_ = Screen::MainMenu;
-  previous_ = Screen::MainMenu;
+  // The piece style is a discrete per-beat choice, so it snaps at the cut rather than
+  // easing like the pose (M13.9 revision, Part H).
+  settings_.shapePieceCylinders = step.flatPieces;
+  // `startGame` landed us on the ordinary game screen; a trailer beat is a real watch
+  // run, so it stays there rather than compositing behind the menu (M13.9 revision, Part
+  // G).
   attractIndex_ = index;
   return {};
 }
@@ -519,8 +524,13 @@ void Shell::stopAttract() {
   attractIndex_ = 0;
   if (session_ != nullptr) session_->stopWatching();
   // The Klein and 3-D beats ghost the board; restore the opaque default so whatever the
-  // player does next does not inherit the trailer's pose.
+  // player does next does not inherit the trailer's pose. The flat icon pucks snap on for
+  // those same two beats, so they are cleared here too (M13.9 revision, Part H).
   settings_.geometryGhost = 1.0f;
+  settings_.shapePieceCylinders = false;
+  // The trailer now runs on its own screen, so leaving it returns to the ordinary menu,
+  // exactly as `stopWatching()` does (M13.9 revision, Part G).
+  go(Screen::MainMenu);
 }
 
 bool Shell::advanceAttract(float dt) {
@@ -538,7 +548,12 @@ bool Shell::advanceAttract(float dt) {
   // A beat ends only when its game has run out *and* the pose has stopped moving, so a
   // cut never lands mid-roll.
   if (session_->watching() || !settled) return false;
-  const std::size_t next = (attractIndex_ + 1) % attract_.size();
+  // The first beat is the trailer's cold open (the literal `standard` board). Once it has
+  // played, the shape beats loop among themselves, so the last beat cuts back to the
+  // cylinder rather than replaying the opener (M13.9 revision, Part I).
+  const std::size_t loopFrom = attract_.size() > 1 ? 1 : 0;
+  const std::size_t next =
+      attractIndex_ + 1 < attract_.size() ? attractIndex_ + 1 : loopFrom;
   if (auto ok = startAttractStep(next); !ok.has_value()) {
     attract_.clear();
     return false;

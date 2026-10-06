@@ -139,21 +139,9 @@ UiRequest Ui::buildMainMenu(app::Shell& shell) {
   UiRequest request;
   const view::Theme& t = theme_;
   auto* display = static_cast<ImFont*>(fontDisplay_);
-  auto* small = static_cast<ImFont*>(fontSmall_);
 
-  // While the attract sequence plays a real game behind the menu (M13.9), the frame is
-  // laid out exactly as the pause screen lays itself over a position: the board keeps the
-  // left half behind a thin scrim, the menu takes the right. `pauseFrame` is that layout,
-  // and it draws no opaque ground, so the board shows through - `drawShellFrame`'s ground
-  // would paint over it. With no board the menu is the whole screen and keeps the ambient
-  // field, as it always did.
-  const bool overBoard = shell.showsBoard();
   ImVec2 menuMin, menuMax;
-  if (overBoard) {
-    pauseFrame(request, menuMin, menuMax);
-  } else {
-    drawShellFrame(shell, menuMin, menuMax);
-  }
+  drawShellFrame(shell, menuMin, menuMax);
   const PaneMove move = paneMove();
   beginPane("##mainmenu", menuMin, menuMax, move.scale, move.alpha, px(46.0f),
             !ghosting_);
@@ -170,7 +158,7 @@ UiRequest Ui::buildMainMenu(app::Shell& shell) {
   if (menuEntry("Watch a game", 2, t, display, width, true, scale_)) {
     shell.go(app::Screen::Watch);
   }
-  // The trailer: a fixed, looping tour of the shapes, played behind the menu (M13.9).
+  // The trailer: a fixed, looping tour of the shapes, played on the game screen (M13.9).
   // Unlike "Watch a game" there is nothing to choose, so the row starts it in place
   // instead of opening a picker.
   if (menuEntry("Watch trailer", 3, t, display, width, true, scale_)) {
@@ -200,37 +188,6 @@ UiRequest Ui::buildMainMenu(app::Shell& shell) {
   }
 
   endPane();
-
-  // While the trailer plays, its only control is the way out - the same shape the
-  // watched-game screen uses (M12.8): one STOP button plus the Esc caption, over the
-  // board. Shown only while a sequence is actually running, so the ordinary menu - the
-  // quintic field - is unchanged.
-  if (shell.attracting()) {
-    const ImGuiViewport* vp = ImGui::GetMainViewport();
-    const ImGuiWindowFlags overlayFlags =
-        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
-        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar |
-        ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar |
-        ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_AlwaysAutoResize |
-        ImGuiWindowFlags_NoSavedSettings;
-    const float margin = px(22.0f);
-    ImGui::SetNextWindowPos(
-        ImVec2(vp->WorkPos.x + margin, vp->WorkPos.y + vp->WorkSize.y - margin),
-        ImGuiCond_Always, ImVec2(0.0f, 1.0f));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::Begin("##attractstop", nullptr, overlayFlags);
-    if (button("STOP TRAILER", t, px(180), false, true, true, display)) {
-      shell.stopAttract();
-    }
-    ImGui::SameLine();
-    ImGui::PushFont(small);
-    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
-    ImGui::TextUnformatted("Esc leaves the trailer");
-    ImGui::PopStyleColor();
-    ImGui::PopFont();
-    ImGui::End();
-    ImGui::PopStyleVar();
-  }
 
   return request;
 }

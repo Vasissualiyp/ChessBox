@@ -1335,8 +1335,8 @@ int main(int argc, char** argv) {
               // Esc is "step back one screen", which from the board means pause. While a
               // bundled game is being watched it is the way out instead: the board is
               // read-only, so there is no pause to step back to (M12.8). The attract
-              // sequence runs behind the main menu, where there is no screen to step
-              // back to either, so Esc stops it and leaves the ordinary menu (M13.9).
+              // sequence is the same kind of run on the game screen, so Esc stops it and
+              // leaves the ordinary menu (M13.9).
               if (shell->attracting()) {
                 shell->stopAttract();
               } else if (shell->watching()) {
@@ -1485,21 +1485,25 @@ int main(int argc, char** argv) {
     // stands down rather than advancing the same runner twice (M13.9).
     if (!shell->attracting()) shell->advanceWatching(dt);
 
-    // The main-menu attract sequence (M13.9): started from the "Watch trailer" button,
-    // never by merely sitting on the menu, and stopped the moment the player navigates
-    // away. A cut to a new shape needs the same options push and camera re-frame the
+    // The attract sequence (M13.9): started from the "Watch trailer" button, never by
+    // merely sitting on the menu. It plays on the ordinary game screen like a watched
+    // game, and a cut to a new shape needs the same options push and camera re-frame the
     // button's own start does, because the shell's startGame/startWatching do neither.
+    // Navigating away from the game screen stops it rather than letting it play on behind
+    // a menu (M13.9 revision, Part G).
 #ifdef CB_HAVE_IMGUI
-    if (shell->screen() == app::Screen::MainMenu) {
-      if (shell->attracting() && shell->advanceAttract(dt)) {
-        applyAttractLook(*shell);
+    if (shell->attracting()) {
+      if (shell->screen() == app::Screen::Game) {
+        if (shell->advanceAttract(dt)) {
+          applyAttractLook(*shell);
+          renderer->setOptions(optionsFor(*shell));
+          frameBoard(*shell);
+          wasSurface = optionsFor(*shell).surface;
+        }
+      } else {
+        shell->stopAttract();
         renderer->setOptions(optionsFor(*shell));
-        frameBoard(*shell);
-        wasSurface = optionsFor(*shell).surface;
       }
-    } else if (shell->attracting()) {
-      shell->stopAttract();
-      renderer->setOptions(optionsFor(*shell));
     }
 #endif
 

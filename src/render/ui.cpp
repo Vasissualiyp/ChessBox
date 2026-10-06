@@ -1465,7 +1465,21 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       ImGuiCond_Always, ImVec2(0.0f, 1.0f));
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
   ImGui::Begin("##controls", nullptr, overlayFlags);
-  if (shell.watching()) {
+  if (shell.attracting()) {
+    // A trailer beat is a watch run under the hood, so `watching()` is also true here -
+    // check `attracting()` first, the same precedence the Esc handler uses (M13.9
+    // revision, Part G). Stopping the inner watch would leave the whole sequence running,
+    // so this is the trailer's own way out; Esc does the same.
+    if (button("STOP TRAILER", t, px(180), false, true, true, display)) {
+      shell.stopAttract();
+    }
+    ImGui::SameLine();
+    ImGui::PushFont(small);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+    ImGui::TextUnformatted("Esc leaves the trailer");
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+  } else if (shell.watching()) {
     // Watching is not playing: the only control that matters is the way out, so it is
     // the only one offered. Esc does the same (M12.8).
     if (button("STOP WATCHING", t, px(180), false, true, true, display)) {
