@@ -254,21 +254,26 @@ TEST_CASE("every cut in the sequence lands on the previous shape's own end-of-st
   CHECK(torus.formedFrom == view::kTorusRollEnd);
   CHECK(torus.formedTarget == 1.0f);
 
-  // Position continuity (M13.9 Part F): torus is a real continuation of cylinder's own
-  // game, the one pair of beats both the geometry and the piece rosters can carry it
-  // through; neither standard nor cylinder itself has anything earlier to continue.
+  // Position continuity (M13.9 Part F, "ALL game should be continuous"): every beat but
+  // the cold open continues the one real game before it - standard has nothing earlier to
+  // continue, so it alone stays false.
   CHECK_FALSE(standard.continuesPosition);
-  CHECK_FALSE(cylinder.continuesPosition);
+  CHECK(cylinder.continuesPosition);
   CHECK(torus.continuesPosition);
+  // Cylinder is also the loop's own re-entry point, and its continuation line is legal
+  // only against its one real predecessor (`standard`, reached once) - every wrap after
+  // the first needs its own fresh line instead (`resetMoves`), which the loop test above
+  // exercises directly rather than just checking it is non-empty here.
+  CHECK_FALSE(cylinder.resetMoves.empty());
 
   // Torus ends fully formed (a plain ring); Klein starts at its own ring-formed waypoint
   // - no fold, no twist yet - the same picture torus's own end state is.
   CHECK(kleinIn.formedFrom == view::kKleinRingEnd);
   CHECK(kleinIn.formedTarget == 1.0f);
-  // Klein's own king/rook/knight army cannot carry torus's bishops and queen (the same
-  // reason Mobius was dropped), so the fold-in is its own independent line, not a
-  // continuation.
-  CHECK_FALSE(kleinIn.continuesPosition);
+  // Klein's own king/rook/knight army could not carry torus's bishops and queen - so the
+  // continuous game trades every one of them off before torus ends, rather than giving up
+  // on continuity here the way Mobius was given up on.
+  CHECK(kleinIn.continuesPosition);
 
   // Klein's second beat eases back down to that same ring-formed waypoint - undoing the
   // fold and the twist it just played - rather than starting fresh or snapping. It *does*
@@ -285,9 +290,12 @@ TEST_CASE("every cut in the sequence lands on the previous shape's own end-of-st
   CHECK(shells.formedFrom == 1.0f);
   CHECK(shells.spreadFrom == 0.0f);
   CHECK(shells.spreadTarget == 1.0f);
-  // Its own king/rook/knight army, same reasoning as Klein's fold-in; the loop's own wrap
-  // back to cylinder afterwards is a hard reset too (checked in the loop test above).
-  CHECK_FALSE(shells.continuesPosition);
+  // Continues Klein's own game too - the trade-down finished by the time Klein's fold-in
+  // opened, so nothing stops the 3-D torus from carrying the same king/rook/knight
+  // position onward. Only the loop's own wrap back to cylinder afterwards is a hard
+  // reset, and only because a looping sequence cannot keep authoring a fresh `moves` list
+  // for every lap (checked directly in the loop test above).
+  CHECK(shells.continuesPosition);
 
   // Standard has nothing to morph from - the sequence's own cold open.
   CHECK(standard.variant == "standard");

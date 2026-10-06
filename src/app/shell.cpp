@@ -491,79 +491,110 @@ AttractSequence defaultAttractSequence() {
   // trailer starts on a clean board and picks the roll up in motion instead. See the
   // status note in `docs/plan/M13-overtures.md`.
   //
-  // Part F, resolved: cylinder and torus carry one real, continuous game between them
-  // (`continuesPosition`, `embedOnto`) - cylinder plays its own ten-ply opening, then
-  // torus's own ten plies are a real continuation of *that exact position*, not a fresh
-  // independent line. It stops there rather than reaching Klein or the 3-D torus, for the
-  // same reason Mobius was dropped, just discovered the hard way instead of reasoned out
-  // in advance: Klein and `torus3d_8x8` both field only king, rook and knight at their
-  // own start (no bishop, no queen, no pawn) because - their own files say so - a bishop
-  // or queen on either shape gives check from almost anywhere once every rank and file
-  // (and, on the 3-D torus, every level) wraps. Embedding a normal opening's bishops and
-  // queen onto either one reliably produces exactly that: a forced-or-near-forced
-  // position, confirmed directly, not assumed, via the CLI's own new `embed` command
-  // against both shapes. Klein and the 3-D torus therefore keep their own independently
-  // authored lines, played on the restricted armies their own files actually field - real
-  // continuity where the geometry supports it, a clean reset where it does not, exactly
-  // the same judgement Mobius was dropped on. Klein's own two beats *do* carry a position
-  // between themselves (`continuesPosition` on the second), since nothing is cut there -
-  // it is the same variant both beats stand on, so the pieces should not visibly jump at
-  // a fold that is not a shape cut. The loop's own wrap from the 3-D torus back to
-  // cylinder stays a hard reset: carrying a king/rook/knight-only position onto a board
-  // that wants pawns would be worse than starting fresh, and the geometry cut there was
-  // already a hard one (`formedFrom = 0.30`, unrelated to whatever the 3-D torus beat
-  // ended on).
+  // Part F, resolved in full: every beat but the loop's own re-entry point continues the
+  // *same* game (`continuesPosition`, `embedOnto`) - one real position, cut after cut,
+  // from the literal standard start all the way to the 3-D torus. Klein and
+  // `torus3d_8x8` field only king, rook and knight at their own declared start (no
+  // bishop, no queen, no pawn) because - their own files say so - a bishop or queen gives
+  // check from almost anywhere once every rank and file (and, on the 3-D torus, every
+  // level) wraps; embedding one onto either reliably produces exactly that, confirmed
+  // directly with the CLI's own `embed` command, not assumed. The fix is not to stop
+  // continuing there, as an earlier revision of this sequence did - it is to make sure
+  // every bishop and both queens are actually gone, via real captures, by the time the
+  // game reaches Klein. Standard and cylinder trade down hard (both bishop pairs, both
+  // queens - some of it finishing as the very first move after a cut, a king recapturing
+  // under check on the shape it just arrived on, which is a perfectly legal way for a
+  // beat to open); by the end of torus nothing is left but kings, rooks, a knight and
+  // pawns, and the pawns themselves are silently dropped at the Klein cut the same way
+  // `embedOnto` always drops a piece type the target does not declare - no special
+  // handling needed, because nothing downstream of Klein ever needs them back. Klein's
+  // own two beats carry a position between themselves too (`continuesPosition` on the
+  // fold-out beat), since nothing is cut there - it is the same variant both beats stand
+  // on, so the pieces should not visibly jump at a fold that is not a shape cut.
   //
-  // Every line below is ten plies (five moves a side), long enough to show real
-  // development and not just an opening tag. Picking them was not just "any legal line
-  // reaches ten plies": transplanting a normal opening's armies onto a rank-periodic
-  // board is its own hazard independent of piece roster - `torus.toml`'s own comment
-  // explains why its start array sits four ranks apart rather than in the usual corners
-  // ("rank 1 and rank 8 are *adjacent*... White is already in an inescapable check").
-  // Cylinder's own ten plies end with both kings stepped one square off their home rank
-  // (`Ke2`, `Ke7`) for exactly that reason - confirmed empirically, the same discipline
-  // as everywhere else in this file, after a first attempt that left both kings at home
-  // folded to one legal move the instant it was embedded onto the rank-periodic torus.
+  // The loop's own re-entry beat (cylinder, `loopEntryIndex()`) is the one place this
+  // cannot extend to. `continuesPosition` is still set on it - true for the *one* real
+  // predecessor it has, `standard`, reached once at the very start - but
+  // `Shell::startAttractStep` falls back to a fresh start there on every wrap after the
+  // first (`attractLooped_`): a looping sequence replays the same fixed `moves` list
+  // every lap, and by the second lap the previous one has usually traded down to a
+  // near-bare king (the shipped line's own `torus3d_8x8` beat ends with white down to a
+  // lone king), against which cylinder's own scripted ten plies are not a legal
+  // continuation at all. Continuing the wrap would make the sequence correct for exactly
+  // one lap and broken forever after. See the status note in `docs/plan/M13-overtures.md`
+  // for the fuller version of this trade-off.
+  //
+  // Every line below is ten plies (five moves a side) of one continuous game, long enough
+  // to show real development and not just an opening tag. Picking them was not just "any
+  // legal line reaches ten plies, trades the right pieces": transplanting an opening's
+  // armies onto a rank-periodic board is its own hazard independent of piece roster -
+  // `torus.toml`'s own comment explains why its start array sits four ranks apart rather
+  // than in the usual corners ("rank 1 and rank 8 are *adjacent*... White is already in
+  // an inescapable check"), and the same effect reaches any piece still near the board's
+  // own back rank, not just the kings. Cylinder's own ten plies end with both kings
+  // stepped one square off their home rank for exactly that reason - confirmed
+  // empirically, the same discipline as everywhere else in this file, after a first
+  // attempt that left both kings at home folded to one legal move the instant it was
+  // embedded onto the rank-periodic torus. Torus itself declares no castling at all (its
+  // own file again: "with the files glued, between the king and the rook is ambiguous"),
+  // so the king steps there are plain moves, not castling - castling, where it is used
+  // earlier (cylinder supports it), only ever changes a king's file, never its rank, so
+  // it would not have solved this anyway.
   AttractSequence seq;
   seq.push_back({.variant = "standard",
-                 .moves = {"e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5", "c2c3", "g8f6",
-                           "d2d3", "d7d6"},
+                 .moves = {"e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "a7a6", "b5c6", "d7c6",
+                           "d2d4", "e5d4"},
                  .formedFrom = 1.0f});
   seq.push_back({.variant = "cylinder",
-                 .moves = {"e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "a7a6", "b5a4", "g8f6",
-                           "e1e2", "e8e7"},
-                 .formedFrom = 0.30f});
+                 .moves = {"f3d4", "d8d4", "d1d4", "f8c5", "d4c5", "b7b6", "c5e3", "c8e6",
+                           "b1c3", "g8f6"},
+                 .formedFrom = 0.30f,
+                 // The loop's own re-entry line, every lap after the first: `standard`'s
+                 // own ten plies followed by these same ten, replayed fresh from
+                 // cylinder's own start rather than continued onto it. Cylinder and
+                 // standard share an army and a start array, and none of these twenty
+                 // plies go near the file seam, so replaying them fresh here reaches the
+                 // same board the continuation path reaches by embedding - confirmed
+                 // directly, not assumed - which is what lets every beat after this one
+                 // keep its own single `moves` list regardless of which path cylinder
+                 // took to get there.
+                 .resetMoves = {"e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "a7a6", "b5c6",
+                                "d7c6", "d2d4", "e5d4", "f3d4", "d8d4", "d1d4", "f8c5",
+                                "d4c5", "b7b6", "c5e3", "c8e6", "b1c3", "g8f6"},
+                 .continuesPosition = true});
   seq.push_back({.variant = "torus",
-                 .moves = {"d2d3", "d7d6", "c2c3", "b7b5", "a4b3", "c8e6", "b1d2", "g7g6",
-                           "h2h3", "h7h6"},
+                 .moves = {"e1e2", "e8d7", "c1d2", "f6g4", "e3f4", "a8d8", "f4g4", "d8d2",
+                           "e2d2", "d7e7"},
                  .formedFrom = view::kTorusRollEnd,
                  .continuesPosition = true});
   // Klein hides its far side, so it ghosts and draws flat icon pucks throughout both of
-  // its beats (M13.9 revision, Part H), not just the fold-in. It does not continue
-  // torus's game (see the comment above) - this is its own line, on its own
-  // king/rook/knight army, from its own declared start.
+  // its beats (M13.9 revision, Part H), not just the fold-in. Its first move is the
+  // queen capturing the last bishop left on the board, under check from its own king -
+  // the king recaptures next move, clearing the last queen too, finishing the trade-down
+  // this beat opens on rather than closes.
   seq.push_back({.variant = "klein",
-                 .moves = {"b1c3", "f5e3", "d1e1", "h5h7", "c3b5", "e3d5", "b5d4", "h7h6",
-                           "d4f5", "d5f6"},
+                 .moves = {"g4e6", "e7e6", "a1a6", "h8a6", "c3e4", "a6a2", "d2e3", "e6e5",
+                           "h1d1", "e5f5"},
                  .ghostTarget = 0.35f,
                  .formedFrom = view::kKleinRingEnd,
-                 .flatPieces = true});
+                 .flatPieces = true,
+                 .continuesPosition = true});
   seq.push_back({.variant = "klein",
                  .moves = {},
                  .formedTarget = view::kKleinRingEnd,
                  .ghostTarget = 0.35f,
                  .flatPieces = true,
                  .continuesPosition = true});
-  // Its own line too, on its own king/rook/knight army, for the same reason Klein's is.
   seq.push_back({.variant = "torus3d_8x8",
-                 .moves = {"(0,0,0)-(0,0,1)", "(0,1,2)-(0,1,1)", "(1,0,0)-(0,2,0)",
-                           "(0,1,1)-(0,0,1)", "(3,0,0)-(3,1,0)", "(3,1,2)-(3,2,2)",
-                           "(2,0,0)-(1,1,0)", "(2,1,2)-(2,2,2)", "(1,1,0)-(1,1,1)",
-                           "(2,2,2)-(2,1,3)"},
+                 .moves = {"(3,0,0)-(3,0,1)", "(0,1,0)-(0,1,1)", "(4,3,0)-(6,4,0)",
+                           "(5,4,0)-(5,5,0)", "(6,4,0)-(7,4,2)", "(0,1,1)-(0,2,1)",
+                           "(7,4,2)-(7,6,3)", "(5,5,0)-(5,6,1)", "(7,6,3)-(7,5,1)",
+                           "(5,6,1)-(6,6,1)"},
                  .ghostTarget = 0.35f,
                  .formedFrom = 1.0f,
                  .flatPieces = true,
-                 .spreadFrom = 0.0f});
+                 .spreadFrom = 0.0f,
+                 .continuesPosition = true});
   return seq;
 }
 
@@ -572,24 +603,42 @@ Result<void> Shell::startAttractStep(std::size_t index) {
     return fail(ErrorCode::OutOfRange, "attract step out of range");
   }
   const AttractStep step = attract_[index];
+  // The loop's own re-entry beat continues only from its *one* real predecessor, reached
+  // once at the very start - not from whatever the previous lap happened to end on, which
+  // its `moves` was never authored against (`loopEntryIndex`'s own doc comment).
+  const bool continuing =
+      step.continuesPosition && !(index == loopEntryIndex() && attractLooped_);
   // Continuity (M13.9 Part F): carry the previous beat's own end-of-game position onto
-  // this beat's board before `startGame` below replaces the session that position lives
-  // in. `fromVariant` is copied rather than referenced, because `embedOnto` only reads it
-  // during the call - the copy just has to outlive that one call, not the new session.
-  std::optional<Position> embedded;
-  std::optional<VariantSpec> fromVariant;
-  if (step.continuesPosition && session_ != nullptr) {
-    fromVariant = session_->variant();
-    embedded = session_->game().position();
+  // this beat's board. Computed - FEN and all - entirely *before* `startGame` below
+  // replaces `session_`, and against a freshly loaded `VariantSpec` of our own rather
+  // than the new session's eventual one: `Position` holds a raw pointer to its variant
+  // (so does the `Position` `embedOnto` returns), and `startGame` loads the target
+  // variant a second time into its own session regardless, so there is no way to hand
+  // this call a `toVariant` that both exists yet and will still be `session_->variant()`
+  // afterwards. Finishing the whole computation - through `toFen`, down to a plain string
+  // with no pointers left in it - while the old session and this local variant are both
+  // still alive is what the CLI's own `embed` command had to learn the hard way (see its
+  // own comment, `src/cli/main.cpp`): building the embedding against a `VariantSpec` that
+  // is about to move or be destroyed corrupts it the instant that happens, not safely
+  // before.
+  std::optional<std::string> embeddedFen;
+  if (continuing && session_ != nullptr) {
+    auto targetVariant = loader_ ? loader_(step.variant) : fail(ErrorCode::Internal, "");
+    if (targetVariant.has_value()) {
+      embeddedFen = toFen(
+          embedOnto(session_->game().position(), session_->variant(), *targetVariant));
+    }
   }
   if (auto ok = startGame(step.variant); !ok.has_value()) return ok;
   // Build the game file from the session's own started position, so its FEN always
   // matches the variant and no author has to keep one in sync (M13.9).
   GameFile file = toGameFile(session_->variant(), session_->game());
-  if (embedded.has_value()) {
-    file.startFen = toFen(embedOnto(*embedded, *fromVariant, session_->variant()));
-  }
-  file.moves = step.moves;
+  if (embeddedFen.has_value()) file.startFen = *embeddedFen;
+  // `step.continuesPosition` asked to continue but this particular visit could not
+  // (the loop's own re-entry beat, past the first lap): play `resetMoves` - a line legal
+  // from this variant's own fresh start - instead of `moves`, which is only legal against
+  // the real continuation this visit does not have.
+  file.moves = continuing || !step.continuesPosition ? step.moves : step.resetMoves;
   if (auto ok = session_->startWatching(std::move(file), settings_.watchDwell);
       !ok.has_value()) {
     message_ = ok.error().format();
@@ -614,6 +663,7 @@ void Shell::startAttract(AttractSequence sequence) {
   if (sequence.empty()) return;
   attract_ = std::move(sequence);
   attractIndex_ = 0;
+  attractLooped_ = false;
   // The beats own their starting pose (`formedFrom`); the first one is the flat-to-shape
   // reveal. Clear the ghost so a beat before the first ghosting one starts opaque.
   settings_.geometryGhost = 1.0f;
@@ -659,9 +709,14 @@ bool Shell::advanceAttract(float dt) {
   // The first beat is the trailer's cold open (the literal `standard` board). Once it has
   // played, the shape beats loop among themselves, so the last beat cuts back to the
   // cylinder rather than replaying the opener (M13.9 revision, Part I).
-  const std::size_t loopFrom = attract_.size() > 1 ? 1 : 0;
-  const std::size_t next =
-      attractIndex_ + 1 < attract_.size() ? attractIndex_ + 1 : loopFrom;
+  // Whether this cut wraps - not simply whether `next` equals `loopEntryIndex()`, which
+  // the sequence's very first forward step into that same beat also satisfies (the
+  // opener is only ever one beat ahead of it). `attractLooped_` has to stay false for
+  // that first, real arrival so the loop's own re-entry beat still gets its one genuine
+  // continuation, and only flips once the sequence has actually run off its own end.
+  const bool wrapping = attractIndex_ + 1 >= attract_.size();
+  const std::size_t next = wrapping ? loopEntryIndex() : attractIndex_ + 1;
+  if (wrapping) attractLooped_ = true;
   if (auto ok = startAttractStep(next); !ok.has_value()) {
     attract_.clear();
     return false;

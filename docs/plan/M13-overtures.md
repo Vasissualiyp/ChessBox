@@ -1323,3 +1323,87 @@ track next (Part E). What remains is authoring, not engineering: nobody has reco
 real track yet, and the in-game list/editor the scaffold's own doc comment names as
 future work - browsing, re-ordering, or nudging a keyframe without re-recording it from
 scratch - is still just the hand-edited text file.
+
+### Revision: one continuous game, standard to the 3-D torus
+### (2026-10-06, feedback, built directly by Claude)
+
+Direct feedback on the previous round's Part F: standard and cylinder were still two
+independent openings, not one game, and the ask was explicit - "ALL game should be
+continuous" - with a concrete way to reach it for Klein and the 3-D torus too, rather than
+leaving them out: "create a game where bishops/queens are gone before we get to torus
+etc." Both landed.
+
+**The line.** One real game, authored and checked the same way as every other line in
+this file - propose a move, embed or replay to the position it reaches, read the engine's
+own legal-move count back - except this time as fifty plies straight through, not six
+independent ten-ply fragments. `standard` plays its own ten-ply opening (unchanged);
+`cylinder` is now a real continuation of it (`continuesPosition`), not a second opening;
+`torus` continues `cylinder`; `klein`'s fold-in continues `torus`; its fold-out continues
+that; `torus3d_8x8` continues the fold-out. The trade-down the previous round's own status
+note named as the missing piece is in the line itself: both bishop pairs and both queens
+come off within `cylinder`'s and `torus`'s own plies, several of them as the direct result
+of the king-safety recaptures those beats already needed (`Ke1-e2`/`...Ke8-e7`-style
+steps, now also serving as the king landing *on* the capturing or captured square rather
+than just off the back rank). By the time `torus` ends, nothing is left but kings, rooks,
+a knight and pawns - exactly Klein's and `torus3d_8x8`'s own declared roster once the
+pawns are dropped at the cut (`embedOnto`'s ordinary behaviour for a piece type the target
+does not declare, needing no special handling, because nothing downstream ever needs them
+back). One beat's own first move is itself a capture that leaves its own king in check,
+resolved by that beat's second move - a real, legal way for a beat to open, confirmed
+directly rather than assumed to be too strange to try.
+
+**The wrap stays a hard reset, for a reason stated plainly to the user rather than just
+implemented quietly.** A looping sequence replays the same fixed `moves` list every lap.
+Continuing `cylinder`'s position across the wrap would make its own ten-ply line a
+continuation of whatever the *previous* lap's `torus3d_8x8` beat happened to end on - and
+the shipped line ends that beat with white down to a lone king, against which a scripted
+ten-ply line is essentially never going to stay legal. Found by building it anyway and
+watching it crash (`seen.size()==1`, stuck on cylinder's first move) and then fail cleanly
+(`'f3d4' is not legal`) once the first bug was fixed - not reasoned around in advance.
+
+**Mechanism.** `AttractStep` gained `resetMoves`: the line to play, from this variant's
+own fresh start, on the one beat where `continuesPosition` cannot be honoured on a given
+visit - the loop's own re-entry point, every lap after the first. `cylinder`'s own
+`resetMoves` is simply `standard`'s ten plies followed by `cylinder`'s own ten, replayed
+fresh rather than embedded: cylinder and standard share an army and a start array, and
+none of these twenty plies go near the file seam, so replaying them fresh reaches the same
+board the continuation path reaches by embedding (confirmed directly) - which is what lets
+every beat after `cylinder` keep its own single `moves` list regardless of which path
+cylinder took to arrive. `Shell` gained `loopEntryIndex()` (`attract_.size() > 1 ? 1 : 0`,
+replacing the duplicated `loopFrom` literal) and `attractLooped_`, set the instant the
+sequence first wraps past its own end (`attractIndex_ + 1 >= attract_.size()`, not simply
+"the next index equals the loop entry" - the sequence's very first forward step into
+`cylinder` also satisfies that equality, and conflating the two was the first bug above).
+`startAttractStep` reads both to decide, per visit, whether a beat marked
+`continuesPosition` actually continues this time or falls back to `resetMoves`.
+
+**A second, independent dangling-pointer bug**, found the same way the CLI's `embed`
+command's own was: a crash, not a hang. `Position` holds a raw pointer to its
+`VariantSpec`; the previous round's `startAttractStep` copied both the old session's
+`VariantSpec` and its `Position` into locals *before* `startGame` replaced `session_`, on
+the reasoning that the copies would outlive the old session - which is true of the
+`VariantSpec` copy, but the copied `Position` carries its own internal pointer forward
+unchanged, still aimed at the old session's (about to be destroyed) `VariantSpec`, not the
+new copy sitting next to it. `embedOnto`'s own `from.cellCount()`/`from.at(cell)` calls
+read through that stale pointer, not the separately-passed `fromVariant` parameter - so
+the corruption was real but hadn't been exercised before, because no earlier beat in this
+file had reused a `Position` copy across a `startGame` call this way. Fixed by finishing
+the whole embedding - FEN string and all, the point at which no pointers remain - before
+`startGame` runs, against a `VariantSpec` loaded fresh for exactly that purpose, following
+the CLI fix's own resolution rather than rediscovering a different one.
+
+**Tests.** `test_attract.cpp`'s loop test now runs all six beats plus the wrap and checks
+the sequence is still playing afterward - it already existed, but the fixes above were
+both found by it going from "silently stuck" to "cleanly fails" to "green" as each one
+landed, not by new assertions. "Every cut...lands on the previous shape's own
+end-of-stage" updated its `continuesPosition` expectations for every beat that now
+continues, plus a check that `cylinder.resetMoves` is non-empty (the loop test is what
+actually exercises it).
+
+**Results.** `[app],[render],[arch],[attract]` (233 cases) and `ctest -R "^property$"`
+(green, ~284s) both pass on the final build; `clang-format --dry-run --Werror` clean on
+every touched file. Visual spot-check via `--shot --screen menu --t <seconds>` across the
+full loop: `t=35` shows `TORUS3D_8X8` mid-sequence on the continuation line; `t=55` shows
+`CYLINDER` at ply 18 with its move log reading `7. d1d4 7.. f8c5 8. d4c5...` - the
+twenty-move `resetMoves` line, not the ten-move continuation one, confirming the wrap
+fallback fires at runtime and not just in the headless test.
