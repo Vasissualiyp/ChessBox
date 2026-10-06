@@ -11,6 +11,7 @@
 #include "app/overture.hpp"
 #include "render/piece_icon.hpp"
 #include "space/dims.hpp"
+#include "view/morph.hpp"
 #include "view/theme.hpp"
 
 namespace cb::render {
@@ -181,6 +182,17 @@ struct SurfacePose {
   /// embedding blended in. Default 1, so every existing caller that does not set it keeps
   /// today's always-fully-formed behaviour and every captured frame is unchanged.
   float formed{1.0f};
+  /// For a D >= 3 nested-shell shape (`torus3d`/`torus3d_8x8`): how far the levels have
+  /// spread into their own radii, 0 to 1. At 0 every level sits at the *same* radius -
+  /// the mean of the shipped ones - so the whole stack reads as a single ring, exactly
+  /// the 2-D torus `formed = 1` already draws; at 1 the levels are at their shipped,
+  /// distinct radii, nested shells. It is a pure function of the same `shellTube` the
+  /// shape already uses, not a second shape blended in: a single ring is not a special
+  /// case, it is every level's `d` collapsed to one value. Default 1 (the shipped,
+  /// always-spread look), so an existing caller that never sets it is unchanged
+  /// (M13.9's trailer attract sequence: "klein folds back into a torus, which then
+  /// visibly copies itself into the nested shells").
+  float shellSpread{1.0f};
 };
 
 /// A sequential sub-window of a morph's own 0..1 progress (M18 revision, items 2 and 3).
@@ -212,6 +224,28 @@ struct KleinMorph {
 /// `form = 1` this is exactly `th = ph = 2*pi`, `pinch = 1`, `tau = twist` - the unstaged
 /// call.
 [[nodiscard]] KleinMorph kleinMorph(float form, float twist) noexcept;
+
+/// The shape morphs' own stage boundaries - `view::kTorusRollEnd`/`kKleinRingEnd`/
+/// `kKleinFoldEnd` - re-exported here because the renderer names them through this
+/// header (and the app layer's attract sequence names them through `view::morph.hpp`
+/// directly, which is where they live: below both layers, so neither duplicates the
+/// other's copy).
+using view::kKleinFoldEnd;
+using view::kKleinRingEnd;
+using view::kTorusRollEnd;
+
+/// The Torus morph's two real construction stages: roll the files into an open tube
+/// (`th` 0 -> 2*pi), then bend that tube into a closed ring (`ph` 0 -> 2*pi). Sequential,
+/// not simultaneous, for the same reason the Klein morph is staged: at `form = 1` this is
+/// exactly `th = ph = 2*pi`, the unstaged call, so a formed shape never moves - but an
+/// *open* tube (`th = 2*pi, ph = 0`) is now a real, nameable waypoint at
+/// `form = kTorusRollEnd`, which is what lets a cylinder cut seamlessly into a torus mid-
+/// morph instead of jumping straight to the fully closed ring (M13.9).
+struct TorusMorph {
+  float th;  ///< file roll, 0 .. 2*pi
+  float ph;  ///< ring close, 0 .. 2*pi
+};
+[[nodiscard]] TorusMorph torusMorph(float form) noexcept;
 
 /// Where a lattice point lands on a derived overture's fully-formed surface, keyed by the
 /// surface the geometry implies. Exposed so the differential test can assert it equals

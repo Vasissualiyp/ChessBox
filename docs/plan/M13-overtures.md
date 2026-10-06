@@ -942,3 +942,121 @@ path an ordinary or watched game uses; the new interactive-loop driver branch in
 `main.cpp` is bypassed by the `--capture` path (which calls `advanceAttract` directly), so
 it is covered by the app/loop tests and reasoning rather than a screenshot; and the
 style/flip at a cut is shown by per-beat stills plus the unit test, not as motion.
+
+### Revision: every cut is a real, continuous geometry morph, built directly by Claude
+### (2026-10-05, feedback)
+
+Two more corrections, this time implemented directly rather than specified for opencode,
+on the user's own request after opencode's attempts at the shape sequencing did not land
+the way they wanted:
+
+1. **Only the standard -> cylinder cut was actually animated.** Every later cut
+   (cylinder -> torus, torus -> Klein, Klein -> the 3-D torus) was a hard swap:
+   `startAttractStep` reset `geometryFormed` to a fixed value with no ramp between a
+   beat's own end state and the next beat's own start state, so each shape just appeared.
+   "They all should be [animated]."
+2. **The specific sequence the user wants, because it is geometrically real, not just
+   narratively convenient:** cylinder morphs into torus (closing an open tube's ring);
+   torus morphs into Klein (folding the ring's circular cross-section into the
+   figure-eight, then twisting it - the Klein bottle's own construction); Klein morphs
+   back into a torus (undoing that fold and twist); and that torus visibly "copies
+   itself" into the 3-D torus's four nested shells. Not a metaphor - this session's own
+   math already carries it: `kleinSurf`'s circular-cross-section case (`pinch = 0,
+   tau = 0`) *is* a torus, and `shellTube`'s four levels are the same ring construction at
+   four radii.
+
+**What this took, and the real bug found along the way.** Reading `tube()`/`kleinSurf()`
+closely showed cylinder, torus and Klein are not three shapes - they are one family of
+embeddings (`th` rolls the files, `ph` bends that roll into a ring, `pinch`/`tau` fold and
+twist the ring's cross-section), already shared by `derivedSurfaceAt`'s own dispatch. The
+Torus case gained a second real construction stage (`torusMorph`, mirroring the Klein
+morph's own existing three-stage pattern): roll the files into an open tube first
+(0 .. `kTorusRollEnd`), then bend that tube into a closed ring (`kTorusRollEnd` .. 1) -
+exposed as `view::kTorusRollEnd` (moved down to `view/morph.hpp`, below both `render` and
+`app`, alongside the pre-existing `kKleinRingEnd`/`kKleinFoldEnd`, for the same layering
+reason `kFormMorphRate` already lives there) so the attract sequence can land a cut
+exactly on it.
+
+The first attempt at this produced a measured, real discontinuity - not a smoothness
+worry, an actual seat jumping 2+ units in one 1/100th of the morph
+(`tests/render/test_play_surface.cpp`'s existing "the flat-to-shape morph is continuous
+and never degenerate" caught it immediately, red before anything was declared done). The
+cause: `tube()`'s ring-bend branch never reads its own `open` (ring-radius) parameter
+until `ph` first leaves zero, and the *limit* of the ring-bend formula as `ph -> 0` is
+`open` times the flat offset, not the flat offset alone - so `open` has to be exactly 1 at
+that instant for the two branches to agree. The old single combined ramp got this for
+free (`open` had barely begun ramping by the time `ph` first mattered); staging `th` and
+`ph` apart meant `open` was already most of the way to its shipped value by the time the
+ring-bend began. Fixed by ramping `open` on the *close* stage's own progress instead of
+raw `form` - and the identical bug, with an even larger absolute mismatch (2.2 vs 2.05,
+the torus and Klein's own different shipped ring radii), existed at the torus -> Klein
+handoff too, fixed the same way: Klein's own `open` now ramps to the *torus's* radius
+(2.2) through its ring stage - since at `pinch = 0, tau = 0` it draws the same picture a
+torus does - then eases to its own native 2.05 over the fold and twist, landing on the
+old shipped constant at `form = 1` to the bit.
+
+**`shellSpread` (new `SurfacePose`/`BoardOptions`/`Settings` field, `geometryShellSpread`,
+threaded through `optionsFor`/`surfacePose`/`SurfaceCache::Key` the same way `formed`
+already is).** For the D >= 3 nested-shell shapes: 0 collapses every level onto the
+*mean* of the shipped four radii - one ring, not four nested ones, the same `shellTube`
+with every level's own `d` offset blended toward that one fixed point - and 1 is the
+shipped, always-spread stack. `playShapeAt`'s `torus3d`/`torus3d_8x8` branch blends
+`dLevel` toward `dMid` by `1 - shellSpread`.
+
+**The sequence, now six beats on five shapes** (`Shell::defaultAttractSequence`):
+`standard` (cold open, unchanged) -> `cylinder` (the existing M18.6-mirror-workaround
+reveal, unchanged) -> `torus` (`formedFrom = kTorusRollEnd`, easing the ring closed) ->
+`klein` (`formedFrom = kKleinRingEnd`, easing the fold then the twist) -> a second,
+move-free `klein` beat (`formedTarget = kKleinRingEnd`, easing *back down* - the
+"temporary morph to torus") -> `torus3d_8x8` (`formedFrom` pinned at `1.0` explicitly,
+since the stacked shape's own `formed` does not share the 2-D shapes' staged meaning;
+`spreadFrom = 0.0`, easing the shells apart). `AttractStep` gained `spreadTarget`/
+`spreadFrom`, eased by `advanceAttract` the same way `formed`/`ghost` already are, and
+included in the beat's own settle check. `stopAttract` resets `geometryShellSpread` to
+`1.0` alongside the ghost and flat-piece resets it already does, so nothing leaks into a
+game started afterwards.
+
+**Tests, all new.** A direct, no-screenshot-needed proof of the central claim: "cylinder,
+torus and klein land on each other's end-of-stage waypoint"
+(`tests/render/test_overture_scene.cpp`) checks `derivedSurfaceAt` for the two shapes on
+either side of each cut, at the exact waypoint, across a grid of `(u, v)`, to within
+`1e-4` - this is what actually caught both `open`-ramp bugs, not inspection. "The nested
+shells collapse onto one ring at shellSpread = 0" pins the new parameter directly:
+collapsed to one real (non-degenerate) radius at 0, the shipped per-level radii at 1,
+monotonic in between. `tests/unit/app/test_attract.cpp` gained "every cut in the sequence
+lands on the previous shape's own end-of-stage," pinning the six beats' own
+`formedFrom`/`formedTarget`/`spreadFrom`/`spreadTarget` wiring directly, and the existing
+sequence/loop/flat-piece tests were updated for six beats instead of five (Klein appears
+twice; the loop wraps to `cylinder`, index 1, not `standard`).
+
+One pre-existing test's own threshold moved: "the morph keeps the camera on the shape as
+its bounds move" asserted the torus's bounding-box centre wanders more than `0.5` units
+across a full flat -> formed sweep, as a "the test has teeth" sanity check. The new
+two-stage torus morph wanders less (measured ~0.35, not a tracking regression - the
+camera's own worst-case miss stayed small throughout) because rolling and closing
+sequentially, rather than together, visits a narrower range of bounding boxes; the
+threshold was lowered to `0.3` with the reasoning recorded in the test itself, not
+silently.
+
+**Results.** `tools/test.sh --build render` 140 cases (5,034,654 assertions, three new
+cases included), `--build app` 78, `[arch]` 9, `ctest -R "^property$"` green,
+`clang-format --dry-run --Werror` clean on every touched file. Visual spot-check via the
+existing `--shot --screen menu --t S` path: cylinder (open tube, opaque, sculptural) ->
+torus (closed ring, opaque, sculptural) -> Klein (ghosted, flat icon pucks, the
+figure-eight self-intersection visible) -> `torus3d_8x8` (ghosted, flat icon pucks,
+opening visibly collapsed toward one ring rather than four separated shells). The actual
+sub-half-second transitions themselves (each stage closes in well under the 1-second
+sampling grid used for review, at the shipped `geometryFormSpeed`) could not be caught
+mid-motion by a still - the *handoff points* are proven exactly by the new differential
+test instead, which is the stronger claim a screenshot cannot make.
+
+**Known limits, stated plainly rather than silently worked around.** The morph's own
+*speed* is fast (a full `0 .. 1` sweep is half a second at the shipped
+`geometryFormSpeed`; a half-range stage is a quarter second) - real, but brief enough
+that a cut can still read as a quick pop rather than a lingering motion depending on
+camera framing. Speed is already the adjustable `geometryFormSpeed` knob; making it
+choreographable per beat is for the camera/scene-authoring scaffold requested alongside
+this, not built here. Two asks from the same round of feedback are **not** addressed by
+this revision and remain open: carrying one continuous game across every shape (the
+Part F question, parked on the real wrap-contact/king-adjacency wall found earlier - not
+touched again here) and the camera-keyframe authoring scaffold (not started).

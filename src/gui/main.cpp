@@ -224,6 +224,7 @@ render::BoardOptions optionsFrom(const app::Settings& s) {
   o.surfaceThickness = s.geometryThickness;
   o.surfaceCollapseSquares = s.kleinShift;
   o.surfaceFormed = s.geometryFormed;
+  o.surfaceShellSpread = s.geometryShellSpread;
   o.shapePieceCylinders = s.shapePieceCylinders;
   return o;
 }

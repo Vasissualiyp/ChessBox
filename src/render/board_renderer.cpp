@@ -665,6 +665,7 @@ InstanceSet BoardRenderer::buildInstances(
     const float nx = static_cast<float>(v.dims.extent(0));
     pose.collapsePhase = nx > 0.0f ? options_.surfaceCollapseSquares / nx : 0.0f;
     pose.formed = options_.surfaceFormed;
+    pose.shellSpread = options_.surfaceShellSpread;
     const PlaySurface surf = PlaySurface::build(v, pose);
 
     std::vector<Archetype> shape(v.pieces.size(), Archetype::Tower);

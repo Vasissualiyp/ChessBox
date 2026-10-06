@@ -25,4 +25,22 @@ inline constexpr float kFormMorphRate = 2.0f;
   return formed;
 }
 
+/// The shape morphs' own stage boundaries, in `formed` - one source of truth, shared by
+/// the renderer that stages the surface functions and the app layer that choreographs a
+/// cut landing exactly on one (M13.9 revision: the main-menu trailer's cylinder ->
+/// torus -> Klein sequence lands each cut on the previous shape's own end-of-stage
+/// waypoint, so the two sides of a cut are the same picture). Lives here, below both
+/// `render` and `app`, for the same reason `kFormMorphRate` does.
+///
+/// `kTorusRollEnd` is the Torus morph's own boundary: the files roll into an open tube
+/// first (0 .. this), then that tube bends into a closed ring (this .. 1).
+/// `kKleinRingEnd` and `kKleinFoldEnd` are the Klein morph's own three-stage boundaries
+/// (M18 revision, item 3): the ring forms first (0 .. `kKleinRingEnd`, bit-for-bit the
+/// Torus morph's own end state), then the cross-section folds into the figure-eight
+/// (`kKleinRingEnd` .. `kKleinFoldEnd`), then the twist settles the identifications
+/// (`kKleinFoldEnd` .. 1).
+inline constexpr float kTorusRollEnd = 0.5f;
+inline constexpr float kKleinRingEnd = 0.40f;
+inline constexpr float kKleinFoldEnd = 0.72f;
+
 }  // namespace cb::view

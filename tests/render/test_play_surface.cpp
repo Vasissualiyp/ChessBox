@@ -699,6 +699,52 @@ TEST_CASE("an eight-by-eight three-dimensional torus plays on the nested shells"
   CHECK(hasPlaySurface(test::loadVariant("torus3d_twist")));
 }
 
+TEST_CASE("the nested shells collapse onto one ring at shellSpread = 0", "[render]") {
+  // M13.9 revision: the main-menu trailer's last cut, Klein folding back into a torus
+  // and that torus "copying itself" into the 3-D torus's four shells, needs a real
+  // waypoint where every level sits on the *same* ring - not a fifth shape, the same
+  // `shellTube` with every level's own radius collapsed to the mean of the shipped four.
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("torus3d_8x8"));
+  const auto radiusAt = [&](int level, float spread) {
+    std::array<float, kMaxDims> axis{};
+    axis[0] = 0.5f;
+    axis[1] = 0.5f;
+    axis[2] = static_cast<float>(level) + 0.5f;
+    SurfacePose pose;
+    pose.shellSpread = spread;
+    OvVec3 p;
+    REQUIRE(playShapeAt(v, axis, p, pose));
+    return std::sqrt(p.x * p.x + p.z * p.z);
+  };
+
+  // At spread = 0, all four levels land on the same radius - one ring, not four nested
+  // ones - and it is a real ring (not a degenerate point).
+  const float collapsed = radiusAt(0, 0.0f);
+  for (int level = 1; level < 4; ++level) {
+    CHECK_THAT(radiusAt(level, 0.0f), WithinAbs(collapsed, 1e-4f));
+  }
+  CHECK(collapsed > 0.5f);
+
+  // At spread = 1 (the default), this is exactly the shipped per-level radii the
+  // existing test above already pins - the collapse is not a second shape blended in,
+  // it is the same formula at the other end of `shellSpread`.
+  for (int level = 1; level < 4; ++level) {
+    CHECK(radiusAt(level, 1.0f) > radiusAt(level - 1, 1.0f));
+  }
+
+  // Monotonic in between: spreading out never un-sorts the levels or overshoots past
+  // the shipped radius.
+  const float outerShipped = radiusAt(3, 1.0f);
+  float prevOuter = collapsed;
+  for (int i = 1; i <= 10; ++i) {
+    const float spread = static_cast<float>(i) / 10.0f;
+    const float outer = radiusAt(3, spread);
+    CHECK(outer >= prevOuter);
+    CHECK(outer <= outerShipped + 1e-4f);
+    prevOuter = outer;
+  }
+}
+
 TEST_CASE("a stacked square is a patch of the surface, not a tangent quad", "[render]") {
   // M17.12 part A. `buildStacked` used to place one flat quad per cell from the cell's
   // centre plus a tangent-plane frame (`axisFrame`). Where the embedding curves, or is
@@ -2795,8 +2841,12 @@ TEST_CASE("the morph keeps the camera on the shape as its bounds move", "[render
   INFO("worstTrack = " << worstTrack << " shapeExcursion = " << shapeExcursion);
   CHECK(formed >= 1.0f);
   // The test has teeth: the shape's own centre really does wander, so a camera left on
-  // the flat frame would be visibly off by the end of the roll.
-  CHECK(shapeExcursion > 0.5f);
+  // the flat frame would be visibly off by the end of the roll. The torus morph is now
+  // two real sequential stages, roll then close (M13.9 revision), not one combined ramp,
+  // and the bounds wander less across the sweep as a result (measured ~0.35, was ~0.5) -
+  // a real, expected consequence of the new staging, not a tracking regression: the
+  // camera's own worst-case miss (`worstTrack`, checked above every step) is still small.
+  CHECK(shapeExcursion > 0.3f);
   // The morph completes exactly on the fully-formed shape's frame.
   CHECK(dist(prev, formedCentre) < 1e-4f);
 

@@ -508,6 +508,42 @@ TEST_CASE("the derived surface equals the hand-authored one for its topology",
   }
 }
 
+TEST_CASE("cylinder, torus and klein land on each other's end-of-stage waypoint",
+          "[render]") {
+  // M13.9 revision: the main-menu trailer cuts cylinder -> torus -> Klein as a
+  // continuous geometry morph, not a hard swap - which only reads as continuous if the
+  // two sides of each cut are, bit-for-bit, the same picture. This is that claim, stated
+  // as arithmetic: no screenshot can prove a cut is seamless, this can.
+  SurfacePose tubeEnd;
+  tubeEnd.formed = 1.0f;
+  SurfacePose torusAtRoll;
+  torusAtRoll.formed = kTorusRollEnd;
+  SurfacePose torusEnd;
+  torusEnd.formed = 1.0f;
+  SurfacePose kleinAtRing;
+  kleinAtRing.formed = kKleinRingEnd;
+  for (int i = 0; i <= 8; ++i) {
+    for (int j = 0; j <= 8; ++j) {
+      const float u = static_cast<float>(i) / 8.0f;
+      const float v = static_cast<float>(j) / 8.0f;
+      INFO("at " << u << "," << v);
+      // Cylinder's own end state is an open tube; the torus morph's own
+      // `kTorusRollEnd` waypoint is defined to be exactly that - not approximately,
+      // the open tube formula and the ring formula's own `ph -> 0` limit have to
+      // agree to the bit, which is what the `open` ramp fix (keyed on the *close*
+      // stage, not raw `form`) buys.
+      CHECK_THAT(dist(derivedSurfaceAt(app::SurfaceKind::Tube, u, v, tubeEnd),
+                      derivedSurfaceAt(app::SurfaceKind::Torus, u, v, torusAtRoll)),
+                 WithinAbs(0.0f, 1e-4f));
+      // Torus's own end state is a plain ring - no fold, no twist; the Klein morph's
+      // own `kKleinRingEnd` waypoint is defined to be exactly that.
+      CHECK_THAT(dist(derivedSurfaceAt(app::SurfaceKind::Torus, u, v, torusEnd),
+                      derivedSurfaceAt(app::SurfaceKind::Klein, u, v, kleinAtRing)),
+                 WithinAbs(0.0f, 1e-4f));
+    }
+  }
+}
+
 TEST_CASE("a data-only variant gets a derived overture", "[render]") {
   // A torus built only as TOML text: its name is in no C++ table, so it animates with the
   // derived scene and not a line of scene code written for it.

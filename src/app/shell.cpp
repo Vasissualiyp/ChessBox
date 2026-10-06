@@ -447,13 +447,24 @@ void Shell::advanceWatching(float dt) {
 }
 
 AttractSequence defaultAttractSequence() {
-  // Standard -> cylinder -> torus -> Klein bottle -> 8x8x4 3-D torus, then round again.
-  // Five beats: the hypercube was dropped (M13.9 revision, Part I); `hyper4_8x8.toml` and
-  // `embedOnto` remain, independently tested but unreferenced here. Every line is real,
-  // legal opening play, verified through the engine's own legality: `startWatching`
-  // replays it move by move and a bad move fails the load. The two shape beats that hide
-  // their far side (Klein, the 3-D torus) ghost
-  // to 0.35 and draw flat icon pucks; the rest stay opaque and sculptural.
+  // Standard -> cylinder -> torus -> Klein bottle -> (Klein eases back to a torus) -> the
+  // 8x8x4 3-D torus, then round again. Six beats on five shapes: the hypercube was
+  // dropped (M13.9 revision, Part I); `hyper4_8x8.toml` and `embedOnto` remain,
+  // independently tested but unreferenced here. Every line is real, legal opening play,
+  // verified through the engine's own legality: `startWatching` replays it move by move
+  // and a bad move fails the load.
+  //
+  // Every cut between shapes is a real, continuous geometry morph, not a hard swap - the
+  // whole point of this revision. Cylinder's own end state (`formed = 1`, an open tube)
+  // is bit-for-bit the torus morph's own `kTorusRollEnd` waypoint (`view/morph.hpp`), so
+  // the torus beat starts there and eases the ring closed. The torus beat's own end state
+  // is bit-for-bit the Klein morph's own `kKleinRingEnd` waypoint - a plain ring, no
+  // fold, no twist - so the Klein beat starts there and eases the fold, then the twist. A
+  // second, move-free Klein beat eases `formed` back down to that same `kKleinRingEnd`
+  // waypoint - undoing the fold and the twist, "morph to torus temporarily" - before the
+  // cut into the 3-D torus, which opens with every level collapsed onto that one ring
+  // (`spreadFrom = 0`) and spreads them apart over the beat - "copy the middle torus a
+  // few times." Only the very first beat (`standard`) has nothing to morph from.
   //
   // The sequence opens on the literal `standard` board, then hard-cuts into the cylinder
   // beat already part-way up its roll. This is the documented workaround for the M18.6
@@ -462,20 +473,32 @@ AttractSequence defaultAttractSequence() {
   // trailer starts on a clean board and picks the roll up in motion instead. See the
   // status note in `docs/plan/M13-overtures.md`.
   AttractSequence seq;
-  seq.push_back({"standard", {"e2e4", "e7e5"}, 1.0f, 1.0f, 1.0f});
-  seq.push_back({"cylinder", {"e2e4", "e7e5", "g1f3", "b8c6"}, 1.0f, 1.0f, 0.30f});
-  seq.push_back({"torus", {"d1d5", "e5d5", "h1h5", "a5a1"}});
-  // Klein and the 3-D torus hide their far side, so they draw flat icon pucks as well as
-  // ghosting (M13.9 revision, Part H); the trailing `-1.0f, true` sets `flatPieces` and
-  // leaves `formedFrom` at its default.
-  seq.push_back({"klein", {"a1a5", "e5a5", "b1c3", "a5a1"}, 1.0f, 0.35f, -1.0f, true});
-  seq.push_back(
-      {"torus3d_8x8",
-       {"(0,0,0)-(0,0,1)", "(0,1,2)-(0,1,1)", "(1,0,0)-(0,2,0)", "(0,1,1)-(0,0,1)"},
-       1.0f,
-       0.35f,
-       -1.0f,
-       true});
+  seq.push_back({.variant = "standard", .moves = {"e2e4", "e7e5"}, .formedFrom = 1.0f});
+  seq.push_back({.variant = "cylinder",
+                 .moves = {"e2e4", "e7e5", "g1f3", "b8c6"},
+                 .formedFrom = 0.30f});
+  seq.push_back({.variant = "torus",
+                 .moves = {"d1d5", "e5d5", "h1h5", "a5a1"},
+                 .formedFrom = view::kTorusRollEnd});
+  // Klein hides its far side, so it ghosts and draws flat icon pucks throughout both of
+  // its beats (M13.9 revision, Part H), not just the fold-in.
+  seq.push_back({.variant = "klein",
+                 .moves = {"a1a5", "e5a5", "b1c3", "a5a1"},
+                 .ghostTarget = 0.35f,
+                 .formedFrom = view::kKleinRingEnd,
+                 .flatPieces = true});
+  seq.push_back({.variant = "klein",
+                 .moves = {},
+                 .formedTarget = view::kKleinRingEnd,
+                 .ghostTarget = 0.35f,
+                 .flatPieces = true});
+  seq.push_back({.variant = "torus3d_8x8",
+                 .moves = {"(0,0,0)-(0,0,1)", "(0,1,2)-(0,1,1)", "(1,0,0)-(0,2,0)",
+                           "(0,1,1)-(0,0,1)"},
+                 .ghostTarget = 0.35f,
+                 .formedFrom = 1.0f,
+                 .flatPieces = true,
+                 .spreadFrom = 0.0f});
   return seq;
 }
 
@@ -497,6 +520,7 @@ Result<void> Shell::startAttractStep(std::size_t index) {
   // A revealing beat starts part-way or from flat; any other beat keeps the pose the last
   // one left, so the shape cuts rather than re-rolling every time.
   if (step.formedFrom >= 0.0f) settings_.geometryFormed = step.formedFrom;
+  if (step.spreadFrom >= 0.0f) settings_.geometryShellSpread = step.spreadFrom;
   // The piece style is a discrete per-beat choice, so it snaps at the cut rather than
   // easing like the pose (M13.9 revision, Part H).
   settings_.shapePieceCylinders = step.flatPieces;
@@ -525,9 +549,12 @@ void Shell::stopAttract() {
   if (session_ != nullptr) session_->stopWatching();
   // The Klein and 3-D beats ghost the board; restore the opaque default so whatever the
   // player does next does not inherit the trailer's pose. The flat icon pucks snap on for
-  // those same two beats, so they are cleared here too (M13.9 revision, Part H).
+  // those same two beats, so they are cleared here too (M13.9 revision, Part H). The 3-D
+  // beat's own level spread is cleared the same way, so a game started afterwards opens
+  // on the shipped, fully-spread shape rather than the trailer's collapsed one.
   settings_.geometryGhost = 1.0f;
   settings_.shapePieceCylinders = false;
+  settings_.geometryShellSpread = 1.0f;
   // The trailer now runs on its own screen, so leaving it returns to the ordinary menu,
   // exactly as `stopWatching()` does (M13.9 revision, Part G).
   go(Screen::MainMenu);
@@ -541,10 +568,13 @@ bool Shell::advanceAttract(float dt) {
       settings_.geometryFormed, step.formedTarget, dt, settings_.geometryFormSpeed);
   settings_.geometryGhost = view::advanceFormMorph(
       settings_.geometryGhost, step.ghostTarget, dt, settings_.geometryFormSpeed);
+  settings_.geometryShellSpread = view::advanceFormMorph(
+      settings_.geometryShellSpread, step.spreadTarget, dt, settings_.geometryFormSpeed);
   constexpr float kSettle = 1e-3f;
   const bool settled =
       std::abs(settings_.geometryFormed - step.formedTarget) <= kSettle &&
-      std::abs(settings_.geometryGhost - step.ghostTarget) <= kSettle;
+      std::abs(settings_.geometryGhost - step.ghostTarget) <= kSettle &&
+      std::abs(settings_.geometryShellSpread - step.spreadTarget) <= kSettle;
   // A beat ends only when its game has run out *and* the pose has stopped moving, so a
   // cut never lands mid-roll.
   if (session_->watching() || !settled) return false;

@@ -96,6 +96,11 @@ struct BoardOptions {
   /// toggle starts from, 1 is the shipped shape. Default 1 so the flag is a no-op unless
   /// the front end is mid-morph.
   float surfaceFormed{1.0f};
+  /// For a D >= 3 nested-shell shape: how far the levels have spread into their own
+  /// radii, 0 to 1 - 0 is every level on one ring (the shape a 2-D torus already draws),
+  /// 1 is the shipped nested shells (M13.9). Default 1, a no-op unless the front end is
+  /// mid-morph, the same convention `surfaceFormed` uses.
+  float surfaceShellSpread{1.0f};
   /// The board mesh's alpha, 1 opaque down to a translucent ghost so the far side of the
   /// shape and the pieces on it show through (M17.10). The pieces stay opaque.
   float surfaceGhost{1.0f};

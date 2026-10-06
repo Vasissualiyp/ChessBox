@@ -88,6 +88,12 @@ struct Settings {
   /// for the board's own morph rather than the shape-follow choreography's. Clamped to
   /// 0.25..4 so a zero cannot freeze the board mid-roll (M18.6).
   float geometryFormSpeed{1.0f};
+  /// The live, eased spread of a D >= 3 nested-shell shape's own levels, 0 (every level
+  /// on one ring) to 1 (the shipped, fully nested shells), fed to
+  /// `SurfacePose::shellSpread` (M13.9). Eases toward its own target the same way
+  /// `geometryFormed` does, at the same `geometryFormSpeed` pace. Transient like
+  /// `geometryFormed`: not written to disk.
+  float geometryShellSpread{1.0f};
   /// How opaque the geometry view's board mesh is, 1 fully opaque down to `kGhostMin` as
   /// a ghost, so the far side of the shape and the pieces on it show through. The pieces
   /// stay opaque; the point is to see them (M17.10).

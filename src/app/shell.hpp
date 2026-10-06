@@ -64,13 +64,26 @@ struct AttractStep {
   /// continuous half-icon/half-sculpture state. Set on the shapes whose far side a
   /// sculptural piece cannot be read through (M13.9 revision, Part H).
   bool flatPieces{false};
+  float spreadTarget{1.0f};
+  /// The `geometryShellSpread` a beat starts from, same "-1 means inherit" convention as
+  /// `formedFrom`. Only the 3-D torus beat sets this (to 0 - every level on one ring,
+  /// matching the plain torus the Klein beat has just folded back into), so its own
+  /// levels visibly spread apart into the nested shells as the beat plays (M13.9
+  /// revision: "klein morphs to torus, then the torus copies itself into shells").
+  float spreadFrom{-1.0f};
 };
 using AttractSequence = std::vector<AttractStep>;
 
-/// The shipped trailer sequence (M13.9 part D): the standard board, then one short game
-/// per shape - cylinder -> torus -> Klein -> 3-D torus -> hypercube - looping. Free so a
-/// capture or a test can name it. The cylinder beat is the flat-to-shape reveal (started
-/// part-way up the roll, the M18.6 mirror workaround); the rest start already formed.
+/// The shipped trailer sequence (M13.9 revision): the standard board, then cylinder ->
+/// torus -> Klein -> (Klein folds back to a torus) -> the 3-D torus, looping the shape
+/// beats among themselves. Free so a capture or a test can name it. Every cut between
+/// shapes is a real, continuous geometry morph, not a hard swap: cylinder's own end
+/// state is bit-for-bit the torus morph's open-tube waypoint, the torus's own end state
+/// is bit-for-bit the Klein morph's ring-formed waypoint, and the Klein beat ends by
+/// easing back down to that same waypoint before the cut into the 3-D torus, which
+/// itself opens with every level collapsed onto that one ring and spreads them apart
+/// over the beat (`shellSpread`). Only the very first beat (`standard`) has nothing to
+/// morph from.
 [[nodiscard]] AttractSequence defaultAttractSequence();
 
 /// The curated first-run path, standard first, exotic last. A front door, not a gate -

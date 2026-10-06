@@ -2632,11 +2632,11 @@ float stageForm(float form, float begin, float end) noexcept {
   return std::clamp((form - begin) / (end - begin), 0.0f, 1.0f);
 }
 
-/// The three windows of the Klein morph (M18 revision, item 3): disjoint slices of
-/// `formed` spent on the ring, the fold and the twist. Tuning constants, by eye, like
-/// every other morph-pacing number here.
-constexpr float kKleinRingEnd = 0.40f;
-constexpr float kKleinFoldEnd = 0.72f;
+TorusMorph torusMorph(float form) noexcept {
+  const float roll = stageForm(form, 0.0f, kTorusRollEnd);
+  const float close = stageForm(form, kTorusRollEnd, 1.0f);
+  return {kTau * roll, kTau * close};
+}
 
 KleinMorph kleinMorph(float form, float twist) noexcept {
   // A plain circular-cross-section tube first, then the fold into the figure-eight, then
@@ -2666,11 +2666,10 @@ OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v, SurfacePose pos
   // The shipped ring radius is not 1 (the real ratio is 1:1, so a hole is a legibility
   // cheat), and `tube`/`kleinSurf` apply it the instant the ring roll begins. Scaling the
   // roll from zero alone would therefore jump the ranks out by that factor on the first
-  // frame; the overtures ramp the radius in for exactly this reason, and so does the
-  // morph (M18.6). At `form = 1` the ramp returns the shipped constant to the bit.
-  const auto ramp = [form](float hi) {
-    return form >= 1.0f ? hi : 1.0f + (hi - 1.0f) * form;
-  };
+  // frame; the Torus and Klein cases below each ramp their own radius in for exactly this
+  // reason (M18.6) - staged on their own construction's stages, not shared, since M13.9
+  // found that sharing one ramp across a cut between two different shapes' own radii is
+  // exactly what breaks the cut's continuity.
   switch (kind) {
     case app::SurfaceKind::Tube: {
       TubeOpt o;
@@ -2680,11 +2679,32 @@ OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v, SurfacePose pos
       return tube(u, v, o);
     }
     case app::SurfaceKind::Torus: {
+      // Two real stages, not one shared ramp (M13.9, the same reasoning as the Klein
+      // morph below): roll the files into an open tube, then bend that tube into a
+      // closed ring. At `form = 1` both stages are done and this is exactly the old
+      // `th = ph = kTau * form` - bit-for-bit the same shipped shape - but the open-tube
+      // waypoint at `form = kTorusRollEnd` is now real, which is what lets a cut from
+      // `cylinder` (an open tube at its own `formed = 1`) land seamlessly mid-morph.
+      const TorusMorph tm = torusMorph(form);
       TubeOpt o;
-      o.th = kTau * form;
-      o.ph = kTau * form;
+      o.th = tm.th;
+      o.ph = tm.ph;
       // The ring radius is the surface's "width"; `thickness` is the tube's own radius.
-      o.open = pose.openness * ramp(2.2f);
+      // Ramped on the *close* stage's own progress, not the raw `form`: `tube()`'s open-
+      // tube branch (`o.ph <= 1e-4`) never reads `o.open` at all, so the only moment that
+      // matters is the instant `ph` first leaves zero - and the ring-bend formula's own
+      // limit as `ph -> 0` is `open` times the flat offset, not the flat offset alone.
+      // Tied to raw `form`, `open` would already be most of the way to its shipped value
+      // by `form = kTorusRollEnd` (both stages used to share one ramp), so every seat
+      // would jump in scale the instant the close stage began - measured, not assumed: a
+      // 2-unit snap in one 1/100th of the morph. Ramped on `close` instead, `open` is
+      // exactly 1 at that instant, matching the open-tube branch's own implicit 1, and
+      // the handoff is seat-for-seat continuous.
+      const float close = stageForm(form, kTorusRollEnd, 1.0f);
+      const auto rampOn = [](float t, float hi) {
+        return t >= 1.0f ? hi : 1.0f + (hi - 1.0f) * t;
+      };
+      o.open = pose.openness * rampOn(close, 2.2f);
       o.thickness = pose.thickness;
       o.evert = e;
       return tube(u, v, o);
@@ -2701,9 +2721,21 @@ OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v, SurfacePose pos
     case app::SurfaceKind::Klein: {
       // The morph is three sequential stages - ring, fold, twist - not one shared ramp
       // (M18 revision, item 3). `kleinMorph` owns that staging; `openness` keeps its own
-      // ramp because it is the hole's legibility cheat, not a stage of the construction.
+      // ramp because it is the hole's legibility cheat, not a stage of the construction -
+      // but the ramp itself is now two pieces, not one (M13.9 revision). Through the ring
+      // stage the hole opens to the *torus's* own ring radius (2.2, not Klein's native
+      // 2.05): at `pinch = 0, tau = 0` this shape is pixel-for-pixel a torus, so it has
+      // to share the torus morph's own end-of-stage `open` value for a cut at
+      // `kKleinRingEnd` to be seamless (checked directly, not just argued: "cylinder,
+      // torus and klein land on each other's end-of-stage waypoint",
+      // tests/render/test_overture_scene.cpp). Through the fold and twist it eases on to
+      // Klein's own shipped 2.05, so `form = 1` is still exactly the old constant.
       const KleinMorph k = kleinMorph(form, pose.twist);
-      return kleinSurf(u, v, k.th, k.pinch, k.ph, k.tau, pose.openness * ramp(2.05f), e,
+      const float ring = stageForm(form, 0.0f, kKleinRingEnd);
+      const float afterRing = stageForm(form, kKleinRingEnd, 1.0f);
+      const float openShaped = form < kKleinRingEnd ? 1.0f + (2.2f - 1.0f) * ring
+                                                    : 2.2f + (2.05f - 2.2f) * afterRing;
+      return kleinSurf(u, v, k.th, k.pinch, k.ph, k.tau, pose.openness * openShaped, e,
                        pose.collapsePhase, pose.thickness);
     }
     case app::SurfaceKind::FlatGrid:
@@ -2770,8 +2802,20 @@ bool playShapeAt(const VariantSpec& v, const std::array<float, kMaxDims>& axis,
     // The level is a continuous coordinate too, so a sub-grid sample - or any future
     // caller - gets a shell radius on the same scale rather than a step at each level:
     // `axis[2] - 0.5` is the integer level at a cell centre, to the bit.
+    //
+    // `shellSpread` (M13.9) blends each level's own radius toward the *mean* radius
+    // across all four levels - `levelMid` below, the same fixed point regardless of
+    // which level a cell is on - so at `shellSpread = 0` every level sits on one ring (a
+    // single, un-nested torus: not a second shape, the same `shellTube` with every
+    // level's `d` collapsed to the one value a plain torus would use) and at 1 it is the
+    // shipped, always-spread stack to the bit.
+    constexpr float levelMid = 2.0f;  // the middle of the 0..4 level range, not a cell
+    const float dLevel = 0.62f + (axis[2] - 0.5f) * 0.82f;
+    const float dMid = 0.62f + (levelMid - 0.5f) * 0.82f;
+    const float spread = std::clamp(pose.shellSpread, 0.0f, 1.0f);
+    const float shellD = dMid + (dLevel - dMid) * spread;
     out = shellTube((axis[0] + pose.slideU) / nx, (axis[1] + pose.slideV) / nz,
-                    kTau * form, kTau * form, 0.62f + (axis[2] - 0.5f) * 0.82f, open);
+                    kTau * form, kTau * form, shellD, open);
     return true;
   }
   if (d.dims() == 4 && v.name == "hyper4") {

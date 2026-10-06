@@ -18,6 +18,7 @@
 #include "io/game_file.hpp"
 #include "position/position.hpp"
 #include "support/variants.hpp"
+#include "view/morph.hpp"
 
 using namespace cb;
 using namespace cb::app;
@@ -51,9 +52,10 @@ TEST_CASE("every attract beat is a real, legal game for its variant",
   // The spec's check: a `GameFile` that fails to load or replay is a build-time failure,
   // not something to hand-wave past. `applyGameFile` is the engine's own legality proof.
   const AttractSequence seq = defaultAttractSequence();
-  // Five beats, not six: the hypercube is gone (M13.9 revision, Part I).
-  const std::vector<std::string> expected{"standard", "cylinder", "torus", "klein",
-                                          "torus3d_8x8"};
+  // Six beats on five shapes: Klein appears twice - fold in, then ease back out to the
+  // torus it folded from, before the cut into the 3-D torus (M13.9 revision).
+  const std::vector<std::string> expected{"standard", "cylinder", "torus",
+                                          "klein",    "klein",    "torus3d_8x8"};
   REQUIRE(seq.size() == expected.size());
   for (std::size_t i = 0; i < expected.size(); ++i) {
     CAPTURE(i);
@@ -100,7 +102,7 @@ TEST_CASE("the attract sequence plays every shape and loops back forever",
     shell->session()->advanceAnimation(kDt);
     if (shell->advanceAttract(kDt)) seen.push_back(shell->currentVariant());
   }
-  REQUIRE(seen.size() == seq.size() + 1);  // five beats and the wrap
+  REQUIRE(seen.size() == seq.size() + 1);  // six beats and the wrap
   for (std::size_t i = 0; i < seq.size(); ++i) {
     CHECK(seen[i] == seq[i].variant);
   }
@@ -157,7 +159,8 @@ TEST_CASE("stopping the attract restores the opaque board and leaves the menu",
   CHECK_FALSE(shell->watching());
   CHECK(shell->screen() == Screen::MainMenu);
   CHECK(shell->settings().geometryGhost == 1.0f);
-  CHECK_FALSE(shell->settings().shapePieceCylinders);  // no icon pucks leak forward
+  CHECK_FALSE(shell->settings().shapePieceCylinders);    // no icon pucks leak forward
+  CHECK(shell->settings().geometryShellSpread == 1.0f);  // nor the collapsed shells
 }
 
 TEST_CASE("only the far-side shapes draw flat icon pieces", "[unit][app][attract]") {
@@ -192,13 +195,57 @@ TEST_CASE("the attract cut switches the pieces to the flat icon style",
   };
   REQUIRE(runTo(2));  // torus: still sculptural
   CHECK_FALSE(shell->settings().shapePieceCylinders);
-  REQUIRE(runTo(3));  // Klein: icon pucks on
+  REQUIRE(runTo(3));  // Klein folds in: icon pucks on
   CHECK(shell->currentVariant() == "klein");
   CHECK(shell->settings().shapePieceCylinders);
-  REQUIRE(runTo(4));  // 3-D torus: icon pucks on
+  REQUIRE(runTo(4));  // Klein eases back out: still icon pucks, still Klein
+  CHECK(shell->currentVariant() == "klein");
+  CHECK(shell->settings().shapePieceCylinders);
+  REQUIRE(runTo(5));  // 3-D torus: icon pucks on
   CHECK(shell->currentVariant() == "torus3d_8x8");
   CHECK(shell->settings().shapePieceCylinders);
   REQUIRE(runTo(1));  // back round to the cylinder: sculptural again
   CHECK(shell->currentVariant() == "cylinder");
   CHECK_FALSE(shell->settings().shapePieceCylinders);
+}
+
+TEST_CASE("every cut in the sequence lands on the previous shape's own end-of-stage",
+          "[unit][app][attract]") {
+  // M13.9 revision: the whole point is that a cut is a continuous morph, not a hard swap
+  // - which requires each beat to *start* exactly where the one before it *ends*. This
+  // pins the wiring that makes that true, step by step through the sequence.
+  const AttractSequence seq = defaultAttractSequence();
+  REQUIRE(seq.size() == 6);
+  const AttractStep& standard = seq[0];
+  const AttractStep& cylinder = seq[1];
+  const AttractStep& torus = seq[2];
+  const AttractStep& kleinIn = seq[3];
+  const AttractStep& kleinOut = seq[4];
+  const AttractStep& shells = seq[5];
+
+  // Cylinder ends fully formed (an open tube); torus starts at its own open-tube
+  // waypoint - the same picture, bit-for-bit, by construction of the two morphs.
+  CHECK(cylinder.formedTarget == 1.0f);
+  CHECK(torus.formedFrom == view::kTorusRollEnd);
+  CHECK(torus.formedTarget == 1.0f);
+
+  // Torus ends fully formed (a plain ring); Klein starts at its own ring-formed waypoint
+  // - no fold, no twist yet - the same picture torus's own end state is.
+  CHECK(kleinIn.formedFrom == view::kKleinRingEnd);
+  CHECK(kleinIn.formedTarget == 1.0f);
+
+  // Klein's second beat eases back down to that same ring-formed waypoint - undoing the
+  // fold and the twist it just played - rather than starting fresh or snapping.
+  CHECK(kleinOut.variant == "klein");
+  CHECK(kleinOut.moves.empty());
+  CHECK(kleinOut.formedTarget == view::kKleinRingEnd);
+
+  // The 3-D torus is explicitly pinned fully formed (not inherited from Klein's own
+  // `kKleinRingEnd`, which does not mean the same thing on a stacked shape) and starts
+  // with every level collapsed onto one ring, spreading apart over the beat.
+  CHECK(shells.formedFrom == 1.0f);
+  CHECK(shells.spreadFrom == 0.0f);
+  CHECK(shells.spreadTarget == 1.0f);
+
+  (void)standard;
 }
