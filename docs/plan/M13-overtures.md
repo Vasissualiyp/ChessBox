@@ -1060,3 +1060,68 @@ this, not built here. Two asks from the same round of feedback are **not** addre
 this revision and remain open: carrying one continuous game across every shape (the
 Part F question, parked on the real wrap-contact/king-adjacency wall found earlier - not
 touched again here) and the camera-keyframe authoring scaffold (not started).
+
+### Revision: wider shell spacing, and a Mobius beat between standard and cylinder
+### (2026-10-05, feedback, built directly by Claude)
+
+Two more corrections after watching the above run - confirmed working well, then two
+small, well-scoped asks on top of it.
+
+**Wider nested-shell spacing.** The 3-D torus read as "a thicker torus," not four
+distinct shells - correct in principle (the handoff math is unaffected) but not legible
+in practice. The per-level radial step in `playShapeAt`'s `torus3d`/`torus3d_8x8` branch
+(`src/render/overture_scene.cpp`) was `0.62 + (level - 0.5) * 0.82`; the multiplier is now
+`1.7`, by eye, checked against a fresh opaque and ghosted capture of `torus3d_8x8` until
+four separated rings actually read as four. This is the shared D >= 3 dispatch, so it
+widens `torus3d` and `torus3d_twist` too, not just the trailer's variant - a general
+legibility fix, not trailer-only tuning. One existing test's own thresholds moved with
+it: "picking a three- and four-dimensional shape finds the tile" measures how far a
+seat's own screen projection can land from the tile `pick()` actually resolves to before
+counting it as a miss - wider shells mean seats on different levels project further
+apart, so the proximity bound widened (120px -> 260px) and the self-agreement ratio
+loosened (`hits / 8` -> `hits / 16`), both with the reasoning recorded in the test, not
+just the numbers changed.
+
+**A Mobius beat, standard -> Mobius -> cylinder -> torus -> klein -> the 3-D torus.**
+Mobius and cylinder are not the same construction family the way cylinder/torus/Klein
+are - `band()`/`stripSurface()` bend the *file* axis into a loop in the board's own
+plane, `tube()` rolls it into a tube's cross-section - genuinely different embeddings,
+not two parameter settings of one function. The only point they share is the bare,
+unrolled flat board (`th = 0`), proven directly ("the Mobius strip and the cylinder
+share the bare flat board," `tests/render/test_overture_scene.cpp`), not assumed. The
+first version of that test used `derivedSurfaceAt`'s own bare default pose
+(`stretch = 1.0`) and failed red, with real, multi-unit distances - not rounding noise:
+`derivedSurfaceAt`'s internal `lerpf(1, kMobiusStretch, clampf(pose.stretch))` reads
+`stretch = 1.0` as *fully* stretched, not unstretched, because the actual "unstretched"
+value the real `PlaySurface::build` produces at `formed = 0` is `pose.stretch = 0`
+(`play_surface.cpp`'s own Band-specific remap, `pose.stretch = kRibbonStretch *
+stageForm(form, 0, kRibbonStretchWindow)`) - a detail the test had to reproduce to be
+honest, not sidestep. Fixed by setting `.stretch = 0.0f` explicitly on the Mobius side of
+the comparison; the test is green and, more usefully, is what the sequence's own
+`formedTarget = 0.0f` on Mobius's second beat relies on being true.
+
+The sequence gained two beats either side of the shared waypoint it needed: Mobius's
+first beat (`formedFrom = 0.30`, the same M18.6 mirror-avoidance reveal cylinder's own
+first beat used to carry) plays a short, engine-verified legal line
+(`a1a4 a8a5 b1c3 b8c6` - mobius has no pawns, same reasoning as Klein, so development
+starts with the back-rank pieces directly); a second, move-free Mobius beat eases
+`formed` all the way down to `0.0` (not a window - a single point, the one the proof
+above establishes); cylinder's own `formedFrom` is now left at its default ("wherever the
+previous beat left it," `-1`) rather than the old explicit `0.30`, since it now inherits
+Mobius's own true-flat end state directly. Every later beat (torus onward) is unchanged.
+The sequence is eight beats on six shapes now; the loop (`loopFrom = 1`) still skips only
+the one-time `standard` opener and now lands on Mobius first.
+
+**Tests.** The new differential proof above; `tests/unit/app/test_attract.cpp`'s sequence
+test extended to the eight beats and their names; the loop test's wrap target updated to
+`mobius`; the flat-icon-style cut test's step indices renumbered for the two new beats in
+front of cylinder; "every cut... lands on the previous shape's own end-of-stage" gained
+checks for both new Mobius waypoints (`formedTarget = 0.0` on the fold-back beat,
+`formedFrom < 0` - inherited - on cylinder).
+
+**Results.** `tools/test.sh --build render` 141 cases, `--build app` 78, `[arch]` 9,
+`[attract]` 9, `ctest -R "^property$"` green, `clang-format --dry-run --Werror` clean.
+Visual spot-check via `--shot --screen menu --t S`: the Mobius beat renders as a
+recognisable coiled ribbon (opaque, sculptural, its own "glued with a twist" label), and
+by `t = 7` the sequence has already cut cleanly to `CYLINDER` playing its own opening -
+confirming the new beats slot into the loop without disturbing anything downstream.

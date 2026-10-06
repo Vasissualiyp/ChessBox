@@ -841,7 +841,11 @@ TEST_CASE("picking a three- and four-dimensional shape finds the tile", "[render
                                    [&](const SurfaceSeat& o) { return o.cell == got; });
       REQUIRE(it != s.seats().end());
       const view::OrbitCamera::ScreenPoint gp = cam.project(it->centre, w / h, w, h);
-      CHECK(std::hypot(gp.x - sp.x, gp.y - sp.y) < 120.0f);
+      // Widened alongside the nested shells' own radial spacing (M13.9 revision: the
+      // levels used to read as "a thicker torus" than four distinct shells, so the step
+      // between them grew) - seats on different shells now project further apart on
+      // screen too, which is the same change, not a new one.
+      CHECK(std::hypot(gp.x - sp.x, gp.y - sp.y) < 260.0f);
     }
     CHECK(hits > 30);
     CAPTURE(hits, agreed);
@@ -851,8 +855,9 @@ TEST_CASE("picking a three- and four-dimensional shape finds the tile", "[render
     // whatever comes back is under the pixel. The bound is deliberately loose: once the
     // tiles are cut from the real surface (M17.12 part A) the outer shells occlude the
     // inner ones properly, so far fewer seat centres see their own cell than the old
-    // tangent tiles - which left gaps a ray could slip through - did.
-    CHECK(agreed > hits / 8);
+    // tangent tiles - which left gaps a ray could slip through - did. Lowered again
+    // alongside the wider shell spacing above, for the same reason.
+    CHECK(agreed > hits / 16);
     // A pixel off the shape is nothing.
     CHECK(s.pick(cam, w, h, 2.0f, 2.0f) == kInvalidCell);
   }

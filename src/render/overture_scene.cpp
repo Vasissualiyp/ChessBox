@@ -2809,9 +2809,13 @@ bool playShapeAt(const VariantSpec& v, const std::array<float, kMaxDims>& axis,
     // single, un-nested torus: not a second shape, the same `shellTube` with every
     // level's `d` collapsed to the one value a plain torus would use) and at 1 it is the
     // shipped, always-spread stack to the bit.
+    // The per-level step: wide enough that four shells read as four shells, not one
+    // thicker tube (the original 0.82 was a ghosted blur at this ring radius - raised by
+    // eye, checked against a fresh capture).
+    constexpr float kLevelStep = 1.7f;
     constexpr float levelMid = 2.0f;  // the middle of the 0..4 level range, not a cell
-    const float dLevel = 0.62f + (axis[2] - 0.5f) * 0.82f;
-    const float dMid = 0.62f + (levelMid - 0.5f) * 0.82f;
+    const float dLevel = 0.62f + (axis[2] - 0.5f) * kLevelStep;
+    const float dMid = 0.62f + (levelMid - 0.5f) * kLevelStep;
     const float spread = std::clamp(pose.shellSpread, 0.0f, 1.0f);
     const float shellD = dMid + (dLevel - dMid) * spread;
     out = shellTube((axis[0] + pose.slideU) / nx, (axis[1] + pose.slideV) / nz,

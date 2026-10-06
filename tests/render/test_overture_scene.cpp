@@ -544,6 +544,41 @@ TEST_CASE("cylinder, torus and klein land on each other's end-of-stage waypoint"
   }
 }
 
+TEST_CASE("the Mobius strip and the cylinder share the bare flat board", "[render]") {
+  // M13.9 revision: standard -> Mobius -> cylinder -> torus -> klein -> the 3-D torus.
+  // The Mobius -> cylinder cut needs its own real waypoint the same way the others do.
+  // Unlike Tube/Torus/Klein (one shared roll-ring-fold family), Band/Mobius bends the
+  // *file* axis into a loop in the board's own plane rather than rolling it into a tube
+  // cross-section - a genuinely different construction, with only one point in common:
+  // both reduce to the bare, unrolled flat board at `th = 0`, before either construction
+  // has begun. Checked directly, not assumed - `stripSurface`'s own flat branch uses a
+  // stretch-scaled length (`kW * stretch`), and only at `pose.stretch = 0` does
+  // `derivedSurfaceAt`'s own internal `lerpf(1, kMobiusStretch, clampf(pose.stretch))`
+  // land back on 1 (unstretched) - which is what `PlaySurface::build`'s own Band
+  // remapping (`pose.stretch = kRibbonStretch * stageForm(form, 0,
+  // kRibbonStretchWindow)`, `play_surface.cpp`) actually produces at `formed = 0`, not
+  // `derivedSurfaceAt`'s own bare default of `stretch = 1.0` (which the first version of
+  // this test wrongly assumed, and which `lerpf` turns into the *fully* stretched ribbon,
+  // not the unstretched one - caught by this test failing red, not by inspection). This
+  // is why the Mobius beat has to ease all the way down to `formed = 0` before the cut -
+  // the shared waypoint is a single point, not a window like the other three shapes get.
+  SurfacePose flat;
+  flat.formed = 0.0f;
+  SurfacePose mobiusFlat;
+  mobiusFlat.formed = 0.0f;
+  mobiusFlat.stretch = 0.0f;  // what PlaySurface::build's own remap produces at formed=0
+  for (int i = 0; i <= 8; ++i) {
+    for (int j = 0; j <= 8; ++j) {
+      const float u = static_cast<float>(i) / 8.0f;
+      const float v = static_cast<float>(j) / 8.0f;
+      INFO("at " << u << "," << v);
+      CHECK_THAT(dist(derivedSurfaceAt(app::SurfaceKind::Band, u, v, mobiusFlat),
+                      derivedSurfaceAt(app::SurfaceKind::Tube, u, v, flat)),
+                 WithinAbs(0.0f, 1e-4f));
+    }
+  }
+}
+
 TEST_CASE("a data-only variant gets a derived overture", "[render]") {
   // A torus built only as TOML text: its name is in no C++ table, so it animates with the
   // derived scene and not a line of scene code written for it.

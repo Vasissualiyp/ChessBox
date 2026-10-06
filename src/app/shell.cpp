@@ -447,26 +447,32 @@ void Shell::advanceWatching(float dt) {
 }
 
 AttractSequence defaultAttractSequence() {
-  // Standard -> cylinder -> torus -> Klein bottle -> (Klein eases back to a torus) -> the
-  // 8x8x4 3-D torus, then round again. Six beats on five shapes: the hypercube was
-  // dropped (M13.9 revision, Part I); `hyper4_8x8.toml` and `embedOnto` remain,
-  // independently tested but unreferenced here. Every line is real, legal opening play,
-  // verified through the engine's own legality: `startWatching` replays it move by move
-  // and a bad move fails the load.
+  // Standard -> Mobius -> (Mobius eases down to the bare flat board) -> cylinder -> torus
+  // -> Klein bottle -> (Klein eases back to a torus) -> the 8x8x4 3-D torus, then round
+  // again. Eight beats on six shapes: the hypercube was dropped (M13.9 revision, Part I);
+  // `hyper4_8x8.toml` and `embedOnto` remain, independently tested but unreferenced here.
+  // Every line is real, legal opening play, verified through the engine's own legality:
+  // `startWatching` replays it move by move and a bad move fails the load.
   //
   // Every cut between shapes is a real, continuous geometry morph, not a hard swap - the
-  // whole point of this revision. Cylinder's own end state (`formed = 1`, an open tube)
-  // is bit-for-bit the torus morph's own `kTorusRollEnd` waypoint (`view/morph.hpp`), so
-  // the torus beat starts there and eases the ring closed. The torus beat's own end state
-  // is bit-for-bit the Klein morph's own `kKleinRingEnd` waypoint - a plain ring, no
-  // fold, no twist - so the Klein beat starts there and eases the fold, then the twist. A
+  // whole point of this revision. Mobius and cylinder are not the same construction
+  // family the way cylinder/torus/Klein are (Mobius bends the files into a loop in the
+  // board's own plane; cylinder rolls them into a tube's cross-section) - the only point
+  // they share is the bare, unrolled flat board, so the Mobius beat eases *all the way*
+  // down to `formed = 0` (not a window, a single point - proven in
+  // tests/render/test_overture_scene.cpp) before the cut, rather than starting partway
+  // the way the later cuts do. Cylinder's own end state (`formed = 1`, an open tube) is
+  // bit-for-bit the torus morph's own `kTorusRollEnd` waypoint (`view/morph.hpp`), so the
+  // torus beat starts there and eases the ring closed. The torus beat's own end state is
+  // bit-for-bit the Klein morph's own `kKleinRingEnd` waypoint - a plain ring, no fold,
+  // no twist - so the Klein beat starts there and eases the fold, then the twist. A
   // second, move-free Klein beat eases `formed` back down to that same `kKleinRingEnd`
   // waypoint - undoing the fold and the twist, "morph to torus temporarily" - before the
   // cut into the 3-D torus, which opens with every level collapsed onto that one ring
   // (`spreadFrom = 0`) and spreads them apart over the beat - "copy the middle torus a
   // few times." Only the very first beat (`standard`) has nothing to morph from.
   //
-  // The sequence opens on the literal `standard` board, then hard-cuts into the cylinder
+  // The sequence opens on the literal `standard` board, then hard-cuts into the Mobius
   // beat already part-way up its roll. This is the documented workaround for the M18.6
   // rank-mirrored flat board at `geometryFormed = 0`: the reveal's flat end would show
   // black nearest the camera and white far off, the reverse of a normal board, so the
@@ -474,9 +480,13 @@ AttractSequence defaultAttractSequence() {
   // status note in `docs/plan/M13-overtures.md`.
   AttractSequence seq;
   seq.push_back({.variant = "standard", .moves = {"e2e4", "e7e5"}, .formedFrom = 1.0f});
-  seq.push_back({.variant = "cylinder",
-                 .moves = {"e2e4", "e7e5", "g1f3", "b8c6"},
+  seq.push_back({.variant = "mobius",
+                 .moves = {"a1a4", "a8a5", "b1c3", "b8c6"},
                  .formedFrom = 0.30f});
+  // Move-free: ease all the way down to the bare flat board, the one point Mobius and
+  // cylinder's own constructions actually share.
+  seq.push_back({.variant = "mobius", .moves = {}, .formedTarget = 0.0f});
+  seq.push_back({.variant = "cylinder", .moves = {"e2e4", "e7e5", "g1f3", "b8c6"}});
   seq.push_back({.variant = "torus",
                  .moves = {"d1d5", "e5d5", "h1h5", "a5a1"},
                  .formedFrom = view::kTorusRollEnd});
