@@ -27,8 +27,7 @@ namespace {
 
 std::unique_ptr<Shell> makeShell(const std::filesystem::path& settings = {}) {
   auto shell = Shell::create(
-      {"standard", "mobius", "cylinder", "torus", "klein", "torus3d_8x8", "hyper4"},
-      settings);
+      {"standard", "cylinder", "torus", "klein", "torus3d_8x8", "hyper4"}, settings);
   shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
     auto v = loadVariantFile(test::variantPath(name));
     if (!v.has_value()) return fail(v.error().code, v.error().message);
@@ -53,20 +52,20 @@ TEST_CASE("every attract beat is a real, legal game for its variant",
   // The spec's check: a `GameFile` that fails to load or replay is a build-time failure,
   // not something to hand-wave past. `applyGameFile` is the engine's own legality proof.
   const AttractSequence seq = defaultAttractSequence();
-  // Eight beats on six shapes: Mobius and Klein each appear twice - fold in, then ease
-  // back out to whatever they folded from or toward, before the next cut (M13.9
+  // Six beats on five shapes: Klein appears twice - fold in, then ease back out to the
+  // same ring waypoint it folded in from, before the cut into the 3-D torus (M13.9
   // revision).
-  const std::vector<std::string> expected{"standard", "mobius", "mobius", "cylinder",
-                                          "torus",    "klein",  "klein",  "torus3d_8x8"};
+  const std::vector<std::string> expected{"standard", "cylinder", "torus",
+                                          "klein",    "klein",    "torus3d_8x8"};
   REQUIRE(seq.size() == expected.size());
   for (std::size_t i = 0; i < expected.size(); ++i) {
     CAPTURE(i);
     CHECK(seq[i].variant == expected[i]);
   }
   // The documented M18.6 workaround: open on the real standard board, then cut into the
-  // Mobius roll in motion rather than at the rank-mirrored flat end.
+  // cylinder roll in motion rather than at the rank-mirrored flat end.
   REQUIRE(seq.front().variant == "standard");
-  REQUIRE(seq[1].variant == "mobius");
+  REQUIRE(seq[1].variant == "cylinder");
   REQUIRE(seq[1].formedFrom > 0.0f);
   for (const AttractStep& step : seq) {
     CAPTURE(step.variant);
@@ -104,13 +103,13 @@ TEST_CASE("the attract sequence plays every shape and loops back forever",
     shell->session()->advanceAnimation(kDt);
     if (shell->advanceAttract(kDt)) seen.push_back(shell->currentVariant());
   }
-  REQUIRE(seen.size() == seq.size() + 1);  // eight beats and the wrap
+  REQUIRE(seen.size() == seq.size() + 1);  // six beats and the wrap
   for (std::size_t i = 0; i < seq.size(); ++i) {
     CHECK(seen[i] == seq[i].variant);
   }
   // The standard opener plays once; the last cut then loops into the first shape beat
-  // (Mobius), and the sequence is still running.
-  CHECK(seen.back() == "mobius");
+  // (cylinder), and the sequence is still running.
+  CHECK(seen.back() == "cylinder");
   CHECK(seen.back() == seq[1].variant);
   CHECK(shell->attracting());
   CHECK(shell->attractStep() == 1);
@@ -149,13 +148,13 @@ TEST_CASE("stopping the attract restores the opaque board and leaves the menu",
   shell->settings().watchDwell = 0.05f;
   shell->startAttract(defaultAttractSequence());
   REQUIRE(shell->attracting());
-  // Run into the Klein beat (index 5, after the standard opener, Mobius's two beats,
-  // cylinder and torus), which ghosts the board, then stop.
-  for (int i = 0; i < 20000 && shell->attractStep() < 5; ++i) {
+  // Run into the Klein beat (index 3, after the standard opener, cylinder and torus),
+  // which ghosts the board, then stop.
+  for (int i = 0; i < 20000 && shell->attractStep() < 3; ++i) {
     shell->session()->advanceAnimation(0.02f);
     shell->advanceAttract(0.02f);
   }
-  REQUIRE(shell->attractStep() == 5);
+  REQUIRE(shell->attractStep() == 3);
   shell->stopAttract();
   CHECK_FALSE(shell->attracting());
   CHECK_FALSE(shell->watching());
@@ -195,22 +194,22 @@ TEST_CASE("the attract cut switches the pieces to the flat icon style",
     }
     return shell->attractStep() == step;
   };
-  REQUIRE(runTo(3));  // cylinder (after Mobius's two beats): still sculptural
+  REQUIRE(runTo(1));  // cylinder: still sculptural
   CHECK(shell->currentVariant() == "cylinder");
   CHECK_FALSE(shell->settings().shapePieceCylinders);
-  REQUIRE(runTo(4));  // torus: still sculptural
+  REQUIRE(runTo(2));  // torus: still sculptural
   CHECK_FALSE(shell->settings().shapePieceCylinders);
-  REQUIRE(runTo(5));  // Klein folds in: icon pucks on
+  REQUIRE(runTo(3));  // Klein folds in: icon pucks on
   CHECK(shell->currentVariant() == "klein");
   CHECK(shell->settings().shapePieceCylinders);
-  REQUIRE(runTo(6));  // Klein eases back out: still icon pucks, still Klein
+  REQUIRE(runTo(4));  // Klein eases back out: still icon pucks, still Klein
   CHECK(shell->currentVariant() == "klein");
   CHECK(shell->settings().shapePieceCylinders);
-  REQUIRE(runTo(7));  // 3-D torus: icon pucks on
+  REQUIRE(runTo(5));  // 3-D torus: icon pucks on
   CHECK(shell->currentVariant() == "torus3d_8x8");
   CHECK(shell->settings().shapePieceCylinders);
-  REQUIRE(runTo(1));  // back round to Mobius: sculptural again
-  CHECK(shell->currentVariant() == "mobius");
+  REQUIRE(runTo(1));  // back round to cylinder: sculptural again
+  CHECK(shell->currentVariant() == "cylinder");
   CHECK_FALSE(shell->settings().shapePieceCylinders);
 }
 
@@ -220,28 +219,20 @@ TEST_CASE("every cut in the sequence lands on the previous shape's own end-of-st
   // - which requires each beat to *start* exactly where the one before it *ends*. This
   // pins the wiring that makes that true, step by step through the sequence.
   const AttractSequence seq = defaultAttractSequence();
-  REQUIRE(seq.size() == 8);
+  REQUIRE(seq.size() == 6);
   const AttractStep& standard = seq[0];
-  const AttractStep& mobiusIn = seq[1];
-  const AttractStep& mobiusOut = seq[2];
-  const AttractStep& cylinder = seq[3];
-  const AttractStep& torus = seq[4];
-  const AttractStep& kleinIn = seq[5];
-  const AttractStep& kleinOut = seq[6];
-  const AttractStep& shells = seq[7];
+  const AttractStep& cylinder = seq[1];
+  const AttractStep& torus = seq[2];
+  const AttractStep& kleinIn = seq[3];
+  const AttractStep& kleinOut = seq[4];
+  const AttractStep& shells = seq[5];
 
-  // Mobius's second beat eases all the way down to the bare flat board - the one point
-  // its own construction and cylinder's share (proven directly in
-  // test_overture_scene.cpp, not just argued) - rather than a mid-morph window.
-  CHECK(mobiusOut.variant == "mobius");
-  CHECK(mobiusOut.moves.empty());
-  CHECK(mobiusOut.formedTarget == 0.0f);
-
-  // Cylinder inherits that same flat waypoint (no `formedFrom` of its own - the default
-  // "wherever the previous beat left it" is exactly right here) and ends fully formed
-  // (an open tube); torus starts at its own open-tube waypoint - the same picture,
-  // bit-for-bit, by construction of the two morphs.
-  CHECK(cylinder.formedFrom < 0.0f);
+  // Cylinder is the sequence's own M18.6 reveal workaround - it has an explicit
+  // `formedFrom` rather than inheriting one, since it follows the cold-open `standard`
+  // beat directly - and ends fully formed (an open tube); torus starts at its own
+  // open-tube waypoint - the same picture, bit-for-bit, by construction of the two
+  // morphs.
+  CHECK(cylinder.formedFrom > 0.0f);
   CHECK(cylinder.formedTarget == 1.0f);
   CHECK(torus.formedFrom == view::kTorusRollEnd);
   CHECK(torus.formedTarget == 1.0f);
@@ -264,8 +255,7 @@ TEST_CASE("every cut in the sequence lands on the previous shape's own end-of-st
   CHECK(shells.spreadFrom == 0.0f);
   CHECK(shells.spreadTarget == 1.0f);
 
-  // Standard has nothing to morph from (the sequence's own cold open); Mobius's first
-  // beat is the M18.6 reveal workaround, same shape as cylinder's used to be.
+  // Standard has nothing to morph from - the sequence's own cold open.
   CHECK(standard.variant == "standard");
-  CHECK(mobiusIn.formedFrom > 0.0f);
+  CHECK(standard.formedFrom == 1.0f);
 }

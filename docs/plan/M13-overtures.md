@@ -1125,3 +1125,35 @@ Visual spot-check via `--shot --screen menu --t S`: the Mobius beat renders as a
 recognisable coiled ribbon (opaque, sculptural, its own "glued with a twist" label), and
 by `t = 7` the sequence has already cut cleanly to `CYLINDER` playing its own opening -
 confirming the new beats slot into the loop without disturbing anything downstream.
+
+### Revision: the Mobius beat reverted (2026-10-05, feedback)
+
+The Mobius beat above shipped, then was dropped the same day. While chasing the Part F
+position-continuity question (carrying one real game across every cut, rather than each
+beat replaying its own short independent line), the blocker turned out to be Mobius
+itself, not the wrap-contact/king-adjacency theory this doc parked on earlier - that
+theory was tested directly with the CLI tool and falsified (cylinder's own unmoved
+4-ply opening carries onto `torus` with 54 legal moves; the issue was specific to
+checking the *unmoved* starting array for simultaneous wraps, not a structural
+illegality). Mobius declares no pawn piece type (`variants/mobius.toml`, same reasoning
+as Klein), and `embedOnto` can only carry pieces the target variant declares - it can
+never manufacture pawns back. Since Mobius sat right after `standard`, wiring up real
+continuity would drop the pawns there and leave every later beat (cylinder onward)
+pawnless for the rest of the trailer, permanently, for a shape the sequence does not
+need. Told this trade-off plainly, the call was to drop Mobius rather than keep
+continuity pawnless or keep Mobius and give up on continuity: "Ok, no need to have
+mobius then, skip it."
+
+Reverted: `defaultAttractSequence()` back to six beats on five shapes (`standard ->
+cylinder -> torus -> klein -> klein -> torus3d_8x8`), cylinder's `formedFrom` restored
+to its own explicit `0.30` since it is once again `standard`'s direct successor; the
+now-orphaned differential test ("the Mobius strip and the cylinder share the bare flat
+board") removed from `test_overture_scene.cpp` - it stated a true geometric fact but was
+no longer load-bearing for any shipped feature; `test_attract.cpp`'s five beat-indexed
+tests (the beat list, the loop wrap target, the stop-at-Klein index, the flat-icon-style
+cut indices, and the end-of-stage waypoint bindings) restored to the six-beat numbering.
+The wider shell spacing above is untouched - that fix is independent of Mobius and
+stands. Position continuity (Part F) and the camera-keyframe scaffold remain open; now
+that Mobius is gone, continuity may be more tractable than this doc previously feared,
+but torus -> klein and klein -> `torus3d_8x8` were not yet checked before this revert
+interrupted that investigation.
