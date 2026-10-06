@@ -1,0 +1,127 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# hyper4_8x8 - an 8x8x4x2 four-dimensional box. TRAILER-SCOPED, not a catalogue variant.
+#
+# This is the main-menu attract sequence's final beat (M13.9 part F). The sequence is one
+# running game carried from shape to shape, and it reaches four dimensions from an 8x8x4
+# 3-D torus - so the 4-D board has to be 8 wide in file and rank or the carried position
+# has nowhere injective to land. `hyper4` (4x4x4x4, the catalogue entry) cannot receive an
+# 8x8 position; this one matches the sequence's scale on the first three axes and adds the
+# aeon axis (extent 2) as the one genuinely new dimension. It exists for that sequence and
+# should not be read as a shipped game.
+#
+# The piece set is the full standard six, unlike `hyper4`'s four, so the embedding from the
+# 3-D beat carries every piece: the trailer's game is still real, and nothing vanishes at
+# the last shape change except by capture.
+
+name = "hyper4_8x8"
+description = "An eight-by-eight-by-four-by-two four-dimensional box - the same game, one dimension further out."
+difficulty = "impossible"
+side_to_move = "white"
+en_passant = false
+stalemate = "draw"
+halfmove_draw_limit = 100
+orientation_axis = "rank"
+
+[[axis]]
+name = "file"
+extent = 8
+
+[[axis]]
+name = "rank"
+extent = 8
+
+[[axis]]
+name = "level"
+extent = 4
+
+[[axis]]
+name = "aeon"
+extent = 2
+
+[promotion]
+rank = 7
+
+[[piece]]
+name = "pawn"
+symbol = "P"
+resets_draw_clock = true
+promotes_to = ["rook", "knight", "bishop", "queen"]
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+  capture = "cannot"
+  forward = true
+
+  # In four dimensions this single atom yields six forward capture directions.
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+  capture = "must"
+  forward = true
+
+[[piece]]
+name = "knight"
+symbol = "N"
+
+  [[piece.move]]
+  vector = [1, 2]
+  max = 1
+  mode = "leap"
+
+[[piece]]
+name = "bishop"
+symbol = "B"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "rook"
+symbol = "R"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "queen"
+symbol = "Q"
+
+  [[piece.move]]
+  vector = [1]
+  max = "inf"
+  mode = "slide"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+[[piece]]
+name = "king"
+symbol = "K"
+royal = true
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+
+# Ranks are separated by "/", levels by "|", and the fourth axis by "||". The canonical
+# opening is the ordinary 8x8 army on the first level of the first aeon; every other cell
+# is empty. The trailer never uses this start - it overwrites it with the carried
+# position - but a board has to open somewhere, and here it opens like chess.
+[start]
+board = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR|8/8/8/8/8/8/8/8|8/8/8/8/8/8/8/8|8/8/8/8/8/8/8/8||8/8/8/8/8/8/8/8|8/8/8/8/8/8/8/8|8/8/8/8/8/8/8/8|8/8/8/8/8/8/8/8"

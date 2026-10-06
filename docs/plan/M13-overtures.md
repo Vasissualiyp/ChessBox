@@ -679,3 +679,96 @@ per-cut re-frame" is explicitly not this task - that is being built separately. 
 building and verifying part E before part F; they are independent and E is far smaller.
 `hyper4_8x8.toml` is exactly as trailer-scoped as `torus3d_8x8.toml` - same disclaiming
 comment, not added to any curated list, not a catalogue variant.
+
+### Status: M13.9 revision - part E built; part F blocked on topology legality (2026-10-05, opencode)
+
+**Part E (button + static camera) is built and green.** It is the small diff the spec
+described.
+
+- The per-frame auto-start on `Screen::MainMenu` is gone. The sequence now starts only
+  from a new main-menu row, **"Watch trailer"** (ordinal 03, immediately after "Watch a
+  game"). The row raises a new `render::UiRequest::startAttract`, handled in `main.cpp`
+  exactly like the bundled-watch request (`applyAttractLook` -> options -> `frameBoard` ->
+  `wasSurface`), so the camera/renderer plumbing lives where it already did. Every later
+  row (Continue 4, Multiplayer 5, Tutorial 6, Editor 7, Settings 8, Quit 9) is renumbered.
+- The exit matches the watched-game precedent: while `shell.attracting()`, a bottom-left
+  **STOP TRAILER** overlay plus the caption "Esc leaves the trailer" is drawn (only then -
+  the ordinary menu has neither), wired to `Shell::stopAttract()`. Esc checks `attracting()`
+  **first**: a running attract also sets `watching()`, so without that check Esc would stop
+  the inner watch and leave the sequence running.
+- `applyAttractLook` now sets `cameraMode = "off"` / `followStrength = 0.0f` instead of the
+  inherited `"route"`/`1.0f`. The per-cut `frameBoard` is kept, exactly as specified.
+- One judgement call the verification forced: the `--screen menu --t S` review path was
+  gated on an explicit `--t` (new `overtureTGiven`), so a plain `--shot --screen menu` is
+  now the ordinary quintic menu rather than the trailer at its default 0.78 s. `--t 0`
+  still starts the trailer from the top. Without this the acceptance's "the ordinary main
+  menu is the quintic field" could not be shown.
+
+Tests after Part E: `tools/test.sh --build render` 138 cases, `--build app` 73 (before
+part F's additions), `[attract]` 4, `[variants]` 5, `[arch]` 9, `io game rules variant`
+43, and `ctest -R gui-(menu|pause)` 2/2 all green. Capture review: `--shot --screen menu`
+shows the quintic field with rows 01-09 and no stop control; `--t 0` / `2.0` / `4.0` show
+the board behind the menu with the STOP TRAILER control and a static (not piece-chasing)
+camera.
+
+**Part F (the continuous game) was attempted and stopped partway.** What is built and
+left as scaffolding:
+
+- `app::embedOnto(from, fromVariant, toVariant)` (`src/app/embed.{hpp,cpp}`): a pure
+  helper that carries every piece across a variant switch, **matching axes by name** and
+  fixing every axis only the target declares at 0. Unit-tested (`tests/unit/app/test_embed.cpp`):
+  identity across two same-shape variants, and new-axis-is-0 (with the rest of the new
+  axis empty) for the higher-dimensional case.
+- `variants/hyper4_8x8.toml`: 8x8x4x2, aeon=2 (512 cells), trailer-scoped. It loads,
+  has 86 legal opening moves, and renders headlessly in 0.36 s, so the size concern the
+  spec raised is not a problem. It declares the full standard six piece kinds so the
+  embedding is lossless.
+
+The reworked `startAttractStep` (capture the live position before `startGame`, overwrite
+`GameFile::startFen` with the embedded FEN) was written and proven mechanically in a
+throwaway generator, then reverted. It cannot be activated: **the spec's central
+assumption - "still real and still provably legal at every step" - is false once the
+topology changes.**
+
+- **Piece tables are per-variant, not global.** `PieceTypeId` is declaration order
+  (`src/io/variant_toml.cpp`), so a raw id copy is wrong across variants. Matching by name
+  fixes that, but `klein`/`mobius`/`torus3d_8x8` declare **no pawn** and `hyper4` declares
+  **no bishop or queen**. Authoring `hyper4_8x8` with all six makes the last embedding
+  lossless, but the pawns still have nowhere to go at the Klein cut (the spec's "embedding
+  must never drop one" cannot hold). Making `klein` declare pawns would change a catalogue
+  variant's identity and its documented "no forward direction" design.
+- **Topology changes reject the running position outright.** Setting the ordinary standard
+  army on `torus` gives **0 legal moves** (`chessbox "load torus" "fen
+  rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1" moves` -> 0; `torus`'s own,
+  designed opening has 54). The pawnless army on `klein` also has 0, and `klein` cannot
+  even parse a pawn FEN. A torus with the black queen removed still has only 1 legal move.
+  This is the rank-wrap contact the variants' own openings are authored to avoid (the
+  AGENTS gotcha "the usual one starts in check on a torus"), and it is intrinsic: carrying
+  the game onto the glued 2-D boards produces a dead position, not a legal continuation.
+- **The tesseract is keyed on the name `hyper4`** (`render/overture_scene.cpp`,
+  `playShapeAt`, M17.12). `hyper4_8x8` therefore fails `render::hasPlaySurface`, so as a
+  play shape it falls back to the ordinary 4-D lattice (confirmed by capture). Restoring
+  the scaffold would mean touching M17.12, which this task excludes, and the branch's
+  `axis - 2` centring is the 4-wide case and would need extent-normalising anyway.
+
+**Why stopped, not routed around.** Full continuity with the shipped catalogue needs one
+of three things, each larger than this task: (a) long cooperative lines that trade all
+sixteen pawns away before the Klein cut *and* clear every wrap check before the torus cut
+- a milestone-sized authoring job, not the "next few moves" the spec describes; (b) a
+fallback to the target's canonical start whenever the embedded position is dead, which
+directly contradicts the acceptance ("no beat's board reverts to a fresh opening array")
+and would show exactly a reset at the torus and Klein cuts; or (c) editing the catalogue
+variants' piece sets / touching M17.12. Per the task, this was stopped partway with the
+reason recorded rather than shipping a sequence that contradicts its own acceptance.
+
+**State left.** `embedOnto` and its tests and `variants/hyper4_8x8.toml` are in place,
+building and green; `embedOnto` has no production caller yet, deliberately - the driver
+that would use it is the part that cannot run. `Shell::startAttractStep` and
+`defaultAttractSequence` are untouched, so the trailer behaves exactly as M13.9 shipped,
+plus Part E's fixes. `tools/test.sh --build render` (138) and `--build app` (75, the two
+new embed cases included) are green; `[attract]` is 6; `[variants]`, `[arch]`,
+`io game rules variant` and `gui-(menu|pause)` are green. What could **not** be visually
+checked: any piece carry across a cut, because the carry is not active - the sequence is
+still the per-beat canonical-start one, and the captures above show that, unchanged. Like
+`torus3d_8x8`, `hyper4_8x8` is auto-scanned into the New Game library (no curated list),
+so it is player-visible even though nothing uses it yet.

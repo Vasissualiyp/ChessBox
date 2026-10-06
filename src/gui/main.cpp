@@ -391,18 +391,20 @@ void frameBoard(app::Shell& shell) {
                               poseFrom(shell.settings(), session->variant()));
 }
 
-/// Put the renderer in the attract sequence's presentation (M13.9): the shape view with
-/// the route camera, exactly the look the "watch a different game" handler gives a glued
-/// variant. Camera behaviour is inherited unchanged - this states the options the shape
-/// needs and nothing else. It deliberately does not set `geometryFormed`, which the
-/// attract driver eases itself so the first beat can reveal.
+/// Put the renderer in the attract sequence's presentation (M13.9): the shape view, with
+/// no per-frame camera following. The camera choreography is being built separately, so
+/// the trailer must not chase a sliding piece the way the "watch a different game"
+/// handler does; it only re-frames on a cut (`frameBoard`, driven by `advanceAttract`
+/// reporting a new beat), so a newly-revealed shape is actually in view. It deliberately
+/// does not set `geometryFormed`, which the attract driver eases itself so the first beat
+/// can reveal.
 void applyAttractLook(app::Shell& shell) {
   app::Session* session = shell.session();
   if (session == nullptr || !render::hasPlaySurface(session->variant())) return;
   shell.settings().geometryView = true;
-  shell.settings().cameraMode = "route";
-  session->setCameraMode("route");
-  session->setFollowStrength(1.0f);
+  shell.settings().cameraMode = "off";
+  session->setCameraMode("off");
+  session->setFollowStrength(0.0f);
 }
 #endif
 
@@ -440,7 +442,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
                  bool geometry, float evert, float formed, bool flatCapture, float slideU,
                  float slideV, float ghost, const std::string& playFile, float dwell,
                  int fps, float playAt, bool framesGiven, int width, int height,
-                 const std::string& watchName, bool pieceCylinders) {
+                 const std::string& watchName, bool pieceCylinders,
+                 bool attractTimeGiven) {
   // Captures use default settings, never the person's own. A screenshot that changes
   // because whoever ran it likes a larger interface is not a screenshot of the game -
   // and `ctest -R gui-` would then pass or fail by whose machine it ran on.
@@ -557,14 +560,16 @@ int captureFrame(const std::string& variantName, const std::string& path,
 #endif
   }
 
-  // Attract review (M13.9): a main-menu capture shows the sequence at the time `--t`
-  // states - 0 the flat start of the cylinder reveal, larger values the later beats - so
-  // the trailer state is reviewable with the flag the library already uses. The advance
-  // is fixed-step, the same reproducibility contract every other capture keeps. Skipped
-  // when the capture asked for a specific shape/ghost pose or a played game, so those
-  // captures keep their meaning.
+  // Attract review (M13.9): a main-menu capture with an explicit `--t` shows the
+  // sequence at that time - 0 the flat start of the cylinder reveal, larger values the
+  // later beats - so the trailer state is reviewable with the flag the library already
+  // uses. The advance is fixed-step, the same reproducibility contract every other
+  // capture keeps. Without `--t` the menu capture is the ordinary menu, exactly what a
+  // player sees before pressing the trailer button. Skipped when the capture asked for a
+  // specific shape/ghost pose or a played game, so those captures keep their meaning.
 #ifdef CB_HAVE_IMGUI
-  if (screen == "menu" && !geometry && playFile.empty() && watchName.empty()) {
+  if (screen == "menu" && attractTimeGiven && !geometry && playFile.empty() &&
+      watchName.empty()) {
     shell->startAttract(app::defaultAttractSequence());
     constexpr float kStep = 1.0f / 60.0f;
     for (float t = 0.0f; t < overtureT; t += kStep) {
@@ -948,6 +953,7 @@ int main(int argc, char** argv) {
   std::string followMode;
   std::string shapeFollow;
   float overtureT = 0.78f;
+  bool overtureTGiven = false;
   float moveT = -1.0f;
   int previewDims = 2;
   int clipFrames = 96;
@@ -1025,9 +1031,10 @@ int main(int argc, char** argv) {
       script = argv[++i];
     else if (arg == "--screen" && i + 1 < argc)
       screen = argv[++i];
-    else if (arg == "--t" && i + 1 < argc)
+    else if (arg == "--t" && i + 1 < argc) {
       overtureT = std::strtof(argv[++i], nullptr);
-    else if (arg == "--t0" && i + 1 < argc)
+      overtureTGiven = true;
+    } else if (arg == "--t0" && i + 1 < argc)
       clipT0 = std::strtof(argv[++i], nullptr);
     else if (arg == "--t1" && i + 1 < argc)
       clipT1 = std::strtof(argv[++i], nullptr);
@@ -1082,12 +1089,12 @@ int main(int argc, char** argv) {
   }
   const std::string& targetPath = !clipDir.empty() ? clipDir : shotPath;
   if (!targetPath.empty() || benchFrames > 0) {
-    return captureFrame(variantName.empty() ? "standard" : variantName, targetPath,
-                        script, screen, overtureT, previewDims, !clipDir.empty(),
-                        clipFrames, clipT0, clipT1, cinema, followMode, shapeFollow,
-                        moveT, benchFrames, geometry || formedGiven, evert, formed,
-                        flatCapture, slideU, slideV, ghost, playFile, dwell, captureFps,
-                        playAt, framesGiven, width, height, watchName, pieceCylinders);
+    return captureFrame(
+        variantName.empty() ? "standard" : variantName, targetPath, script, screen,
+        overtureT, previewDims, !clipDir.empty(), clipFrames, clipT0, clipT1, cinema,
+        followMode, shapeFollow, moveT, benchFrames, geometry || formedGiven, evert,
+        formed, flatCapture, slideU, slideV, ghost, playFile, dwell, captureFps, playAt,
+        framesGiven, width, height, watchName, pieceCylinders, overtureTGiven);
   }
 
   auto shell = makeShell();
@@ -1327,8 +1334,12 @@ int main(int argc, char** argv) {
             case SDLK_ESCAPE:
               // Esc is "step back one screen", which from the board means pause. While a
               // bundled game is being watched it is the way out instead: the board is
-              // read-only, so there is no pause to step back to (M12.8).
-              if (shell->watching()) {
+              // read-only, so there is no pause to step back to (M12.8). The attract
+              // sequence runs behind the main menu, where there is no screen to step
+              // back to either, so Esc stops it and leaves the ordinary menu (M13.9).
+              if (shell->attracting()) {
+                shell->stopAttract();
+              } else if (shell->watching()) {
                 shell->stopWatching();
               } else {
                 shell->back();
@@ -1474,20 +1485,13 @@ int main(int argc, char** argv) {
     // stands down rather than advancing the same runner twice (M13.9).
     if (!shell->attracting()) shell->advanceWatching(dt);
 
-    // The main-menu attract sequence (M13.9): started as soon as the app sits on the
-    // menu, driven every frame, and stopped the moment the player navigates away. A cut
-    // to a new shape needs the same options push and camera re-frame the "watch a
-    // different game" handler gives a glued variant, because the shell's own
-    // startGame/startWatching do neither.
+    // The main-menu attract sequence (M13.9): started from the "Watch trailer" button,
+    // never by merely sitting on the menu, and stopped the moment the player navigates
+    // away. A cut to a new shape needs the same options push and camera re-frame the
+    // button's own start does, because the shell's startGame/startWatching do neither.
 #ifdef CB_HAVE_IMGUI
     if (shell->screen() == app::Screen::MainMenu) {
-      if (!shell->attracting()) {
-        shell->startAttract(app::defaultAttractSequence());
-        applyAttractLook(*shell);
-        renderer->setOptions(optionsFor(*shell));
-        frameBoard(*shell);
-        wasSurface = optionsFor(*shell).surface;
-      } else if (shell->advanceAttract(dt)) {
+      if (shell->attracting() && shell->advanceAttract(dt)) {
         applyAttractLook(*shell);
         renderer->setOptions(optionsFor(*shell));
         frameBoard(*shell);
@@ -1550,6 +1554,16 @@ int main(int argc, char** argv) {
         frameBoard(*shell);
         wasSurface = optionsFor(*shell).surface;
       }
+    }
+    if (request.startAttract) {
+      // The trailer button (M13.9 revision): the sequence is fixed, so it starts in
+      // place rather than through a picker. `applyAttractLook` states the shape view and
+      // the no-follow camera; `frameBoard` puts the camera round the first beat's shape.
+      shell->startAttract(app::defaultAttractSequence());
+      applyAttractLook(*shell);
+      renderer->setOptions(optionsFor(*shell));
+      frameBoard(*shell);
+      wasSurface = optionsFor(*shell).surface;
     }
     if (request.settingsChanged) {
       shell->applySettings();

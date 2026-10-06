@@ -48,6 +48,9 @@ struct UiRequest {
   /// Watch the named bundled game (M12.8): the engine plays it and the player watches.
   /// One frame's request, cleared once acted on.
   std::string watchGame;
+  /// Start the main-menu attract trailer (M13.9 revision). One frame's request: the
+  /// sequence is fixed, so there is no picker step the way a bundled "Watch" game has.
+  bool startAttract{false};
 };
 
 /// Whether the camera-projected file/rank coordinate labels are drawn.
