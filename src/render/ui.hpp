@@ -234,7 +234,7 @@ class Ui {
   /// The trailer's camera-authoring rows (M13.9 revision): stepping, keyframes, and the
   /// shape-mode buttons, shown above the trailer's main row while it is paused for edit.
   void buildTrailerEditRows(app::Shell& shell, app::Session& session, UiRequest& request,
-                            ImFont* display, ImFont* small);
+                            ImFont* display, ImFont* small, bool editing);
   UiRequest buildPieceMoves(app::Shell& shell);
   /// The piece designer's three tabs. They share one pane, because they are three jobs
   /// on one piece and moving between them must not feel like leaving the piece behind.

@@ -41,6 +41,10 @@ struct Settings {
   /// Draw the corner legend that names what the cyan seam colours mean (M14.4).
   bool showSeamLegend{true};
   bool showCoordinates{true};
+  /// On a board with more than two spatial axes, flip the square colours on every odd
+  /// layer (the 2nd, 4th, ...), so a layer's colours alternate with its neighbours' like
+  /// a 3-D chequerboard instead of repeating.
+  bool swapLayerColors{false};
   /// How much taller a valuable piece stands. 0 makes every piece the same height.
   float pieceHeightScale{1.0f};
   /// Draw the board flat and straight down, with pieces as lettered tokens. Cheaper to

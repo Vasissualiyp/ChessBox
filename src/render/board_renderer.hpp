@@ -8,6 +8,7 @@
 #include "render/image_io.hpp"
 #include "render/offscreen_target.hpp"
 #include "render/piece_mesh.hpp"
+#include "space/coord.hpp"
 #include "view/camera.hpp"
 #include "view/layout.hpp"
 #include "view/move_anim.hpp"
@@ -16,6 +17,24 @@
 #include "view/theme.hpp"
 
 namespace cb::render {
+
+/// The colour parity of a square: the sum of its coordinates on `drawnAxes` (even =
+/// dark). With `swapLayers`, every axis beyond the first two that is not already one of
+/// the drawn axes also counts, so the second, fourth ... layer of a 3-D board is the
+/// colour opposite to the layer below it instead of a copy of it.
+[[nodiscard]] inline int squareParity(const Coord& c, const std::uint8_t* drawnAxes,
+                                      std::size_t drawnCount, bool swapLayers) noexcept {
+  int parity = 0;
+  for (std::size_t i = 0; i < drawnCount; ++i) parity += c.c[drawnAxes[i]];
+  if (swapLayers) {
+    for (std::uint8_t a = 2; a < c.n; ++a) {
+      bool drawn = false;
+      for (std::size_t i = 0; i < drawnCount; ++i) drawn = drawn || drawnAxes[i] == a;
+      if (!drawn) parity += c.c[a];
+    }
+  }
+  return parity;
+}
 
 /// One instanced box or piece.
 struct Instance {
@@ -53,6 +72,9 @@ struct BoardRect {
 struct BoardOptions {
   bool showLegalMoves{true};
   bool showLastMove{true};
+  /// Flip square colours on every second layer of a board with 3+ axes
+  /// (`Settings::swapLayerColors`).
+  bool swapLayerColors{false};
   bool showCheck{true};
   bool showSeams{true};
   /// 1 keeps the height a piece's value implies; 0 makes every piece the same height.

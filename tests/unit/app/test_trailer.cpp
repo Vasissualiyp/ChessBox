@@ -211,3 +211,27 @@ TEST_CASE("the standard opener is short and the whole chain is one continuous ga
     CHECK(seq[i].moves.size() <= 10);
   }
 }
+
+TEST_CASE("the layer colour swap is a persisted setting, off by default",
+          "[unit][app][trailer]") {
+  const auto path = tempSettings("layer-swap.conf");
+  Settings s;
+  CHECK_FALSE(s.swapLayerColors);
+  s.swapLayerColors = true;
+  REQUIRE(s.save(path).has_value());
+  CHECK(Settings::load(path).swapLayerColors);
+}
+
+TEST_CASE("trailer look overrides survive the beat cut and clear on stop",
+          "[unit][app][trailer]") {
+  auto shell = makeShell("trailer-override.conf");
+  shell->startAttract(defaultAttractSequence());
+  shell->setTrailerFlatPieces(true);
+  shell->setTrailerGhost(0.5f);
+  run(*shell, 400.0f);  // across several cuts
+  CHECK(shell->settings().shapePieceCylinders);
+  CHECK(shell->settings().geometryGhost < 0.99f);
+  shell->stopAttract();
+  CHECK_FALSE(shell->settings().shapePieceCylinders);
+  CHECK(shell->settings().geometryGhost == 1.0f);
+}

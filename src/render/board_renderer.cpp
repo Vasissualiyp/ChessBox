@@ -682,8 +682,10 @@ InstanceSet BoardRenderer::buildInstances(
     // The square's colour comes from its lattice parity, exactly as on the flat board.
     const auto fillFor = [&](CellId cell) {
       const Coord co = v.dims.toCoord(cell);
-      view::Rgba fill =
-          ((co.c[0] + co.c[1]) % 2 == 0) ? theme_.boardDark : theme_.boardLight;
+      constexpr std::uint8_t kPlane[2] = {0, 1};
+      view::Rgba fill = (squareParity(co, kPlane, 2, options_.swapLayerColors) % 2 == 0)
+                            ? theme_.boardDark
+                            : theme_.boardLight;
       if (cell == p.selected()) return theme_.ember;
       if (options_.showLegalMoves && isHighlighted(cell)) {
         return p.at(cell).empty() ? mix(fill, theme_.moss, 0.72f)
@@ -1128,8 +1130,10 @@ InstanceSet BoardRenderer::buildInstances(
     // Square colour comes from the drawn spatial axes only: a sub-board on another turn
     // or timeline is still a chessboard, and its light and dark squares must not swap as
     // the turn axis advances.
-    int parity = 0;
-    for (std::uint8_t a : cfg.screenAxes) parity += c.c[a];
+    std::uint8_t drawn[3] = {};
+    std::size_t drawnCount = 0;
+    for (std::uint8_t a : cfg.screenAxes) drawn[drawnCount++] = a;
+    const int parity = squareParity(c, drawn, drawnCount, options_.swapLayerColors);
 
     Instance cell{};
     cell.center[0] = pl.x;

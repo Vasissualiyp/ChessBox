@@ -205,6 +205,7 @@ render::BoardOptions optionsFrom(const app::Settings& s) {
   render::BoardOptions o;
   o.showLegalMoves = s.showLegalMoves;
   o.showLastMove = s.showLastMove;
+  o.swapLayerColors = s.swapLayerColors;
   o.showCheck = s.showCheck;
   o.showSeams = s.showSeams;
   o.pieceHeightScale = s.pieceHeightScale;

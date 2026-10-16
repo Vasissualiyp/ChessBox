@@ -315,10 +315,14 @@ Mat4 OrbitCamera::viewProj(float aspect) const {
   // Z is the board's "up" for 3-D boards, and the extra axes lay out in X and Y, so the
   // camera treats Z as up too - looking at a 2-D board then gives the familiar
   // over-the-table view with no special case.
+  // `farZ` was set when the board was framed; a player can zoom out far past it, and the
+  // whole shape would then sit beyond the far plane and vanish. The far plane follows the
+  // eye's distance, never closer than the framed value.
+  const float far = std::max(farZ, distance * 2.0f + 50.0f);
   const Mat4 proj =
       orthographic
-          ? cb::view::orthographic(distance * std::tan(fovY * 0.5f), aspect, nearZ, farZ)
-          : perspective(fovY, aspect, nearZ, farZ);
+          ? cb::view::orthographic(distance * std::tan(fovY * 0.5f), aspect, nearZ, far)
+          : perspective(fovY, aspect, nearZ, far);
   Vec3 f{}, r{}, u{};
   cameraBasis(*this, f, r, u);
   return multiply(proj, lookFrom(eye(), f, r, u));

@@ -71,3 +71,22 @@ TEST_CASE("steady sway leaves target, distance and lens alone", "[unit][view][tr
   CHECK(c.distance == 9.0f);
   CHECK(c.fovY == base.fovY);
 }
+
+TEST_CASE("zooming out never pushes the board past the far plane",
+          "[unit][view][camera]") {
+  // `frame` sets farZ from the framing distance; a player then zooms out well beyond it.
+  // The target must still land inside the depth range [0,1], or the shape vanishes.
+  OrbitCamera cam;
+  cam.farZ = 60.0f;
+  for (float d : {10.0f, 80.0f, 400.0f, 3000.0f}) {
+    cam.distance = d;
+    const Mat4 vp = cam.viewProj(1.6f);
+    const Vec3 t = cam.target;
+    const float z = vp[2] * t.x + vp[6] * t.y + vp[10] * t.z + vp[14];
+    const float w = vp[3] * t.x + vp[7] * t.y + vp[11] * t.z + vp[15];
+    CAPTURE(d);
+    REQUIRE(w > 0.0f);
+    CHECK(z / w >= 0.0f);
+    CHECK(z / w <= 1.0f);
+  }
+}

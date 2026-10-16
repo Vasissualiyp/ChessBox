@@ -1194,7 +1194,8 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
 }
 
 void Ui::buildTrailerEditRows(app::Shell& shell, app::Session& session,
-                              UiRequest& request, ImFont* display, ImFont* small) {
+                              UiRequest& request, ImFont* display, ImFont* small,
+                              bool editing) {
   const view::Theme& t = theme_;
   auto note = [&](const char* text) {
     ImGui::SameLine();
@@ -1206,78 +1207,87 @@ void Ui::buildTrailerEditRows(app::Shell& shell, app::Session& session,
   };
   char text[128];
 
-  // Row 1 - where in the trailer the camera is being set up.
-  if (button("< PLY", t, px(78), false, true, true, display)) (void)shell.trailerStep(-1);
-  ImGui::SameLine();
-  if (button("PLY >", t, px(78), false, true, true, display)) (void)shell.trailerStep(+1);
-  ImGui::SameLine();
-  if (button("< BEAT", t, px(92), false, true, true, display)) shell.trailerJumpBeat(-1);
-  ImGui::SameLine();
-  if (button("BEAT >", t, px(92), false, true, true, display)) shell.trailerJumpBeat(+1);
-  std::snprintf(text, sizeof(text), "beat %zu of %zu  -  %s  -  move %zu",
-                shell.attractStep() + 1, shell.attractCount(),
-                shell.currentVariant().c_str(), session.game().moveHistory().size());
-  note(text);
+  if (editing) {
+    // Row 1 - where in the trailer the camera is being set up.
+    if (button("< PLY", t, px(78), false, true, true, display))
+      (void)shell.trailerStep(-1);
+    ImGui::SameLine();
+    if (button("PLY >", t, px(78), false, true, true, display))
+      (void)shell.trailerStep(+1);
+    ImGui::SameLine();
+    if (button("< BEAT", t, px(92), false, true, true, display))
+      shell.trailerJumpBeat(-1);
+    ImGui::SameLine();
+    if (button("BEAT >", t, px(92), false, true, true, display))
+      shell.trailerJumpBeat(+1);
+    std::snprintf(text, sizeof(text), "beat %zu of %zu  -  %s  -  move %zu",
+                  shell.attractStep() + 1, shell.attractCount(),
+                  shell.currentVariant().c_str(), session.game().moveHistory().size());
+    note(text);
 
-  // Row 2 - keyframes. A keyframe is the view exactly as it stands, pinned to this move.
-  const app::CameraCue here{shell.currentVariant(), session.game().moveHistory().size(),
-                            shell.attractStep() + 1};
-  const app::CameraKeyframe* key = shell.cameraTrack().find(here);
-  if (button("REC KEY", t, px(100), key != nullptr, true, true, display)) {
-    shell.recordCameraKeyframe(shell.trailerKeySpeed());
+    // Row 2 - keyframes. A keyframe is the view exactly as it stands, pinned to this
+    // move.
+    const app::CameraCue here{shell.currentVariant(), session.game().moveHistory().size(),
+                              shell.attractStep() + 1};
+    const app::CameraKeyframe* key = shell.cameraTrack().find(here);
+    if (button("REC KEY", t, px(100), key != nullptr, true, true, display)) {
+      shell.recordCameraKeyframe(shell.trailerKeySpeed());
+    }
+    ImGui::SameLine();
+    if (button("DEL KEY", t, px(100), false, true, key != nullptr, display)) {
+      (void)shell.eraseCameraKeyframe();
+    }
+    ImGui::SameLine();
+    if (button("SLOWER", t, px(92), false, true, true, display)) {
+      shell.setTrailerKeySpeed(shell.trailerKeySpeed() * 0.7f);
+    }
+    ImGui::SameLine();
+    if (button("FASTER", t, px(92), false, true, true, display)) {
+      shell.setTrailerKeySpeed(shell.trailerKeySpeed() / 0.7f);
+    }
+    std::snprintf(text, sizeof(text), "ease speed %.2f  -  %zu keys%s",
+                  static_cast<double>(shell.trailerKeySpeed()),
+                  shell.cameraTrack().keyframes().size(),
+                  key != nullptr ? "  -  key on this move" : "");
+    note(text);
   }
-  ImGui::SameLine();
-  if (button("DEL KEY", t, px(100), false, true, key != nullptr, display)) {
-    (void)shell.eraseCameraKeyframe();
-  }
-  ImGui::SameLine();
-  if (button("SLOWER", t, px(92), false, true, true, display)) {
-    shell.setTrailerKeySpeed(shell.trailerKeySpeed() * 0.7f);
-  }
-  ImGui::SameLine();
-  if (button("FASTER", t, px(92), false, true, true, display)) {
-    shell.setTrailerKeySpeed(shell.trailerKeySpeed() / 0.7f);
-  }
-  std::snprintf(text, sizeof(text), "ease speed %.2f  -  %zu keys%s",
-                static_cast<double>(shell.trailerKeySpeed()),
-                shell.cameraTrack().keyframes().size(),
-                key != nullptr ? "  -  key on this move" : "");
-  note(text);
 
   // Row 3 - the same shape-mode controls the game screen offers. The pose is what a
   // keyframe records; a button here sets the edit pose and the trailer eases to it.
   if (hasPlaySurface(session.variant())) {
     app::TrailerPose& pose = shell.editPose();
     const bool formed = pose.formed > 0.5f;
-    if (button("SHAPE", t, px(84), formed, true, true, display)) {
-      pose.formed = formed ? 0.0f : 1.0f;
+    if (editing) {
+      if (button("SHAPE", t, px(84), formed, true, true, display)) {
+        pose.formed = formed ? 0.0f : 1.0f;
+      }
+      ImGui::SameLine();
     }
-    ImGui::SameLine();
     const bool inverted = shell.settings().geometryInvert;
     if (button("INVERT", t, px(92), inverted, true, true, display)) {
       shell.settings().geometryInvert = !inverted;
       request.settingsChanged = true;
     }
     ImGui::SameLine();
-    const bool ghost = pose.ghost < 0.99f;
+    const bool ghost = (editing ? pose.ghost : shell.settings().geometryGhost) < 0.99f;
     if (button("GHOST", t, px(84), ghost, true, true, display)) {
-      pose.ghost = ghost ? 1.0f : 0.35f;
+      shell.setTrailerGhost(ghost ? 1.0f : 0.35f);
     }
     ImGui::SameLine();
     const bool flat = shell.settings().shapePieceCylinders;
     if (button("PIECES", t, px(100), flat, true, true, display)) {
-      shell.settings().shapePieceCylinders = !flat;
+      shell.setTrailerFlatPieces(!flat);
       request.settingsChanged = true;
     }
-    if (session.variant().dims.dims() > 2) {
+    if (editing && session.variant().dims.dims() > 2) {
       ImGui::SameLine();
       const bool spread = pose.shellSpread > 0.5f;
       if (button("SPREAD", t, px(92), spread, true, true, display)) {
         pose.shellSpread = spread ? 0.0f : 1.0f;
       }
     }
-    note("drag to orbit, middle-drag to slide, then REC KEY");
-  } else {
+    if (editing) note("drag to orbit, middle-drag to slide, then REC KEY");
+  } else if (editing) {
     note("drag to orbit, then REC KEY");
   }
 }
@@ -1560,10 +1570,9 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     // revision, Part G). Stopping the inner watch would leave the whole sequence running,
     // so this is the trailer's own way out; Esc does the same.
     const bool editing = shell.trailerEditing();
-    if (editing) {
-      // The authoring row sits above the main row, so the main row never moves.
-      buildTrailerEditRows(shell, session, request, display, small);
-    }
+    // The shape buttons are offered while it plays too; the stepping and keyframe rows
+    // only while editing. They sit above the main row, so the main row never moves.
+    buildTrailerEditRows(shell, session, request, display, small, editing);
     if (button("STOP TRAILER", t, px(180), false, true, true, display)) {
       shell.stopAttract();
     }

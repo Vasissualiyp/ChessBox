@@ -1086,6 +1086,8 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::Checkbox("Name the seam colours", &s.showSeamLegend);
   ImGui::EndDisabled();
   ImGui::Checkbox("Show coordinates", &s.showCoordinates);
+  ImGui::Checkbox("Alternate square colours on every other layer (3-D boards)",
+                  &s.swapLayerColors);
   ImGui::SliderFloat("Piece height", &s.pieceHeightScale, 0.0f, 2.0f, "%.2f");
   ImGui::PushFont(small);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
@@ -1273,7 +1275,8 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       before.showLegalMoves != s.showLegalMoves ||
       before.showLastMove != s.showLastMove || before.showCheck != s.showCheck ||
       before.showSeams != s.showSeams || before.showSeamLegend != s.showSeamLegend ||
-      before.showCoordinates != s.showCoordinates || before.kleinTwist != s.kleinTwist ||
+      before.showCoordinates != s.showCoordinates ||
+      before.swapLayerColors != s.swapLayerColors || before.kleinTwist != s.kleinTwist ||
       before.pieceHeightScale != s.pieceHeightScale || before.flatView != s.flatView ||
       before.pieceIcons != s.pieceIcons || before.animateMoves != s.animateMoves ||
       before.theme != s.theme || before.animationSpeed != s.animationSpeed ||

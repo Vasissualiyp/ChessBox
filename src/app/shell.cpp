@@ -579,7 +579,7 @@ Result<void> Shell::startAttractStep(std::size_t index) {
   if (step.spreadFrom >= 0.0f) settings_.geometryShellSpread = step.spreadFrom;
   // The piece style is a discrete per-beat choice, so it snaps at the cut rather than
   // easing like the pose (M13.9 revision, Part H).
-  settings_.shapePieceCylinders = step.flatPieces;
+  settings_.shapePieceCylinders = trailerFlatPieces_.value_or(step.flatPieces);
   // `startGame` landed us on the ordinary game screen; a trailer beat is a real watch
   // run, so it stays there rather than compositing behind the menu (M13.9 revision, Part
   // G).
@@ -687,6 +687,8 @@ void Shell::stopAttract() {
   trailerClock_ = 0.0f;
   swayWeight_ = 1.0f;
   authoredPose_.reset();
+  trailerGhost_.reset();
+  trailerFlatPieces_.reset();
   if (session_ != nullptr) session_->stopWatching();
   // The Klein and 3-D beats ghost the board; restore the opaque default so whatever the
   // player does next does not inherit the trailer's pose. The flat icon pucks snap on for
@@ -732,7 +734,8 @@ bool Shell::advanceAttract(float dt) {
   const TrailerPose want =
       (trailerCamera_ == TrailerCamera::Authored && authoredPose_.has_value())
           ? *authoredPose_
-          : TrailerPose{step.formedTarget, step.ghostTarget, step.spreadTarget};
+          : TrailerPose{step.formedTarget, trailerGhost_.value_or(step.ghostTarget),
+                        step.spreadTarget};
   settings_.geometryFormed = view::advanceFormMorph(settings_.geometryFormed, want.formed,
                                                     dt, settings_.geometryFormSpeed);
   settings_.geometryGhost = view::advanceFormMorph(settings_.geometryGhost, want.ghost,

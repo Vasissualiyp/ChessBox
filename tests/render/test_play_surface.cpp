@@ -21,6 +21,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "render/board_renderer.hpp"
 
 #include "position/position.hpp"
 #include "render/overture_scene.hpp"
@@ -2916,3 +2917,26 @@ TEST_CASE("the morph speed scales the flat/shape roll, and 1.0 is the shipped pa
 }
 
 #endif  // CB_HAVE_IMGUI
+
+TEST_CASE("swapping layer colours flips every second layer and nothing else",
+          "[render][layers]") {
+  using cb::Coord;
+  const std::uint8_t plane[2] = {0, 1};
+  for (int z = 0; z < 4; ++z) {
+    const Coord c = Coord::of({2, 3, z});
+    const int plain = cb::render::squareParity(c, plane, 2, false);
+    const int swapped = cb::render::squareParity(c, plane, 2, true);
+    CAPTURE(z);
+    CHECK((plain % 2 + 2) % 2 == 1);                  // layer-independent without it
+    CHECK(((swapped - plain) % 2 + 2) % 2 == z % 2);  // odd z (2nd, 4th layer) flips
+  }
+  // A 2-D board is untouched.
+  const Coord flat = Coord::of({2, 3});
+  CHECK(cb::render::squareParity(flat, plane, 2, true) ==
+        cb::render::squareParity(flat, plane, 2, false));
+  // An axis the view already draws is not counted twice.
+  const std::uint8_t cube[3] = {0, 1, 2};
+  const Coord c = Coord::of({1, 1, 1});
+  CHECK(cb::render::squareParity(c, cube, 3, true) ==
+        cb::render::squareParity(c, cube, 3, false));
+}

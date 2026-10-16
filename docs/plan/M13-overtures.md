@@ -1550,3 +1550,13 @@ continues through `embedOnto`. Not verified by me: the live window (only `--shot
 were looked at); and the render suite's Vulkan offscreen tests were flaky with
 `VK_ERROR_DEVICE_LOST` in this environment, independent of these changes. Open: keyframes
 only ease on reaching a move (no mid-move timeline), and there is no in-app keyframe list.
+
+### Revision: trailer look buttons while playing, layer colour swap, far-plane fix (2026-10-16)
+
+INVERT / GHOST / PIECES are now shown while the trailer *plays*, not only in edit mode
+(`Shell::setTrailerGhost`/`setTrailerFlatPieces` hold across beat cuts until the trailer
+stops). `Settings::swapLayerColors` (settings screen, off by default) flips square colour on
+every odd layer of a board with 3+ axes via `render::squareParity`, in both the surface and
+lattice paths. `OrbitCamera::viewProj` now floors the far plane at `2 * distance + 50`: the
+framed `farZ` was fixed at framing time, so zooming out past it put the whole shape beyond
+the far plane and it vanished.

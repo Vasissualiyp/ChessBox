@@ -254,6 +254,17 @@ class Shell {
   [[nodiscard]] bool trailerEditing() const noexcept { return trailerEditing_; }
   void setTrailerEditing(bool on);
   /// The pose the edit-mode buttons are driving.
+  /// Viewer overrides of a beat's own look, for the buttons shown while the trailer plays
+  /// (INVERT is `Settings::geometryInvert` and needs none). They hold across every beat
+  /// until the trailer stops. A keyframe's pose still wins in the authored camera.
+  void setTrailerGhost(float ghost) noexcept {
+    trailerGhost_ = ghost;
+    editPose_.ghost = ghost;
+  }
+  void setTrailerFlatPieces(bool flat) noexcept {
+    trailerFlatPieces_ = flat;
+    settings_.shapePieceCylinders = flat;
+  }
   [[nodiscard]] TrailerPose& editPose() noexcept { return editPose_; }
   [[nodiscard]] const TrailerPose& editPose() const noexcept { return editPose_; }
   /// The easing speed a newly recorded keyframe gets.
@@ -412,6 +423,8 @@ class Shell {
   float swayWeight_{1.0f};
   float trailerKeySpeed_{2.0f};
   TrailerPose editPose_;
+  std::optional<float> trailerGhost_;
+  std::optional<bool> trailerFlatPieces_;
   /// The pose the last keyframe reached in this beat asked for; replaces the beat's own
   /// targets in `Authored` mode so the driver does not ease it back.
   std::optional<TrailerPose> authoredPose_;
