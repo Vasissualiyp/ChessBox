@@ -229,3 +229,52 @@ TEST_CASE("a cue with no keyframe leaves the camera alone", "[unit][app]") {
   shell->advanceCameraTrack(1.0f);
   CHECK(shell->session()->camera().yaw == before.yaw);
 }
+
+TEST_CASE("a trailer cue carries its beat and the invert pose through the text form",
+          "[unit][app][trailer]") {
+  CameraTrack track;
+  // Klein plays twice in the trailer, so (variant, ply) alone would collide.
+  CameraKeyframe a = sample("klein", 0);
+  a.cue.beat = 4;
+  a.invert = true;
+  CameraKeyframe b = sample("klein", 0);
+  b.cue.beat = 5;
+  CameraKeyframe plain = sample("klein", 0);  // beat 0: an ordinary game
+  track.set(a);
+  track.set(b);
+  track.set(plain);
+  REQUIRE(track.keyframes().size() == 3);
+
+  const auto parsed = parseCameraTrack(cameraTrackText(track));
+  REQUIRE(parsed.has_value());
+  REQUIRE(parsed->keyframes().size() == 3);
+  const CameraKeyframe* ka = parsed->find({"klein", 0, 4});
+  const CameraKeyframe* kb = parsed->find({"klein", 0, 5});
+  const CameraKeyframe* kp = parsed->find({"klein", 0, 0});
+  REQUIRE(ka != nullptr);
+  REQUIRE(kb != nullptr);
+  REQUIRE(kp != nullptr);
+  CHECK(ka->invert);
+  CHECK_FALSE(kb->invert);
+}
+
+TEST_CASE("a legacy keyframe line with no beat or invert still parses as beat 0",
+          "[unit][app][trailer]") {
+  const auto parsed = parseCameraTrack(
+      "keyframe variant=torus ply=3 target=0,0,0 distance=9 yaw=0.5 pitch=0.6 roll=0 "
+      "fov=0.9 formed=1 ghost=1 shellSpread=1 slideU=0 slideV=0 flatPieces=0 speed=2\n");
+  REQUIRE(parsed.has_value());
+  const CameraKeyframe* kf = parsed->find({"torus", 3, 0});
+  REQUIRE(kf != nullptr);
+  CHECK_FALSE(kf->invert);
+}
+
+TEST_CASE("the beat is written only when it is not zero", "[unit][app][trailer]") {
+  CameraTrack track;
+  track.set(sample("torus", 1));
+  CHECK(cameraTrackText(track).find("beat=") == std::string::npos);
+  CameraKeyframe k = sample("torus", 2);
+  k.cue.beat = 2;
+  track.set(k);
+  CHECK(cameraTrackText(track).find("beat=2") != std::string::npos);
+}

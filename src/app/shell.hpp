@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
@@ -13,6 +14,7 @@
 #include "app/overture.hpp"
 #include "app/session.hpp"
 #include "app/settings.hpp"
+#include "view/trailer_camera.hpp"
 
 namespace cb::app {
 
@@ -82,6 +84,9 @@ struct AttractStep {
   /// this one needs (Klein and the 3-D torus field no bishop or queen at their own start
   /// for exactly this reason - see `defaultAttractSequence`'s own comment).
   bool continuesPosition{false};
+  /// Seconds each move is held once it has landed; negative (the default) means the
+  /// player's `Settings::watchDwell`. The long opener plays briskly (M13.9 revision).
+  float dwell{-1.0f};
 };
 using AttractSequence = std::vector<AttractStep>;
 
@@ -96,6 +101,19 @@ using AttractSequence = std::vector<AttractStep>;
 /// over the beat (`shellSpread`). Only the very first beat (`standard`) has nothing to
 /// morph from.
 [[nodiscard]] AttractSequence defaultAttractSequence();
+
+/// How the trailer's camera behaves (M13.9 revision). `Auto` is the calm default: no
+/// following, a barely perceptible sway. `Follow` is the old chase behind the moving
+/// piece. `Authored` holds still except where a recorded keyframe eases it.
+enum class TrailerCamera : std::uint8_t { Auto, Follow, Authored };
+
+/// The pose scalars the trailer's edit mode owns while the trailer is paused: where the
+/// SHAPE / GHOST / SPREAD buttons put them, and what a keyframe then records.
+struct TrailerPose {
+  float formed{1.0f};
+  float ghost{1.0f};
+  float shellSpread{1.0f};
+};
 
 /// The curated first-run path, standard first, exotic last. A front door, not a gate -
 /// the full library stays available.
@@ -221,10 +239,36 @@ class Shell {
   [[nodiscard]] bool attracting() const noexcept { return !attract_.empty(); }
   /// Which beat of the sequence is playing, for a status line or a test.
   [[nodiscard]] std::size_t attractStep() const noexcept { return attractIndex_; }
+  [[nodiscard]] std::size_t attractCount() const noexcept { return attract_.size(); }
   /// Drive one interactive frame of the attract sequence. Returns true when this tick
   /// started a new beat - the first step, or a cut to the next variant - so the front end
   /// can push renderer options and re-frame the camera for the shape now loaded.
   bool advanceAttract(float dt);
+
+  // ---- the trailer's own camera (M13.9 revision) -----------------------------------
+  /// The camera mode. Applied to each beat's session; never written to `Settings`.
+  [[nodiscard]] TrailerCamera trailerCamera() const noexcept { return trailerCamera_; }
+  void setTrailerCamera(TrailerCamera mode);
+  /// Edit mode: the trailer's clock stops, the camera becomes `Authored`, and the
+  /// stepping / pose controls apply. Leaving it resumes play where it stood.
+  [[nodiscard]] bool trailerEditing() const noexcept { return trailerEditing_; }
+  void setTrailerEditing(bool on);
+  /// The pose the edit-mode buttons are driving.
+  [[nodiscard]] TrailerPose& editPose() noexcept { return editPose_; }
+  [[nodiscard]] const TrailerPose& editPose() const noexcept { return editPose_; }
+  /// The easing speed a newly recorded keyframe gets.
+  [[nodiscard]] float trailerKeySpeed() const noexcept { return trailerKeySpeed_; }
+  void setTrailerKeySpeed(float s) noexcept;
+  /// `base` with the trailer's resting sway applied (a pure function of the trailer
+  /// clock); `base` unchanged outside the trailer or when the sway has faded out.
+  [[nodiscard]] view::OrbitCamera trailerView(const view::OrbitCamera& base) const;
+  /// Edit mode only: move one ply within the beat (animated forwards, a jump back).
+  /// False when not editing or already at that end.
+  bool trailerStep(int delta);
+  /// Edit mode only: replay the chain from the first beat to `beat`, `ply` moves in.
+  void trailerGoto(std::size_t beat, std::size_t ply);
+  /// Edit mode only: jump `delta` beats (wrapping), landing at the start of that beat.
+  void trailerJumpBeat(int delta);
 
   /// A variant's advertised difficulty, for the library's order and its colours.
   /// Resolved through the loader once and remembered; a name that will not load is
@@ -329,6 +373,8 @@ class Shell {
   /// Start beat `index`: switch to its variant and load its short game into the watch
   /// runner, landing on the game screen. Fails when the variant will not load.
   Result<void> startAttractStep(std::size_t index);
+  /// Put the session's follow policy where `trailerCamera_` says (session only).
+  void applyTrailerCamera();
 
   std::vector<std::string> library_;
   std::filesystem::path settingsPath_;
@@ -358,6 +404,17 @@ class Shell {
   /// The main-menu attract sequence, empty when none is running (M13.9).
   AttractSequence attract_;
   std::size_t attractIndex_{0};
+  TrailerCamera trailerCamera_{TrailerCamera::Auto};
+  bool trailerEditing_{false};
+  /// A beat was entered outside `advanceAttract` (a jump); the next call reports it.
+  bool trailerCutPending_{false};
+  float trailerClock_{0.0f};
+  float swayWeight_{1.0f};
+  float trailerKeySpeed_{2.0f};
+  TrailerPose editPose_;
+  /// The pose the last keyframe reached in this beat asked for; replaces the beat's own
+  /// targets in `Authored` mode so the driver does not ease it back.
+  std::optional<TrailerPose> authoredPose_;
 
   /// Where the current point in the running game is, for the camera track: the session's
   /// variant and its ply count right now.

@@ -19,10 +19,15 @@ namespace cb::app {
 struct CameraCue {
   std::string variant;
   std::size_t ply{0};
+  /// Which beat of the attract trailer this is, counted from 1; 0 for an ordinary game.
+  /// The trailer plays `klein` twice and replays `standard` every lap, so (variant, ply)
+  /// alone is ambiguous inside it - and a keyframe authored for the trailer must not
+  /// fire in a game the player started themselves (M13.9 revision).
+  std::size_t beat{0};
 };
 
 [[nodiscard]] inline bool operator==(const CameraCue& a, const CameraCue& b) noexcept {
-  return a.ply == b.ply && a.variant == b.variant;
+  return a.ply == b.ply && a.beat == b.beat && a.variant == b.variant;
 }
 
 /// One saved camera pose and shape pose, and how fast the view eases into it (M13.9 Part
@@ -48,6 +53,8 @@ struct CameraKeyframe {
   float slideV{0.0f};
   /// `Settings::shapePieceCylinders` - flat icon pucks instead of sculptural pieces.
   bool flatPieces{false};
+  /// `Settings::geometryInvert` - the shape turned inside out (the INVERT button).
+  bool invert{false};
   /// How fast the view eases toward this keyframe once play reaches its cue, in the same
   /// units as `Settings::geometryFormSpeed` (`view::advanceFormMorph`'s own rate - bigger
   /// is quicker). Adjustable per keyframe, per the M13.9 ask: the morph's speed is one of

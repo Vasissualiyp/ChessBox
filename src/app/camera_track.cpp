@@ -16,6 +16,7 @@ std::string_view trim(std::string_view s) {
 
 bool less(const CameraCue& a, const CameraCue& b) noexcept {
   if (a.variant != b.variant) return a.variant < b.variant;
+  if (a.beat != b.beat) return a.beat < b.beat;
   return a.ply < b.ply;
 }
 
@@ -96,14 +97,15 @@ std::string cameraTrackText(const CameraTrack& track) {
   out << "# ChessBox camera track v1\n";
   for (const CameraKeyframe& kf : track.keyframes()) {
     out << "keyframe"
-        << " variant=" << kf.cue.variant << " ply=" << kf.cue.ply
-        << " target=" << vec3Text(kf.camera.target) << " distance=" << kf.camera.distance
-        << " yaw=" << kf.camera.yaw << " pitch=" << kf.camera.pitch
-        << " roll=" << kf.camera.roll << " fov=" << kf.camera.fovY
-        << " formed=" << kf.formed << " ghost=" << kf.ghost
+        << " variant=" << kf.cue.variant;
+    if (kf.cue.beat != 0) out << " beat=" << kf.cue.beat;
+    out << " ply=" << kf.cue.ply << " target=" << vec3Text(kf.camera.target)
+        << " distance=" << kf.camera.distance << " yaw=" << kf.camera.yaw
+        << " pitch=" << kf.camera.pitch << " roll=" << kf.camera.roll
+        << " fov=" << kf.camera.fovY << " formed=" << kf.formed << " ghost=" << kf.ghost
         << " shellSpread=" << kf.shellSpread << " slideU=" << kf.slideU
         << " slideV=" << kf.slideV << " flatPieces=" << (kf.flatPieces ? 1 : 0)
-        << " speed=" << kf.morphSpeed << '\n';
+        << " invert=" << (kf.invert ? 1 : 0) << " speed=" << kf.morphSpeed << '\n';
   }
   return out.str();
 }
@@ -148,6 +150,8 @@ Result<CameraTrack> parseCameraTrack(std::string_view text) {
       if (key == "variant") {
         kf.cue.variant = std::string(value);
         sawVariant = !value.empty();
+      } else if (key == "beat") {
+        kf.cue.beat = parseSize(value, ok);
       } else if (key == "ply") {
         kf.cue.ply = parseSize(value, ok);
       } else if (key == "target") {
@@ -174,6 +178,8 @@ Result<CameraTrack> parseCameraTrack(std::string_view text) {
         kf.slideV = parseFloat(value, ok);
       } else if (key == "flatPieces") {
         kf.flatPieces = value == "1";
+      } else if (key == "invert") {
+        kf.invert = value == "1";
       } else if (key == "speed") {
         kf.morphSpeed = parseFloat(value, ok);
       } else {

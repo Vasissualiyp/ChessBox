@@ -1477,3 +1477,76 @@ ones, same as the previous round.
 `--shot --screen menu --t <seconds>`: the second lap's `t≈210` capture shows `STANDARD`,
 ply 1, the full thirty-two-piece army, exactly the fresh canonical start - confirming the
 loop-to-`standard` redesign works end to end, at runtime, not just in the headless test.
+
+### Revision: a calm trailer camera, a shorter opener, and a camera-move mode
+### (2026-10-16, feedback; spec written before the code)
+
+Feedback: the trailer's camera "jitters a lot", turns to sit behind each piece, and
+rotates far more than a trailer wants; the standard-board game runs too long ("by move 20
+people will click off"); the trailer should offer the SHAPE-mode buttons (INVERT ...); and
+the author wants to set the camera up themselves with keyframes, as a separate camera mode.
+
+**Root cause of the swinging camera.** `applyAttractLook` (`src/gui/main.cpp`) returns
+early for a variant with no play surface, so on the flat `standard` beat - the longest
+beat by far - the player's own `cameraMode` (`route`) drove `Session::cameraOver`'s move
+camera: yaw swung behind every piece, with `shotEnvelope` re-easing on each of ~50 plies.
+On shape beats it forced `settings.cameraMode = "off"` instead, which both clobbered the
+player's setting and was invisible to the flat case. The existing tests never saw it
+because they drive a `Shell` with default settings, where the camera mode is already off.
+
+**The fix: the trailer owns its camera policy, per session, never via `Settings`.**
+`Shell::trailerCamera()` is one of `TrailerCamera::{Auto, Follow, Authored}`:
+- `Auto` (default): move-follow is off on *every* beat (flat or shape); the only motion
+  is `view::steadySway`, a pure function of the trailer clock - a slow sinusoidal yaw of
+  at most ~4 degrees and a smaller pitch breathing, no per-frame state, so it cannot
+  jitter, and continuous across a cut because the clock is not reset by one.
+- `Follow`: the old chase (`route`), for whoever wants it.
+- `Authored`: follow off and no sway; the camera holds still except where a keyframe
+  eases it. Recording a keyframe switches to this mode.
+The mode is applied to each beat's new `Session` in `startAttractStep`, so no `Settings`
+field is touched and the player's own mode survives the trailer. `Auto`/`Follow` skip
+`advanceCameraTrack` while attracting; `Authored` runs it.
+
+**Camera edit mode** (`Shell::trailerEditing()`): pauses the trailer's clock (the pose
+scalars stop following the beat's targets and follow `editPose_` instead, which the
+buttons set), selects `Authored`, and enables stepping: `trailerStep(+-1)` plays/rewinds
+one ply inside the beat (`Session::watchSeek`), `trailerGoto(beat, ply)` replays the
+chain from beat 0 so a `continuesPosition` beat is reachable. The cue gains a `beat`
+field (0 outside the trailer, `attractIndex_ + 1` inside it) because `klein` appears
+twice and a trailer cue must not fire in an ordinary game; the text form writes `beat=`
+only when nonzero. A keyframe also records `invert`. While a keyframe's pose has been
+reached in `Authored` mode the beat's pose targets become that keyframe's pose, so the
+driver does not ease the authored pose back to the beat default.
+
+**The trailer panel** (`render/ui.cpp`, shown while `shell.attracting()`): STOP TRAILER,
+CAMERA (cycles the three modes), EDIT; and in edit mode PLY -/+, BEAT -/+, REC KEY,
+DEL KEY, KEY SPEED -/+, and for shapes SHAPE, INVERT, GHOST, PIECES (and SPREAD on the
+3-D torus). Free orbit/zoom is unchanged. Keys `k`/`j` keep working.
+
+**A shorter opener.** `standard` is cut to <= 20 plies and the trailer's per-ply pace is
+raised (`AttractStep::pace`). The trade-down that Klein needs (no bishop/queen) can no
+longer all happen on the flat board, so the Klein cut starts from Klein's own restricted
+start (`continuesPosition = false`) while `standard -> cylinder -> torus` still continue
+one game, and `klein -> torus3d` still continues. Every line is re-derived and replayed
+through the engine by `test_attract.cpp`.
+
+**Tests.** `view` : `steadySway` bounds, zero at zero weight, smooth (max per-frame step).
+`app`: the cue/`invert` text round-trip incl. legacy lines without `beat=`; the trailer
+leaves `Settings::cameraMode` untouched and the session's follow off on a flat beat even
+with `cameraMode = "route"`; `Auto` does not run the track and `Authored` does; edit mode
+freezes the beat clock and the cut; `trailerStep` forward/back lands on the right ply;
+`trailerGoto` reproduces the chain; the standard beat is <= 20 plies.
+
+**Status (2026-10-16): built.** `view/trailer_camera.hpp` (`steadySway`), `Session::watchStep`/
+`watchSeek`, `CameraCue::beat` and `CameraKeyframe::invert`, the `Shell` trailer camera /
+edit-mode / stepping API, the trailer panel, and `--trailer-edit` for a capture of it.
+`applyAttractLook` no longer touches `Settings`; `applySettings` re-applies the trailer's
+policy so a mid-trailer setting change cannot hand the chase back. The standard opener is
+18 plies (was 54) at 0.22 s dwell; it trades both bishop pairs and both queens (Bxh6 gxh6,
+Qxg4/Qxd7, Bxa6 bxa6, dxe5) so Klein still receives a legal position, and keeps every rook
+and knight. Cylinder, torus, Klein and 3-D torus lines were re-found by an engine-driven
+search (quiet, no shuffling, one wrapped step per shape beat) and the whole chain still
+continues through `embedOnto`. Not verified by me: the live window (only `--shot` captures
+were looked at); and the render suite's Vulkan offscreen tests were flaky with
+`VK_ERROR_DEVICE_LOST` in this environment, independent of these changes. Open: keyframes
+only ease on reaching a move (no mid-move timeline), and there is no in-app keyframe list.

@@ -304,8 +304,20 @@ std::vector<view::Placement> surfacePlacements(const render::PlaySurface& surf) 
 /// because it is already a blend of the player's own view and the follow (M17.19). The
 /// rest of this is the capture path's steady-state follow - a `--clip` of a move never
 /// runs the choreography, and its frames must stay byte-for-byte what they were.
+view::OrbitCamera boardCameraBase(const app::Shell& shell,
+                                  const render::ShapeMoveSequence& seq);
+
 view::OrbitCamera boardCamera(const app::Shell& shell,
                               const render::ShapeMoveSequence& seq) {
+  const app::Session* session = shell.session();
+  if (session == nullptr) return {};
+  // The trailer's resting sway rides on whatever the base camera is (identity outside
+  // it).
+  return shell.trailerView(boardCameraBase(shell, seq));
+}
+
+view::OrbitCamera boardCameraBase(const app::Shell& shell,
+                                  const render::ShapeMoveSequence& seq) {
   const app::Session* session = shell.session();
   if (session == nullptr) return {};
   const app::Settings& st = shell.settings();
@@ -392,20 +404,16 @@ void frameBoard(app::Shell& shell) {
                               poseFrom(shell.settings(), session->variant()));
 }
 
-/// Put the renderer in the attract sequence's presentation (M13.9): the shape view, with
-/// no per-frame camera following. The camera choreography is being built separately, so
-/// the trailer must not chase a sliding piece the way the "watch a different game"
-/// handler does; it only re-frames on a cut (`frameBoard`, driven by `advanceAttract`
-/// reporting a new beat), so a newly-revealed shape is actually in view. It deliberately
-/// does not set `geometryFormed`, which the attract driver eases itself so the first beat
-/// can reveal.
+/// Put the renderer in the attract sequence's presentation (M13.9): the shape view where
+/// there is a shape. The camera policy is the shell's (`Shell::trailerCamera`, applied to
+/// each beat's session) - this must not touch `Settings::cameraMode`, which is the
+/// player's, and it applies on a flat board too, where the move camera used to swing
+/// behind every piece of the longest beat. It deliberately does not set `geometryFormed`,
+/// which the attract driver eases itself so the first beat can reveal.
 void applyAttractLook(app::Shell& shell) {
   app::Session* session = shell.session();
-  if (session == nullptr || !render::hasPlaySurface(session->variant())) return;
-  shell.settings().geometryView = true;
-  shell.settings().cameraMode = "off";
-  session->setCameraMode("off");
-  session->setFollowStrength(0.0f);
+  if (session == nullptr) return;
+  if (render::hasPlaySurface(session->variant())) shell.settings().geometryView = true;
 }
 #endif
 
@@ -435,6 +443,9 @@ void syncMarks(render::BoardRenderer& renderer, const app::Session& session) {
 /// `<dir>/frame_%04d.ppm`. That is the deterministic, dependency-light half of the clip
 /// export (M12.2): a directory of numbered frames is the guaranteed output, and muxing a
 /// video from them is an external convenience, never a codec in the engine.
+/// `--trailer-edit`: a main-menu attract capture taken in the trailer's camera-edit mode.
+static bool gTrailerEditCapture = false;
+
 int captureFrame(const std::string& variantName, const std::string& path,
                  const std::string& script, const std::string& screen, float overtureT,
                  int previewDims, bool clip, int clipFrames, float clipT0, float clipT1,
@@ -577,6 +588,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
       if (shell->session() != nullptr) shell->session()->advanceAnimation(kStep);
       shell->advanceAttract(kStep);
     }
+    if (gTrailerEditCapture) shell->setTrailerEditing(true);
     applyAttractLook(*shell);
     frameBoard(*shell);
   }
@@ -1059,6 +1071,8 @@ int main(int argc, char** argv) {
       slideU = std::strtof(argv[++i], nullptr);
     else if (arg == "--slide-v" && i + 1 < argc)
       slideV = std::strtof(argv[++i], nullptr);
+    else if (arg == "--trailer-edit")
+      gTrailerEditCapture = true;
     else if (arg == "--ghost" && i + 1 < argc)
       ghost = std::strtof(argv[++i], nullptr);
     else if (arg == "--piece-cylinders")
@@ -1396,7 +1410,8 @@ int main(int argc, char** argv) {
               // pose look like right now, saved against the current move. The scaffold's
               // whole authoring surface is this one key plus `J` to remove one - there is
               // no in-game list or editor yet, just the saved text file.
-              if (inGame && !twoPlayer) shell->recordCameraKeyframe();
+              if (inGame && !twoPlayer)
+                shell->recordCameraKeyframe(shell->trailerKeySpeed());
               break;
             case SDLK_J:
               // Remove the keyframe at the current move, if any.

@@ -132,6 +132,8 @@ tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID 
 ./build/dev/src/gui/chessbox_gui --shot out.ppm --screen settings   # any screen
 ./build/dev/src/gui/chessbox_gui --shot o.ppm --screen menu --t 3.0   # the main-menu attract
                                  # sequence (M13.9), 3s into its loop
+./build/dev/src/gui/chessbox_gui --shot o.ppm --screen menu --t 14 --trailer-edit
+                                 # the trailer in its camera-edit mode (PLY/BEAT, REC KEY, shape buttons)
 ./build/dev/src/gui/chessbox_gui torus --shot o.ppm --screen newgame --t 0.6  # an overture
 ./build/dev/src/gui/chessbox_gui torus --clip frames/ --screen newgame       # a frame sequence
                                  # (--frames N --t0 a --t1 b; mux with ffmpeg externally)
@@ -257,6 +259,7 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | An authored piece body or icon | `src/assets/piece_model.cpp`; the designers are `src/render/ui_designer.cpp` | |
 | A menu's decorative object | `src/render/deco.cpp` + `decoForScreen` | |
 | How a menu object answers a drag | `Ui::updateObjectDrag`; the turn is an offset on the object's own animation | |
+| The trailer's camera (calm sway, follow, authored keyframes, edit mode) | `Shell::trailerCamera`/`setTrailerEditing` in `src/app/shell.cpp`, `view::steadySway`, the panel in `Ui::buildTrailerEditRows`. Never write the trailer's camera into `Settings`. See `docs/plan/M13-overtures.md` (2026-10-16) | |
 | A variant's library animation | `src/render/overture_scene.cpp`; which one, and its cycle, in `src/app/overture.cpp` | |
 | A variant with no bespoke overture | nothing - it gets `derivedOvertureScene` from its geometry (`app::overtureSignature`), keyed by `SurfaceKind`, never its name. See `docs/overtures.md` |
 | Playing on the shape (a glued 2-D board warped to its surface, or a `torus3d`/`hyper4` authored shape) | `render::PlaySurface` in `src/render/play_surface.cpp` - seats, frames, sizes, tiles and picking, all off one sampling; the D>=3 shapes come from `playShapePosition` in `src/render/overture_scene.cpp`. `BoardRenderer::buildInstances` draws them. The mode is `Settings::geometryView`, offered only where `render::hasPlaySurface`; `Settings::geometryEvert` is the pose. See ADR-0019 and `docs/plan/M17.12-shapes-above-two-dimensions.md` | |

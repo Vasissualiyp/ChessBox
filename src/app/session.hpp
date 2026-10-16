@@ -257,6 +257,13 @@ class Session {
   /// there are, for a status line.
   [[nodiscard]] std::size_t watchIndex() const noexcept;
   [[nodiscard]] std::size_t watchCount() const noexcept;
+  /// Play the watched game's next move now, without waiting out the dwell. False when no
+  /// watch is running or it has no move left. The trailer's edit mode steps with it.
+  bool watchStep();
+  /// Put the watched game exactly `index` moves in (0 = its start position), settled: no
+  /// animation is left running. Replays from the start, so it can go backwards. Fails
+  /// when no watch is running or `index` is past the last move.
+  Result<void> watchSeek(std::size_t index);
 
   /// Resolve a pixel to a cell and act on it. Returns kInvalidCell if the click missed
   /// the board, which is not an error - it deselects, like clicking off a board does.

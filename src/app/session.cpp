@@ -783,6 +783,33 @@ std::size_t Session::watchCount() const noexcept {
   return watchRunner_ != nullptr ? watchRunner_->count() : 0;
 }
 
+bool Session::watchStep() {
+  if (!watching_ || watchRunner_ == nullptr || watchRunner_->done()) return false;
+  if (auto ok = watchRunner_->step(); !ok.has_value()) {
+    message_ = ok.error().format();
+    return false;
+  }
+  watchClock_ = 0.0f;
+  return true;
+}
+
+Result<void> Session::watchSeek(std::size_t index) {
+  if (!watching_ || watchRunner_ == nullptr) {
+    return fail(ErrorCode::OutOfRange, "no watched game to seek in");
+  }
+  if (index > watchRunner_->count()) {
+    return fail(ErrorCode::OutOfRange, "seek past the last move");
+  }
+  if (auto ok = watchRunner_->reset(); !ok.has_value()) return ok;
+  selected_ = kInvalidCell;
+  for (std::size_t i = 0; i < index; ++i) {
+    if (auto ok = watchRunner_->step(); !ok.has_value()) return ok;
+  }
+  (void)advanceAnimation(1.0e6f);  // settle: a seek is a jump, not a move to watch
+  watchClock_ = 0.0f;
+  return {};
+}
+
 CellId Session::clickPixel(float px, float py, float width, float height) {
   // While a shot owns the view, or while the engine is playing a game for a watcher, the
   // board is locked: the pose may be moving, and in either case the position is not the

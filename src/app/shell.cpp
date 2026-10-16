@@ -461,118 +461,57 @@ void Shell::advanceWatching(float dt) {
 
 AttractSequence defaultAttractSequence() {
   // Standard -> cylinder -> torus -> Klein bottle -> (Klein eases back to a torus) -> the
-  // 8x8x4 3-D torus, then round again. Six beats on five shapes: the hypercube was
-  // dropped (M13.9 revision, Part I); `hyper4_8x8.toml` and `embedOnto` remain,
-  // independently tested but unreferenced here. Every line is real, legal play, verified
-  // through the engine's own legality: `startWatching` replays it move by move and a bad
-  // move fails the load.
+  // 8x8x4 3-D torus, then round again. Every line is real, legal play, verified through
+  // the engine's own legality: `startWatching` replays it move by move and a bad move
+  // fails the load.
   //
-  // Every cut between shapes is a real, continuous geometry morph, not a hard swap, and
-  // (M13.9 Part F) every cut but the loop's own re-entry point carries the *position*
-  // too: one real game, from the literal standard start all the way to the 3-D torus.
-  // Cylinder's own end state (`formed = 1`, an open tube) is bit-for-bit the torus
-  // morph's own `kTorusRollEnd` waypoint (`view/morph.hpp`); the torus beat's own end
-  // state is bit-for-bit the Klein morph's own `kKleinRingEnd` waypoint; a second,
-  // move-free Klein beat eases back down to that same waypoint before the cut into the
-  // 3-D torus, which opens with every level collapsed onto one ring (`spreadFrom = 0`)
-  // and spreads them apart over the beat. Only `standard` has nothing to morph from.
+  // It is one continuous game (M13.9 Part F): every beat but the first continues the
+  // position right before it through `embedOnto`, and every cut between shapes is a real
+  // geometry morph (cylinder's end state is the torus morph's `kTorusRollEnd` waypoint,
+  // the torus's end state is Klein's `kKleinRingEnd`, Klein eases back to that waypoint
+  // before the 3-D torus, which opens with its levels collapsed onto one ring and spreads
+  // them apart over the beat).
   //
-  // Klein fields only king, rook and knight at its own declared start - no bishop, no
-  // queen - because its own file says why: a bishop or queen gives check from almost
-  // anywhere once a surface has no two-colouring, confirmed directly with the CLI's own
-  // `embed` command, not assumed. `torus3d_8x8` is TRAILER-SCOPED (not a catalogue
-  // variant) and was originally built the same restricted way, but its own geometry is
-  // fully orientable - every identification is a plain periodic gluing, no flip - so
-  // there was never a structural reason for that: it now fields the full army, pawns
-  // included, the same revision that fixed this comment (M13.9 Part F, "take the
-  // geometry, not the restricted army"). Klein's own restriction is not a choice of
-  // variant file the way `torus3d_8x8`'s was - it is the one place in this sequence a
-  // full army genuinely cannot cross intact, so `standard` spends its own extra length
-  // trading every bishop and both queens off *before* the Klein cut, not stopping
-  // continuity there the way an earlier revision of this sequence did.
+  // `standard` is 18 plies (9 moves) - short on purpose, because a viewer gone by move 20
+  // never sees a shape (M13.9 revision, "the standard game is too long"). Klein fields no
+  // bishop or queen at all (a bishop or queen gives check from almost anywhere once a
+  // surface has no two-colouring), so the opener spends its 18 plies trading exactly
+  // those: both bishop pairs and both queens come off, and nothing else of value does.
+  // Bxh6 gxh6 and Bxa6 bxa6 take a bishop each for a pawn; the black bishop on c8 trades
+  // itself and the queens off on g4/d7; the last black bishop goes on e5 to dxe5. Both
+  // sides keep every rook and knight to the 3-D torus; only pawns drop at the Klein cut,
+  // by `embedOnto`'s ordinary rule for a piece type the target does not declare.
   //
-  // That trade-down is why `standard`'s own line runs far longer than the other beats'
-  // ten plies: removing six pieces (two bishop pairs, both queens) while losing as little
-  // else as possible took real moves, not a single clever tactic, and all of it happens
-  // on the plain, non-wrapping standard board on purpose - every bishop goes by a direct
-  // sacrifice onto a defended square with the *king* recapturing (never a rook, so both
-  // rooks survive the whole sequence), and the queens go last, down to a single
-  // rook-for-queen trade once nothing lighter is available. An earlier attempt tried
-  // running some of this trade-down *after* the cut into cylinder and torus and found a
-  // second, independent hazard the same way the king-off-back-rank one below was found:
-  // a piece sacrifice that gives a clean king recapture on the plain board can land on a
-  // square a *wrapped* diagonal defends instead (cylinder's own file seam lets a queen on
-  // d1 defend f7 the long way round), turning a sound sacrifice into a blunder the moment
-  // it is replayed on the shape rather than the flat board. Keeping every capture on
-  // `standard` sidesteps that entirely - cylinder and torus, below, only ever continue
-  // the *result*, not repeat the tactics that produced it.
-  //
-  // What survives to the 3-D torus, every lap: both rooks, each side, the whole way -
-  // the original version of this trade-down lost one; one black knight; no bishops, no
-  // queens (required); pawns, until the Klein cut drops them the way `embedOnto` always
-  // drops a piece type the target does not declare (unavoidable there - Klein has no
-  // orientation axis, so "forward" and therefore a pawn is not even definable on it,
-  // independent of which variant file supplies the geometry).
+  // The shape beats' ten-ply lines were found by a search over the engine's own legal
+  // moves (material-safe at two plies, no shuffling, at least one wrapped step across a
+  // seam, at most one capture), so each is quiet, varied and shows the seam. The loop
+  // wraps back to `standard`, because every later beat continues the one before it.
   //
   // The sequence opens on the literal `standard` board, then hard-cuts into the cylinder
-  // beat already part-way up its roll. This is the documented workaround for the M18.6
-  // rank-mirrored flat board at `geometryFormed = 0`: the reveal's flat end would show
-  // black nearest the camera and white far off, the reverse of a normal board, so the
-  // trailer starts on a clean board and picks the roll up in motion instead. See the
-  // status note in `docs/plan/M13-overtures.md`.
-  //
-  // The loop wraps all the way back to `standard` (M13.9 Part F, "ALL game should be
-  // continuous"), not straight to the shape beats the way an earlier revision of this
-  // sequence had it: every beat but `standard` continues the position right before it,
-  // so a lap that skipped `standard` would need cylinder to continue from whatever the
-  // *previous* lap's `torus3d_8x8` beat ended on instead - a different position every
-  // lap, which cylinder's one fixed `moves` list cannot stay a legal continuation of.
-  // Replaying cylinder's trade-down-dependent tactics fresh from its own start, as a
-  // substitute, runs into the same wrapped-diagonal hazard noted above - confirmed
-  // directly, not assumed, the same way everything else in this file is. Looping back to
-  // `standard` sidesteps both: every lap is the exact same verified chain, cold open to
-  // 3-D torus, with nothing beat-specific to re-derive.
-  //
-  // Cylinder's and torus's own ten plies each end with both kings stepped off their
-  // home rank - confirmed empirically, the same discipline as everywhere else in this
-  // file: `torus.toml`'s own comment explains why its start array sits four ranks apart
-  // rather than in the usual corners ("rank 1 and rank 8 are *adjacent*... White is
-  // already in an inescapable check"), and transplanting an opening's armies onto a
-  // rank-periodic board reaches that same wall regardless of material, the instant a
-  // beat is cut there with a king still at home.
+  // beat already part-way up its roll (the documented M18.6 workaround for the
+  // rank-mirrored flat end of the reveal).
   AttractSequence seq;
   seq.push_back(
       {.variant = "standard",
-       // Development (10 plies, no captures) - both bishop pairs sacrificed onto a
-       // king-defended square, king recaptures each time (10 plies: 2 bishops) - the
-       // remaining White bishop sacrificed onto a pawn, pawn recaptures (2 plies) - a
-       // central fork trades a White knight for Black's second bishop (2 plies) - White's
-       // queen, Black's remaining knight and both queens finish the trade-down (28
-       // plies): a central pawn exchange, a knight-for-knight fork, then the only route
-       // left to clear White's queen, a rook-for-queen trade once nothing lighter reaches
-       // it.
-       .moves = {"e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5", "c2c3", "g8f6", "d2d3",
-                 "d7d6", "c4f7", "e8f7", "b1d2", "c5f2", "e1f2", "c8e6", "b2b3", "h8e8",
-                 "f3d4", "d8e7", "d4e6", "f7e6", "d1g4", "e6f7", "g4e2", "e7e6", "c1a3",
-                 "e6d7", "a3d6", "c7d6", "d2b1", "d7d8", "b1d2", "f7g8", "d3d4", "e5d4",
-                 "d2c4", "d8d7", "e2d3", "a8d8", "c3d4", "c6d4", "d3d2", "d7c6", "d2d4",
-                 "c6c4", "d4c4", "e8e6", "c4d4", "g7g6", "d4d6", "d8d6"},
-       .formedFrom = 1.0f});
+       .moves = {"d2d4", "d7d6", "c1h6", "g7h6", "e2e4", "c8g4", "d1g4", "d8d7", "g4d7",
+                 "e8d7", "f1a6", "b7a6", "g1f3", "f8g7", "e1f1", "g7e5", "d4e5", "c7c6"},
+       .formedFrom = 1.0f,
+       .dwell = 0.22f});
   seq.push_back({.variant = "cylinder",
-                 .moves = {"a1d1", "g8g7", "h1e1", "d6d7", "g2g3", "f6h5", "e1e3", "h5f4",
-                           "e3e1", "d7d6"},
+                 .moves = {"f3g1", "d7c7", "b1c3", "b8d7", "a1d1", "a8f8", "h1a1", "f8a8",
+                           "g1h3", "c7b8"},
                  .formedFrom = 0.30f,
                  .continuesPosition = true});
   seq.push_back({.variant = "torus",
-                 .moves = {"g3g4", "d6d7", "f2g3", "d7d6", "g4g5", "d6d7", "g3g4", "g7f7",
-                           "e1e3", "d7d6"},
+                 .moves = {"d1d8", "b8b7", "a1b1", "d7b8", "f1f8", "g8a1", "f8g1", "a1g8",
+                           "h3b4", "b7c7"},
                  .formedFrom = view::kTorusRollEnd,
                  .continuesPosition = true});
   // Klein hides its far side, so it ghosts and draws flat icon pucks throughout both of
   // its beats (M13.9 revision, Part H), not just the fold-in.
   seq.push_back({.variant = "klein",
-                 .moves = {"g4h4", "f7g7", "h4g4", "d6d7", "g4g3", "d7d6", "g3h2", "d6d7",
-                           "h2g1", "d7d6"},
+                 .moves = {"d8d3", "g8a7", "g1f1", "b8h2", "f1e2", "h8c8", "b1g7", "c8f7",
+                           "c3b5", "c7c8"},
                  .ghostTarget = 0.35f,
                  .formedFrom = view::kKleinRingEnd,
                  .flatPieces = true,
@@ -584,10 +523,10 @@ AttractSequence defaultAttractSequence() {
                  .flatPieces = true,
                  .continuesPosition = true});
   seq.push_back({.variant = "torus3d_8x8",
-                 .moves = {"(4,2,0)-(4,3,0)", "(6,6,0)-(6,5,0)", "(6,0,0)-(7,0,1)",
-                           "(5,3,0)-(4,3,2)", "(7,0,1)-(7,7,2)", "(6,5,0)-(7,6,0)",
-                           "(7,7,2)-(7,6,2)", "(7,6,0)-(7,7,0)", "(7,6,2)-(7,7,2)",
-                           "(7,7,0)-(6,6,0)"},
+                 .moves = {"(1,4,0)-(3,5,0)", "(2,7,0)-(1,0,0)", "(6,6,0)-(5,6,0)",
+                           "(0,6,0)-(6,6,1)", "(1,3,0)-(7,2,0)", "(7,1,0)-(7,7,1)",
+                           "(5,6,0)-(5,1,0)", "(7,7,1)-(1,0,1)", "(7,2,0)-(1,2,3)",
+                           "(1,0,0)-(1,7,1)"},
                  .ghostTarget = 0.35f,
                  .formedFrom = 1.0f,
                  .flatPieces = true,
@@ -628,7 +567,8 @@ Result<void> Shell::startAttractStep(std::size_t index) {
   GameFile file = toGameFile(session_->variant(), session_->game());
   if (embeddedFen.has_value()) file.startFen = *embeddedFen;
   file.moves = step.moves;
-  if (auto ok = session_->startWatching(std::move(file), settings_.watchDwell);
+  if (auto ok = session_->startWatching(
+          std::move(file), step.dwell >= 0.0f ? step.dwell : settings_.watchDwell);
       !ok.has_value()) {
     message_ = ok.error().format();
     return fail(ok.error().code, ok.error().message);
@@ -644,7 +584,88 @@ Result<void> Shell::startAttractStep(std::size_t index) {
   // run, so it stays there rather than compositing behind the menu (M13.9 revision, Part
   // G).
   attractIndex_ = index;
+  // Per-beat camera state: a fresh session, so its follow policy is the trailer's, not
+  // the player's; a keyframe pose from the previous beat does not carry over; and the
+  // track's "last cue" is forgotten so the new beat's first keyframe is reached.
+  authoredPose_.reset();
+  cameraTrackCue_.reset();
+  applyTrailerCamera();
   return {};
+}
+
+void Shell::applyTrailerCamera() {
+  if (session_ == nullptr) return;
+  // Per session, never `Settings`: the player's own camera mode is theirs and survives.
+  const bool chase = trailerCamera_ == TrailerCamera::Follow;
+  session_->setCameraMode(chase ? "route" : "off");
+  session_->setFollowStrength(chase ? 1.0f : 0.0f);
+}
+
+void Shell::setTrailerCamera(TrailerCamera mode) {
+  trailerCamera_ = mode;
+  if (attracting()) applyTrailerCamera();
+}
+
+void Shell::setTrailerKeySpeed(float s) noexcept {
+  trailerKeySpeed_ = std::clamp(s, 0.25f, 16.0f);
+}
+
+void Shell::setTrailerEditing(bool on) {
+  if (!attracting() || on == trailerEditing_) return;
+  trailerEditing_ = on;
+  if (on) {
+    trailerCamera_ = TrailerCamera::Authored;
+    applyTrailerCamera();
+    editPose_ = {settings_.geometryFormed, settings_.geometryGhost,
+                 settings_.geometryShellSpread};
+  }
+}
+
+view::OrbitCamera Shell::trailerView(const view::OrbitCamera& base) const {
+  if (!attracting()) return base;
+  return view::steadySway(base, trailerClock_, swayWeight_);
+}
+
+bool Shell::trailerStep(int delta) {
+  if (!attracting() || !trailerEditing_ || session_ == nullptr || delta == 0 ||
+      !session_->watching()) {
+    return false;
+  }
+  const long target = static_cast<long>(session_->watchIndex()) + delta;
+  if (target < 0 || target > static_cast<long>(session_->watchCount())) return false;
+  if (delta == 1) return session_->watchStep();
+  return session_->watchSeek(static_cast<std::size_t>(target)).has_value();
+}
+
+void Shell::trailerGoto(std::size_t beat, std::size_t ply) {
+  if (!attracting() || !trailerEditing_ || beat >= attract_.size()) return;
+  for (std::size_t i = 0; i <= beat; ++i) {
+    if (!startAttractStep(i).has_value()) {
+      attract_.clear();
+      return;
+    }
+    // Every beat before the target is played to its end, so the next one embeds the real
+    // finished position it would have in the trailer.
+    if (i < beat && session_->watching()) {
+      (void)session_->watchSeek(session_->watchCount());
+    }
+  }
+  if (session_->watching()) {
+    (void)session_->watchSeek(std::min(ply, session_->watchCount()));
+  }
+  const AttractStep& step = attract_[beat];
+  settings_.geometryFormed = step.formedTarget;
+  settings_.geometryGhost = step.ghostTarget;
+  settings_.geometryShellSpread = step.spreadTarget;
+  editPose_ = {step.formedTarget, step.ghostTarget, step.spreadTarget};
+  trailerCutPending_ = true;
+}
+
+void Shell::trailerJumpBeat(int delta) {
+  if (!attracting() || !trailerEditing_) return;
+  const long n = static_cast<long>(attract_.size());
+  const long next = ((static_cast<long>(attractIndex_) + delta) % n + n) % n;
+  trailerGoto(static_cast<std::size_t>(next), 0);
 }
 
 void Shell::startAttract(AttractSequence sequence) {
@@ -662,6 +683,10 @@ void Shell::stopAttract() {
   if (attract_.empty()) return;
   attract_.clear();
   attractIndex_ = 0;
+  trailerEditing_ = false;
+  trailerClock_ = 0.0f;
+  swayWeight_ = 1.0f;
+  authoredPose_.reset();
   if (session_ != nullptr) session_->stopWatching();
   // The Klein and 3-D beats ghost the board; restore the opaque default so whatever the
   // player does next does not inherit the trailer's pose. The flat icon pucks snap on for
@@ -679,18 +704,46 @@ void Shell::stopAttract() {
 bool Shell::advanceAttract(float dt) {
   if (attract_.empty() || session_ == nullptr) return false;
   const AttractStep& step = attract_[attractIndex_];
+  // The resting sway fades in and out rather than switching, so changing mode or entering
+  // edit mode never jumps the view.
+  const float swayTarget =
+      (trailerCamera_ == TrailerCamera::Auto && !trailerEditing_) ? 1.0f : 0.0f;
+  swayWeight_ += std::clamp(swayTarget - swayWeight_, -dt * 1.5f, dt * 1.5f);
+  if (trailerCutPending_) {
+    trailerCutPending_ = false;
+    return true;
+  }
+  if (trailerEditing_) {
+    // Paused: the clock, the watch and the cut all stand still, and the pose follows the
+    // edit buttons rather than the beat's targets.
+    settings_.geometryFormed = view::advanceFormMorph(
+        settings_.geometryFormed, editPose_.formed, dt, settings_.geometryFormSpeed);
+    settings_.geometryGhost = view::advanceFormMorph(
+        settings_.geometryGhost, editPose_.ghost, dt, settings_.geometryFormSpeed);
+    settings_.geometryShellSpread =
+        view::advanceFormMorph(settings_.geometryShellSpread, editPose_.shellSpread, dt,
+                               settings_.geometryFormSpeed);
+    return false;
+  }
+  trailerClock_ += dt;
   if (session_->watching()) session_->advanceWatching(dt);
-  settings_.geometryFormed = view::advanceFormMorph(
-      settings_.geometryFormed, step.formedTarget, dt, settings_.geometryFormSpeed);
-  settings_.geometryGhost = view::advanceFormMorph(
-      settings_.geometryGhost, step.ghostTarget, dt, settings_.geometryFormSpeed);
+  // An authored keyframe's pose replaces the beat's own default once reached, so the
+  // driver does not ease it straight back.
+  const TrailerPose want =
+      (trailerCamera_ == TrailerCamera::Authored && authoredPose_.has_value())
+          ? *authoredPose_
+          : TrailerPose{step.formedTarget, step.ghostTarget, step.spreadTarget};
+  settings_.geometryFormed = view::advanceFormMorph(settings_.geometryFormed, want.formed,
+                                                    dt, settings_.geometryFormSpeed);
+  settings_.geometryGhost = view::advanceFormMorph(settings_.geometryGhost, want.ghost,
+                                                   dt, settings_.geometryFormSpeed);
   settings_.geometryShellSpread = view::advanceFormMorph(
-      settings_.geometryShellSpread, step.spreadTarget, dt, settings_.geometryFormSpeed);
+      settings_.geometryShellSpread, want.shellSpread, dt, settings_.geometryFormSpeed);
   constexpr float kSettle = 1e-3f;
   const bool settled =
-      std::abs(settings_.geometryFormed - step.formedTarget) <= kSettle &&
-      std::abs(settings_.geometryGhost - step.ghostTarget) <= kSettle &&
-      std::abs(settings_.geometryShellSpread - step.spreadTarget) <= kSettle;
+      std::abs(settings_.geometryFormed - want.formed) <= kSettle &&
+      std::abs(settings_.geometryGhost - want.ghost) <= kSettle &&
+      std::abs(settings_.geometryShellSpread - want.shellSpread) <= kSettle;
   // A beat ends only when its game has run out *and* the pose has stopped moving, so a
   // cut never lands mid-roll.
   if (session_->watching() || !settled) return false;
@@ -712,7 +765,10 @@ bool Shell::advanceAttract(float dt) {
 
 CameraCue Shell::currentCue() const {
   if (session_ == nullptr) return {};
-  return {currentVariant_, session_->game().moveHistory().size()};
+  // Inside the trailer a cue also names its beat (`klein` plays twice), and is never the
+  // same cue as a game the player started themselves.
+  return {currentVariant_, session_->game().moveHistory().size(),
+          attracting() ? attractIndex_ + 1 : 0};
 }
 
 std::filesystem::path Shell::cameraTrackPath() const {
@@ -736,7 +792,15 @@ void Shell::recordCameraKeyframe(float speed) {
   kf.slideU = settings_.geometrySlideU;
   kf.slideV = settings_.geometrySlideV;
   kf.flatPieces = settings_.shapePieceCylinders;
+  kf.invert = settings_.geometryInvert;
   kf.morphSpeed = speed;
+  if (attracting()) {
+    // A keyframe only plays in the authored mode, so recording one means choosing it; and
+    // the pose just recorded is the one to hold from here on in this beat.
+    trailerCamera_ = TrailerCamera::Authored;
+    applyTrailerCamera();
+    authoredPose_ = TrailerPose{kf.formed, kf.ghost, kf.shellSpread};
+  }
   cameraTrack_.set(std::move(kf));
   persistCameraTrack();
 }
@@ -750,6 +814,9 @@ bool Shell::eraseCameraKeyframe() {
 
 void Shell::advanceCameraTrack(float dt) {
   if (session_ == nullptr || cameraTrack_.empty()) return;
+  // In the trailer only the authored camera plays keyframes; Auto and Follow own the
+  // view.
+  if (attracting() && trailerCamera_ != TrailerCamera::Authored) return;
   const CameraCue cue = currentCue();
   if (!cameraTrackCue_.has_value() || !(*cameraTrackCue_ == cue)) {
     cameraTrackCue_ = cue;
@@ -764,6 +831,13 @@ void Shell::advanceCameraTrack(float dt) {
       cameraTrackFromSlideU_ = settings_.geometrySlideU;
       cameraTrackFromSlideV_ = settings_.geometrySlideV;
       cameraTrackT_ = 0.0f;
+      const CameraKeyframe* reached = cameraTrack_.find(cue);
+      settings_.geometryInvert = reached->invert;
+      if (attracting()) {
+        authoredPose_ =
+            TrailerPose{reached->formed, reached->ghost, reached->shellSpread};
+        editPose_ = *authoredPose_;
+      }
     } else {
       cameraTrackT_ = 1.0f;  // nothing to ease toward at this cue - leave the view alone
     }
@@ -843,6 +917,10 @@ void Shell::applySettings() {
     // An empty preference means "always ask", which the session expresses by having no
     // preference at all rather than by a sentinel piece.
     if (!settings_.autoPromoteTo.empty()) (void)session_->apply(a);
+    // The lines above hand the session the player's camera mode; during the trailer the
+    // trailer's own camera policy wins, or any settings change (a button in the trailer
+    // panel is one) would turn the chase back on.
+    if (attracting()) applyTrailerCamera();
   }
   if (auto ok = settings_.save(settingsPath_); !ok.has_value()) {
     message_ = ok.error().message;
