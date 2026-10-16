@@ -162,6 +162,10 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.autoPromoteTo = value;
     else if (key == "last_variant")
       s.lastVariant = value;
+    else if (key == "trailer_morph_speed")
+      s.trailerMorphSpeed = asFloat(value, s.trailerMorphSpeed);
+    else if (key == "trailer_move_speed")
+      s.trailerMoveSpeed = asFloat(value, s.trailerMoveSpeed);
     else if (key == "trailer_move_preview")
       s.trailerMovePreview = asFloat(value, s.trailerMovePreview);
     else if (key == "watch_dwell")
@@ -235,6 +239,8 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "auto_promote_to = " << autoPromoteTo << '\n';
   out << "last_variant = " << lastVariant << '\n';
   out << "watch_dwell = " << watchDwell << '\n';
+  out << "trailer_morph_speed = " << trailerMorphSpeed << '\n';
+  out << "trailer_move_speed = " << trailerMoveSpeed << '\n';
   out << "trailer_move_preview = " << trailerMovePreview << '\n';
   out << "seen_welcome = " << boolText(seenWelcome) << '\n';
   out << "volume_master = " << volumeMaster << '\n';
@@ -271,6 +277,8 @@ void Settings::sanitize() {
   shapeMorphSpeed = std::clamp(shapeMorphSpeed, 0.25f, 4.0f);
   geometryFormSpeed = std::clamp(geometryFormSpeed, 0.25f, 4.0f);
   watchDwell = std::clamp(watchDwell, 0.0f, 10.0f);
+  trailerMorphSpeed = std::clamp(trailerMorphSpeed, 0.25f, 4.0f);
+  trailerMoveSpeed = std::clamp(trailerMoveSpeed, 0.25f, 4.0f);
   trailerMovePreview = std::clamp(trailerMovePreview, 0.0f, 0.5f);
   if (cameraMode != "off" && cameraMode != "piece" && cameraMode != "route") {
     cameraMode = "off";

@@ -448,7 +448,9 @@ class Shell {
   /// than writing the settings directly (playback).
   void applySplineAt(float g, bool toEditPose);
   void seekNow(const TrailerCue& to);
-  [[nodiscard]] bool splineDrives() const;
+  /// Whether the keyframes own the pose right now (see `poseKeysFrom`).
+  [[nodiscard]] bool splinePoseActive() const;
+  [[nodiscard]] float poseKeysFrom(std::size_t beat) const;
 
   std::vector<std::string> library_;
   std::filesystem::path settingsPath_;

@@ -1086,6 +1086,10 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::Checkbox("Name the seam colours", &s.showSeamLegend);
   ImGui::EndDisabled();
   ImGui::Checkbox("Show coordinates", &s.showCoordinates);
+  ImGui::SliderFloat("Trailer: shape morph speed", &s.trailerMorphSpeed, 0.25f, 4.0f,
+                     "%.2fx");
+  ImGui::SliderFloat("Trailer: piece move speed", &s.trailerMoveSpeed, 0.25f, 4.0f,
+                     "%.2fx");
   ImGui::SliderFloat("Trailer: show each move first", &s.trailerMovePreview, 0.0f, 0.5f,
                      "%.2f s");
   ImGui::Checkbox("Alternate square colours on every other layer (3-D boards)",
@@ -1280,6 +1284,8 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       before.showCoordinates != s.showCoordinates ||
       before.swapLayerColors != s.swapLayerColors ||
       before.trailerMovePreview != s.trailerMovePreview ||
+      before.trailerMorphSpeed != s.trailerMorphSpeed ||
+      before.trailerMoveSpeed != s.trailerMoveSpeed ||
       before.kleinTwist != s.kleinTwist ||
       before.pieceHeightScale != s.pieceHeightScale || before.flatView != s.flatView ||
       before.pieceIcons != s.pieceIcons || before.animateMoves != s.animateMoves ||

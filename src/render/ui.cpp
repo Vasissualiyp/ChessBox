@@ -1300,6 +1300,21 @@ void Ui::buildTrailerEditRows(app::Shell& shell, app::Session& session,
                   : "drag to orbit, then REC KEY");
     }
   }
+
+  // How fast the trailer's shape morph and each piece's move play - the trailer's own
+  // multipliers, so the player's game is untouched. Live: they apply as the slider moves.
+  {
+    app::Settings& st = shell.settings();
+    bool changed = false;
+    ImGui::SetNextItemWidth(px(150.0f));
+    changed |=
+        ImGui::SliderFloat("MORPH SPEED", &st.trailerMorphSpeed, 0.25f, 4.0f, "%.2fx");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(px(150.0f));
+    changed |=
+        ImGui::SliderFloat("MOVE SPEED", &st.trailerMoveSpeed, 0.25f, 4.0f, "%.2fx");
+    if (changed) request.settingsChanged = true;
+  }
 }
 
 float Ui::buildTrailerTimeline(app::Shell& shell) {

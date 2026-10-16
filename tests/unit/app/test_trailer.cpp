@@ -3,6 +3,7 @@
 // M13.9 revision: the trailer owns its camera. A calm default that never follows a piece,
 // an edit mode that freezes the trailer so a camera can be authored, and stepping through
 // the chain. Headless, driving a Shell and a clock.
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
@@ -536,4 +537,95 @@ TEST_CASE("a timeline click seeks in edit mode, a frame later",
   CHECK(shell->session()->game().moveHistory().size() == 3);
   CHECK(shell->trailerEditSub() == 2);
   CHECK(shell->trailerTime() == shell->beatOffset(2) + 3.25f);
+}
+
+TEST_CASE("a beat's own morph plays until its first keyframe takes over",
+          "[unit][app][trailer][spline]") {
+  auto shell = makeShell("trailer-morphgate.conf");
+  shell->settings().watchDwell = 0.05f;
+  shell->settings().trailerMovePreview = 0.0f;
+  shell->startAttract(defaultAttractSequence());
+  shell->setTrailerCamera(TrailerCamera::Authored);
+  // Keys only in the cylinder beat, from move 6; a formed value of 1 would, held across
+  // the whole trailer, erase every beat's reveal.
+  shell->cameraTrack().set(trailerKey(1, 6, 0, 0.3f, 1.0f, "cylinder"));
+  shell->cameraTrack().set(trailerKey(1, 8, 0, 0.3f, 1.0f, "cylinder"));
+  constexpr float kStep = 1.0f / 60.0f;
+  float cylinderStart = -1.0f;
+  float torusStart = -1.0f;
+  for (int i = 0; i < 60 * 120 && shell->attractStep() < 3; ++i) {
+    shell->session()->advanceAnimation(kStep);
+    const bool cut = shell->advanceAttract(kStep);
+    shell->advanceCameraTrack(kStep);
+    if (cut && shell->attractStep() == 1 && cylinderStart < 0.0f) {
+      cylinderStart = shell->settings().geometryFormed;
+    }
+    if (cut && shell->attractStep() == 2 && torusStart < 0.0f) {
+      torusStart = shell->settings().geometryFormed;
+    }
+  }
+  // Both beats begin part-way up their roll (the driver's `formedFrom`), not at the
+  // key's 1.
+  CHECK(cylinderStart > 0.0f);
+  CHECK(cylinderStart < 0.9f);
+  CHECK(torusStart > 0.0f);
+  CHECK(torusStart < 0.9f);
+}
+
+TEST_CASE("the trailer's morph and move speeds are their own settings",
+          "[unit][app][trailer][speed]") {
+  Settings s;
+  CHECK(s.trailerMorphSpeed == 1.0f);
+  CHECK(s.trailerMoveSpeed == 1.0f);
+  s.trailerMorphSpeed = 99.0f;
+  s.trailerMoveSpeed = 0.0f;
+  s.sanitize();
+  CHECK(s.trailerMorphSpeed == 4.0f);
+  CHECK(s.trailerMoveSpeed == 0.25f);
+  s.trailerMorphSpeed = 2.5f;
+  s.trailerMoveSpeed = 0.5f;
+  const auto path = tempSettings("trailer-speeds.conf");
+  REQUIRE(s.save(path).has_value());
+  const Settings back = Settings::load(path);
+  CHECK(back.trailerMorphSpeed == 2.5f);
+  CHECK(back.trailerMoveSpeed == 0.5f);
+}
+
+TEST_CASE(
+    "the move speed scales the trailer's piece animation, the morph speed its morph",
+    "[unit][app][trailer][speed]") {
+  const auto firstMoveSeconds = [](float moveSpeed) {
+    auto shell = makeShell("trailer-movespeed.conf");
+    shell->settings().animationSpeed = 1.0f;
+    shell->settings().trailerMoveSpeed = moveSpeed;
+    shell->startAttract(defaultAttractSequence());
+    return shell->session()->animation().duration();
+  };
+  const float normal = firstMoveSeconds(1.0f);
+  const float fast = firstMoveSeconds(2.0f);
+  REQUIRE(normal > 0.0f);
+  CHECK(fast == Catch::Approx(normal * 0.5f).epsilon(0.02));
+
+  // Frames the cylinder beat's reveal takes to finish, from the cut into it.
+  const auto framesToForm = [](float morphSpeed) {
+    auto shell = makeShell("trailer-morphspeed.conf");
+    shell->settings().watchDwell = 0.05f;
+    shell->settings().trailerMorphSpeed = morphSpeed;
+    shell->startAttract(defaultAttractSequence());
+    while (shell->attractStep() < 1) {
+      shell->session()->advanceAnimation(1.0f / 60.0f);
+      shell->advanceAttract(1.0f / 60.0f);
+    }
+    int frames = 0;
+    while (shell->settings().geometryFormed < 0.999f && frames < 60 * 60) {
+      shell->session()->advanceAnimation(1.0f / 60.0f);
+      shell->advanceAttract(1.0f / 60.0f);
+      ++frames;
+    }
+    return frames;
+  };
+  const int slow = framesToForm(1.0f);
+  const int quick = framesToForm(2.0f);
+  CHECK(quick < slow);
+  CHECK(quick <= slow / 2 + 2);
 }

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <sstream>
 
@@ -757,6 +758,7 @@ bool Shell::advanceAttract(float dt) {
     if (attract_.empty() || session_ == nullptr) return false;
   }
   const AttractStep& step = attract_[attractIndex_];
+  const float formSpeed = settings_.geometryFormSpeed * settings_.trailerMorphSpeed;
   // The resting sway fades in and out rather than switching, so changing mode or entering
   // edit mode never jumps the view.
   const float swayTarget =
@@ -769,13 +771,12 @@ bool Shell::advanceAttract(float dt) {
   if (trailerEditing_) {
     // Paused: the clock, the watch and the cut all stand still, and the pose follows the
     // edit buttons rather than the beat's targets.
-    settings_.geometryFormed = view::advanceFormMorph(
-        settings_.geometryFormed, editPose_.formed, dt, settings_.geometryFormSpeed);
-    settings_.geometryGhost = view::advanceFormMorph(
-        settings_.geometryGhost, editPose_.ghost, dt, settings_.geometryFormSpeed);
-    settings_.geometryShellSpread =
-        view::advanceFormMorph(settings_.geometryShellSpread, editPose_.shellSpread, dt,
-                               settings_.geometryFormSpeed);
+    settings_.geometryFormed =
+        view::advanceFormMorph(settings_.geometryFormed, editPose_.formed, dt, formSpeed);
+    settings_.geometryGhost =
+        view::advanceFormMorph(settings_.geometryGhost, editPose_.ghost, dt, formSpeed);
+    settings_.geometryShellSpread = view::advanceFormMorph(
+        settings_.geometryShellSpread, editPose_.shellSpread, dt, formSpeed);
     return false;
   }
   trailerClock_ += dt;
@@ -796,15 +797,15 @@ bool Shell::advanceAttract(float dt) {
   // down - and must not hold the beat open waiting for a pose the spline will never
   // reach.
   bool settled = true;
-  if (!splineDrives()) {
+  if (!splinePoseActive()) {
     const TrailerPose want{step.formedTarget, trailerGhost_.value_or(step.ghostTarget),
                            step.spreadTarget};
-    settings_.geometryFormed = view::advanceFormMorph(
-        settings_.geometryFormed, want.formed, dt, settings_.geometryFormSpeed);
-    settings_.geometryGhost = view::advanceFormMorph(settings_.geometryGhost, want.ghost,
-                                                     dt, settings_.geometryFormSpeed);
+    settings_.geometryFormed =
+        view::advanceFormMorph(settings_.geometryFormed, want.formed, dt, formSpeed);
+    settings_.geometryGhost =
+        view::advanceFormMorph(settings_.geometryGhost, want.ghost, dt, formSpeed);
     settings_.geometryShellSpread = view::advanceFormMorph(
-        settings_.geometryShellSpread, want.shellSpread, dt, settings_.geometryFormSpeed);
+        settings_.geometryShellSpread, want.shellSpread, dt, formSpeed);
     constexpr float kSettle = 1e-3f;
     settled = std::abs(settings_.geometryFormed - want.formed) <= kSettle &&
               std::abs(settings_.geometryGhost - want.ghost) <= kSettle &&
@@ -998,9 +999,21 @@ std::vector<std::pair<float, const CameraKeyframe*>> Shell::trailerKeys() const 
   return keys;
 }
 
-bool Shell::splineDrives() const {
-  return attracting() && trailerCamera_ == TrailerCamera::Authored &&
-         !trailerKeys().empty();
+bool Shell::splinePoseActive() const {
+  if (!attracting() || trailerCamera_ != TrailerCamera::Authored) return false;
+  return poseKeysFrom(trailerCueAt(trailerTime(), 8).beat) <= trailerTime();
+}
+
+float Shell::poseKeysFrom(std::size_t beat) const {
+  // The time of the first keyframe of `beat`, or infinity when it has none. Before it the
+  // beat's own morph plays (the cylinder rolling up, the torus bending ...); from it on
+  // the keyframes own the pose. Without this a keyframe's morph value, held backwards,
+  // would erase every beat's reveal.
+  float first = std::numeric_limits<float>::infinity();
+  for (const auto& [time, kf] : trailerKeys()) {
+    if (kf->cue.beat == beat + 1) first = std::min(first, time);
+  }
+  return first;
 }
 
 void Shell::applySplineAt(float g, bool toEditPose) {
@@ -1019,6 +1032,9 @@ void Shell::applySplineAt(float g, bool toEditPose) {
     if (time <= g) discrete = kf;  // flat pieces and invert step at their keyframe
   }
   session_->setOrbitCamera(view::splineCamera(path, g));
+  // The pose (morph, ghost, slide, piece style, invert) is only the keyframes' once this
+  // beat's first keyframe is reached; before that the beat's own morph plays.
+  if (poseKeysFrom(trailerCueAt(g, 8).beat) > g) return;
   const float f = std::clamp(view::splineScalar(formed, g), 0.0f, 1.0f);
   const float gh = std::clamp(view::splineScalar(ghost, g), 0.35f, 1.0f);
   const float sp = std::clamp(view::splineScalar(spread, g), 0.0f, 1.0f);
@@ -1102,8 +1118,11 @@ void Shell::applySettings() {
     // Seconds per cell travelled. Nought-point-nought-eight-five at speed 1 is about
     // as fast as a move can be read; switching animation off means zero, not "instant",
     // so the session has one rule for "do not animate" rather than two.
-    session_->setAnimationSeconds(
-        settings_.animateMoves ? 0.085f / settings_.animationSpeed : 0.0f);
+    // The trailer has its own multiplier on top, so tuning it leaves the player's game
+    // be.
+    const float moveSpeed =
+        settings_.animationSpeed * (attracting() ? settings_.trailerMoveSpeed : 1.0f);
+    session_->setAnimationSeconds(settings_.animateMoves ? 0.085f / moveSpeed : 0.0f);
     Action a;
     a.kind = ActionKind::SetPromotion;
     a.text = settings_.autoPromoteTo;

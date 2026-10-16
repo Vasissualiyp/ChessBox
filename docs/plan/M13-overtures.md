@@ -1632,3 +1632,19 @@ front end calls `refreshTrailerView` so the camera shows the spline's value, not
 re-framed default. Hover shows the beat, move and fraction. Time <-> cue mapping
 (`trailerCueAt`, `trailerLength`, `beatOffset`, `trailerKeyTimes`) is in `Shell` and
 tested (`[timeline]`); the drawing is not. Not yet: dragging a keyframe to retime it.
+
+### Fix + feature: the shape-to-shape morph survives keyframes; morph and move speed sliders (2026-10-16)
+
+**Fix.** Once keyframes existed, the spline owned the pose scalars for the whole trailer and
+held the first keyframe's morph value backwards, so every beat's own reveal (the cylinder
+rolling up, the torus bending, Klein folding, the 3-D torus spreading) was gone. The camera is
+still one global spline, but the *pose* (morph, ghost, spread, slide, piece style, invert)
+now belongs to the keyframes only from the first keyframe of the current beat on
+(`Shell::poseKeysFrom`); before it, and in a beat with no keyframes, the beat's own morph
+plays, and it eases on from wherever the last keyframe left the pose. Test: "a beat's own
+morph plays until its first keyframe takes over".
+
+**Sliders.** `Settings::trailerMorphSpeed` and `trailerMoveSpeed` (0.25-4, default 1) scale
+the trailer's shape morph and every piece's move animation on top of the player's own
+settings, so tuning the trailer leaves their game alone. Live sliders sit in the trailer
+panel (`MORPH SPEED`, `MOVE SPEED`) and on the settings screen. Tests: `[speed]`.
