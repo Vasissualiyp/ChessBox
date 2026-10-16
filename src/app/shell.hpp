@@ -301,6 +301,11 @@ class Shell {
   /// The trailer's position in moves: whole beats laid end to end, plus the move, plus
   /// how far through it. The clock keyframes and the camera spline share.
   [[nodiscard]] float trailerTime() const;
+  /// True while the trailer's camera belongs to the author (the authored mode, which edit
+  /// mode implies). Nothing else may re-frame or move the camera then.
+  [[nodiscard]] bool trailerOwnsCamera() const noexcept {
+    return attracting() && trailerCamera_ == TrailerCamera::Authored;
+  }
 
   /// A variant's advertised difficulty, for the library's order and its colours.
   /// Resolved through the loader once and remembered; a name that will not load is

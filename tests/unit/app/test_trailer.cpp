@@ -412,3 +412,49 @@ TEST_CASE("restarting the trailer goes back to the first beat", "[unit][app][tra
   CHECK(shell->trailerCamera() == TrailerCamera::Authored);  // the mode is kept
   CHECK(shell->session()->game().moveHistory().size() == 1);
 }
+
+TEST_CASE("a zoom-in between two keyframes lands between them, not at the close one",
+          "[unit][app][trailer][spline]") {
+  auto shell = makeShell("trailer-zoom.conf");
+  shell->settings().watchDwell = 0.3f;
+  shell->startAttract(defaultAttractSequence());
+  shell->setTrailerCamera(TrailerCamera::Authored);
+  CameraKeyframe far = trailerKey(0, 1, 0, 0.5f);
+  far.camera.distance = 40.0f;
+  CameraKeyframe near = trailerKey(0, 9, 0, 0.5f);
+  near.camera.distance = 10.0f;
+  CameraKeyframe mid = trailerKey(0, 5, 0, 0.5f);
+  mid.camera.distance = 25.0f;
+  shell->cameraTrack().set(far);
+  shell->cameraTrack().set(mid);
+  shell->cameraTrack().set(near);
+  constexpr float kStep = 1.0f / 60.0f;
+  float atMid = -1.0f;
+  float lo = 1e9f;
+  for (int i = 0; i < 60 * 40 && shell->attractStep() == 0; ++i) {
+    shell->session()->advanceAnimation(kStep);
+    shell->advanceAttract(kStep);
+    shell->advanceCameraTrack(kStep);
+    const std::size_t ply = shell->session()->game().moveHistory().size();
+    const float d = shell->session()->camera().distance;
+    lo = std::min(lo, d);
+    if (ply == 5 && atMid < 0.0f) atMid = d;
+  }
+  // The pull-back factor is 1 outside the pause screen, so the distances are the keys'.
+  CHECK(atMid > 22.0f);
+  CHECK(atMid < 28.0f);
+  CHECK(lo >= 9.5f);  // never closer than the nearest key
+}
+
+TEST_CASE("the authored camera (and so edit mode) owns the camera",
+          "[unit][app][trailer]") {
+  auto shell = makeShell("trailer-owns.conf");
+  CHECK_FALSE(shell->trailerOwnsCamera());  // no trailer
+  shell->startAttract(defaultAttractSequence());
+  CHECK_FALSE(shell->trailerOwnsCamera());  // Auto
+  shell->setTrailerCamera(TrailerCamera::Authored);
+  CHECK(shell->trailerOwnsCamera());
+  shell->setTrailerCamera(TrailerCamera::Auto);
+  shell->setTrailerEditing(true);  // edit mode selects Authored
+  CHECK(shell->trailerOwnsCamera());
+}

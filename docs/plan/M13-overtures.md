@@ -1608,3 +1608,14 @@ open. Edit mode records the edit pose's targets, not the mid-ease value.
 **RESTART** (trailer panel, always shown): deferred a frame like a beat jump; keeps the
 camera and edit modes. Per-keyframe ease speed no longer applies in the trailer, so its
 buttons are gone. Tests: `[spline]` in `test_camera.cpp` / `test_trailer.cpp`.
+
+### Fix: an authored zoom-in landed on the tightest framing (2026-10-16)
+
+`main`'s per-frame "ease the frame toward the shape while a morph is in flight" ran for the
+whole trailer: the trailer's `geometryFormed` never equals the SHAPE toggle's target (`1`
+on the flat opener with the toggle off, mid-value under the spline), so `morphInFlight` was
+always true and `Session::easeFrameOn` pulled target and distance to the exact fit of the
+board every frame, on top of the keyframe spline - a halfway zoom came out close-up. It also
+ate manual zoom in edit mode. It now stands down while `Shell::trailerOwnsCamera()`. The
+spline itself was right: the new Shell test records 40 / 25 / 10 and reads 25 at the middle
+key. Not seen in a live window.

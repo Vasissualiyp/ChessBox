@@ -1669,7 +1669,12 @@ int main(int argc, char** argv) {
       // frame it settles so the endpoints land exactly (M17.24). This is a frame
       // correction only
       // - the player's own angle is kept.
-      if (morphInFlight) {
+      //
+      // Not while the trailer's authored camera is in charge: there the camera is the
+      // author's (keyframes, or their hand in edit mode), and the trailer's morph value
+      // never equals the SHAPE toggle's target, so this would run every frame and pull
+      // the zoom to the tightest framing over whatever was set up.
+      if (morphInFlight && !shell->trailerOwnsCamera()) {
         const app::Settings& st = shell->settings();
         render::easeMorphFraming(*shell->session(), optionsFor(*shell),
                                  poseFrom(st, shell->session()->variant()),
