@@ -19,10 +19,15 @@ the relevant test tags, and a visual capture inspected directly) before being co
 see each milestone's own "Status" section in `M17-geometry-view.md`/`M12-broadcast.md`/
 `M18-production-polish.md` for the detail and any deviations.
 
-**One open item, well-scoped:** M12.6's "Watch a game" interactive menu action (a library
-entry that plays a canonical game through the same `GameRunner` the `--play` CLI flag
-already uses) is specced but not yet built - see `M12-broadcast.md`'s own "Getting it in
-front of a user" note and the **Next** pointer at the end of this file.
+**Since the 2026-10-04 refresh:** the previously-open "Watch a game" item landed as M12.8
+(`0a1f742`), and the M13.9 main-menu attract/trailer sequence was built out and revised
+through several rounds (continuity, material-preserving trade-down, loop-to-standard, the
+camera-keyframe scaffold). Nothing in Wave 1 or M18 is open now.
+
+**Reprioritised 2026-10-16 (the user's direction):** the **piece editor of M7 is moved into
+Wave 1** (only the piece editor - not the board or gamemode editors), ahead of M16.1's store
+page - the shipped models are placeholders that need hand re-authoring and show in every
+clip. That is the next build; see the **Next** pointer at the end of this file.
 
 **Known, deliberately deferred, not blocking anything:** `torus3d_twist`'s own 3-D shell
 shape (M17.12/M17.22 - the flat-lattice variant plays correctly; only its *shape view* is
@@ -176,8 +181,8 @@ and `t6` stays lattice-only (no shape view planned; see the Verdict in
 
 ### 7. Then Wave 2
 
-M14 onboarding, M16.3 the demo (M16.2 is done), M7 the editors. See the release sequence in
-the roadmap.
+M14 onboarding, M16.3 the demo (M16.2 is done), M7's board and gamemode editors (its piece
+editor moved up to Wave 1 on 2026-10-16). See the release sequence in the roadmap.
 
 ## Verifying a derived overture (no shipped variant)
 
@@ -251,13 +256,15 @@ worth a human confirming the live feel next time SHAPE is used in play.
 
 ## Next
 
-The one open, well-scoped item: M12.6's **"Watch a game"** interactive menu action (see
-`M12-broadcast.md`'s "Getting it in front of a user" note). Spec it with full
-implementation precision (menu entry location, which bundled game file plays until the user
-supplies a real canonical one, determinism/reuse of the existing `GameRunner`) before
-dispatching - the existing M12.6 text states the want but not the exact build, the way every
-other dispatch this session has needed.
+**Reprioritised 2026-10-16 (the user's direction):** the **piece editor of M7 is moved into
+Wave 1**, ahead of M16.1's store page. The shipped piece models are placeholder primitive
+archetypes and are not good enough to ship; only a human can redraw them, and they appear in
+every clip, overture and store-page frame. So the next build is M7's **piece editor only** -
+the shared authoring document/serializer (M7.0), then the 3-D profile and 2-D icon editors
+(M7.3) that let a person replace the models. The board and gamemode editors (M7.5) are not
+part of Wave 1 and stay in Wave 2. See `00-roadmap.md`'s release sequence and
+`M7-editors.md`'s own "Scheduled (2026-10-16)" note and Status.
 
-Beyond that, Wave 1 and M18 are done; the next real work is Wave 2 (M14 onboarding,
-M10.2-M10.3 the baseline opponent, M16.2-M16.3 the demo, M7 the editors) per the roadmap's
-release sequence - see `00-roadmap.md`.
+Beyond that, Wave 1 (M11, M12 incl. the M12.6/M12.8 runner and watch, M13, M17) and M18 are
+done; the rest of the next real work is Wave 2 (M14 onboarding, M10.2-M10.3 the baseline
+opponent, M16.2-M16.3 the demo, M7's game editor) per the roadmap.

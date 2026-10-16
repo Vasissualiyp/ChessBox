@@ -23,6 +23,16 @@ M7.4 is green.
 editor edits a *variant document* that owns a list of piece documents. Both are the
 same editable, source-faithful model and both save through the same serializer.
 
+**Scheduled (2026-10-16).** **Only the piece editor** (M7.0 shared machinery + M7.1-M7.4) is
+moved up into the roadmap's **Wave 1**: the shipped piece models are placeholder primitive
+archetypes and are not good enough to ship, only a hand can improve them, and they are
+visible in every clip, overture, shape-view shot and store-page frame. It therefore ships
+**before** M16.1's store page. The **board editor and the gamemode editor** (M7.5 — the plan
+calls this "the game editor": the axes/topology/start-position half is the board editor, the
+piece-list/rules/policy half is the gamemode editor) are **not needed for Wave 1** and stay in
+Wave 2. This is a scheduling change only - the build order below (M7.0 first, then the piece
+editor, then the board and gamemode editors) is unchanged.
+
 ---
 
 ## M7.0 Shared machinery (build first, in this order)
@@ -448,3 +458,11 @@ fields (M7.2), the 3-D/2-D model editors (M7.3), the game editor's start positio
 pieces list, rules and policy (M7.5), and the package/validation-before-save flow
 (the save button does not yet gate on `finalize()`). The serializer and the move and
 axis editing are the parts the rest will hang off.
+
+**Wave-1 priority (2026-10-16).** Within the piece editor, what the pull-forward actually
+buys is **M7.3**: the 3-D profile editor, the revolve/symmetry step and the 2-D icon
+editor, plus M7.3.4 porting the shipped primitive archetypes to editable models. That is
+the surface a human needs to replace the placeholder models every clip currently shows.
+M7.1/M7.2 (movement, then fields/rules) already have their first cut and complete the
+editor around it; the board and gamemode editors (M7.5) are not part of Wave 1 and stay in
+Wave 2.

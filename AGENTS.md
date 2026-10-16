@@ -87,10 +87,12 @@ clean fix and a bug-infested one-shot on this codebase - not a style preference.
 non-trivial boundary topology, a Vulkan interface, a rule VM, and 5D-chess-style time
 travel. Next, in **release order** (visuals and clippable things first — see the roadmap's
 release sequence): Wave 1 M11 (move camera), M12 (clip export/cinema), M13 (generic
-overtures) and M16.1 (Coming Soon page); Wave 2 M14 (onboarding), M10.2-3 (the baseline
-opponent the demo needs), M16.2-3 (build pipeline + demo) and M7 (editors); Wave 3 M10.4-5
-(learned AI), M15 (campaign) and M8 (multiplayer); Wave 4 M9 (Workshop); Wave 5 M16.4-5
-(release). The fixed schedule anchor is **Steam Next Fest,
+overtures), M17 (play on the shape) and the piece editor of M7 (re-author the shipped piece
+models - only the piece editor, not the board or gamemode editors), then M16.1 (Coming Soon
+page); Wave 2 M14 (onboarding), M10.2-3 (the baseline opponent the demo needs), M16.2-3
+(build pipeline + demo) and the board and gamemode editors of M7;
+Wave 3 M10.4-5 (learned AI), M15 (campaign) and M8 (multiplayer); Wave 4 M9 (Workshop);
+Wave 5 M16.4-5 (release). The fixed schedule anchor is **Steam Next Fest,
 February 2027**. Milestone numbers are stable IDs, not a schedule; M11 only needs M4/M6 and
 M13 lets data-only variants animate.
 See [`docs/plan/00-roadmap.md`](docs/plan/00-roadmap.md); each milestone plan ends with a

@@ -179,4 +179,4 @@ Planned but not built: M14.3 (the played tutorial), the rest of M14.4 (per-piece
 reachability), M14.5 (the accessibility pass). It reads variant
 descriptions and difficulty (already in the variant data), the move preview
 (`expandAtom`/`tracePath`, M4/M5) and the visuals M11/M13 produce; it does **not** depend on
-M7's editor, so Release Wave 2 can run M14 and M7 in either order.
+M7's editors, so Release Wave 2 can run M14 and M7's board and gamemode editors in either order.
