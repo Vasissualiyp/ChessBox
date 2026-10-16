@@ -1528,6 +1528,7 @@ int main(int argc, char** argv) {
           applyAttractLook(*shell);
           renderer->setOptions(optionsFor(*shell));
           frameBoard(*shell);
+          shell->refreshTrailerView();  // the cut re-framed; edit mode shows the keys
           wasSurface = optionsFor(*shell).surface;
         }
       } else {

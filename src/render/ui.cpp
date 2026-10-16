@@ -1302,6 +1302,111 @@ void Ui::buildTrailerEditRows(app::Shell& shell, app::Session& session,
   }
 }
 
+float Ui::buildTrailerTimeline(app::Shell& shell) {
+  const view::Theme& t = theme_;
+  auto* small = static_cast<ImFont*>(fontSmall_);
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  const float margin = px(22.0f);
+  const float height = px(46.0f);
+  const float width = std::max(px(200.0f), vp->WorkSize.x - 2.0f * margin);
+  const float total = std::max(1.0f, shell.trailerLength());
+  const bool editing = shell.trailerEditing();
+
+  ImGui::SetNextWindowPos(
+      ImVec2(vp->WorkPos.x + margin, vp->WorkPos.y + vp->WorkSize.y - margin),
+      ImGuiCond_Always, ImVec2(0.0f, 1.0f));
+  ImGui::SetNextWindowSize(ImVec2(width, height), ImGuiCond_Always);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+  ImGui::Begin("##timeline", nullptr,
+               ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                   ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoSavedSettings |
+                   ImGuiWindowFlags_NoBringToFrontOnFocus);
+  const ImVec2 origin = ImGui::GetCursorScreenPos();
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  const auto u32 = [](const ImVec4& c) { return ImGui::ColorConvertFloat4ToU32(c); };
+  const float labelH = px(15.0f);
+  const float y0 = origin.y + labelH;  // the track
+  const float y1 = origin.y + height;
+  const auto xOf = [&](float g) { return origin.x + g / total * width; };
+
+  ImGui::InvisibleButton("##track", ImVec2(width, height));
+  const bool hovered = ImGui::IsItemHovered();
+
+  // Beats: one segment each, the current one lit.
+  ImGui::PushFont(small);
+  for (std::size_t b = 0; b < shell.attractCount(); ++b) {
+    const float xa = xOf(shell.beatOffset(b));
+    const float xb = xOf(shell.beatOffset(b + 1));
+    const bool current = b == shell.attractStep();
+    dl->AddRectFilled(
+        ImVec2(xa, y0), ImVec2(xb, y1),
+        u32(col(t.boneFaint, current ? 0.40f : (b % 2 == 0 ? 0.18f : 0.28f))));
+    dl->AddLine(ImVec2(xa, y0), ImVec2(xa, y1), u32(col(t.boneFaint, 0.55f)), 1.0f);
+    // One tick per move when they are far enough apart to read.
+    const std::size_t moves = shell.attractBeat(b).moves.size();
+    if ((xb - xa) / static_cast<float>(moves + 1) >= px(5.0f)) {
+      for (std::size_t m = 1; m <= moves; ++m) {
+        const float x = xOf(shell.beatOffset(b) + static_cast<float>(m));
+        dl->AddLine(ImVec2(x, y1 - px(6.0f)), ImVec2(x, y1), u32(col(t.boneFaint, 0.35f)),
+                    1.0f);
+      }
+    }
+    dl->PushClipRect(ImVec2(xa, origin.y), ImVec2(xb, y0), true);
+    dl->AddText(ImVec2(xa + px(4.0f), origin.y), u32(col(current ? t.bone : t.boneFaint)),
+                shell.attractBeat(b).variant.c_str());
+    dl->PopClipRect();
+  }
+  ImGui::PopFont();
+
+  // Keyframes, as diamonds. The one under the playhead is lit.
+  const float here = shell.trailerTime();
+  const float r = px(5.5f);
+  const float ymid = 0.5f * (y0 + y1);
+  for (const float time : shell.trailerKeyTimes()) {
+    const float x = xOf(time);
+    const bool lit = std::abs(time - here) < 1.0f / 16.0f;
+    const ImU32 fill = u32(col(lit ? t.bone : t.ember));
+    const ImVec2 pts[4] = {ImVec2(x, ymid - r), ImVec2(x + r, ymid), ImVec2(x, ymid + r),
+                           ImVec2(x - r, ymid)};
+    dl->AddConvexPolyFilled(pts, 4, fill);
+    dl->AddPolyline(pts, 4, u32(col(t.boneFaint, 0.9f)), ImDrawFlags_Closed, 1.0f);
+  }
+
+  // Playhead.
+  const float xh = xOf(here);
+  dl->AddLine(ImVec2(xh, y0 - px(3.0f)), ImVec2(xh, y1), u32(col(t.bone)), px(2.0f));
+  dl->AddTriangleFilled(ImVec2(xh - px(5.0f), y0 - px(8.0f)),
+                        ImVec2(xh + px(5.0f), y0 - px(8.0f)), ImVec2(xh, y0 - px(2.0f)),
+                        u32(col(t.bone)));
+
+  // Scrubbing: edit mode only, and it snaps - to a keyframe when the pointer is near one,
+  // otherwise to the grid in use.
+  if (hovered || ImGui::IsItemActive()) {
+    const float mx = ImGui::GetIO().MousePos.x;
+    const float g = std::clamp((mx - origin.x) / width * total, 0.0f, total);
+    float snapTime = -1.0f;
+    for (const float time : shell.trailerKeyTimes()) {
+      if (std::abs(xOf(time) - mx) <= px(7.0f)) snapTime = time;
+    }
+    const app::TrailerCue cue =
+        snapTime >= 0.0f ? shell.trailerCueAt(snapTime, 8) : shell.trailerCueAt(g);
+    if (editing && ImGui::IsItemActive()) {
+      shell.requestTrailerSeek(cue.beat, cue.ply, cue.sub);
+    }
+    if (hovered) {
+      ImGui::BeginTooltip();
+      ImGui::Text("%s  -  move %zu + %zu/8%s",
+                  shell.attractBeat(cue.beat).variant.c_str(), cue.ply, cue.sub,
+                  snapTime >= 0.0f ? "  -  keyframe" : "");
+      if (!editing) ImGui::TextUnformatted("EDIT CAMERA to scrub");
+      ImGui::EndTooltip();
+    }
+  }
+  ImGui::End();
+  ImGui::PopStyleVar();
+  return height + px(8.0f);
+}
+
 UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   UiRequest request;
   const view::Theme& t = theme_;
@@ -1569,9 +1674,11 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   }
 
   // ------------------------------------------------------------ controls, bottom left
-  ImGui::SetNextWindowPos(
-      ImVec2(vp->WorkPos.x + margin, vp->WorkPos.y + vp->WorkSize.y - margin),
-      ImGuiCond_Always, ImVec2(0.0f, 1.0f));
+  // The trailer's timeline strip takes the bottom edge; the controls sit above it.
+  const float timelineLift = shell.attracting() ? buildTrailerTimeline(shell) : 0.0f;
+  ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + margin,
+                                 vp->WorkPos.y + vp->WorkSize.y - margin - timelineLift),
+                          ImGuiCond_Always, ImVec2(0.0f, 1.0f));
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
   ImGui::Begin("##controls", nullptr, overlayFlags);
   if (shell.attracting()) {

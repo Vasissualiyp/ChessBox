@@ -458,3 +458,82 @@ TEST_CASE("the authored camera (and so edit mode) owns the camera",
   shell->setTrailerEditing(true);  // edit mode selects Authored
   CHECK(shell->trailerOwnsCamera());
 }
+
+TEST_CASE("the trailer timeline maps time to a beat, move and fraction and back",
+          "[unit][app][trailer][timeline]") {
+  auto shell = makeShell("trailer-timeline.conf");
+  const AttractSequence seq = defaultAttractSequence();
+  shell->startAttract(seq);
+  float total = 0.0f;
+  for (const AttractStep& s : seq) total += static_cast<float>(s.moves.size() + 1);
+  CHECK(shell->trailerLength() == total);
+  CHECK(shell->beatOffset(0) == 0.0f);
+  CHECK(shell->beatOffset(1) == static_cast<float>(seq[0].moves.size() + 1));
+
+  shell->setTrailerGrid(8);
+  for (const auto& [beat, ply, sub] : {std::tuple{0, 1, 0}, std::tuple{0, 5, 3},
+                                       std::tuple{2, 4, 7}, std::tuple{5, 10, 0}}) {
+    const float g = shell->beatOffset(static_cast<std::size_t>(beat)) +
+                    static_cast<float>(ply) + static_cast<float>(sub) / 8.0f;
+    const TrailerCue cue = shell->trailerCueAt(g);
+    CAPTURE(beat, ply, sub);
+    CHECK(cue.beat == static_cast<std::size_t>(beat));
+    CHECK(cue.ply == static_cast<std::size_t>(ply));
+    CHECK(cue.sub == static_cast<std::size_t>(sub));
+  }
+  // Snapped to the grid in use.
+  shell->setTrailerGrid(4);
+  const float base = shell->beatOffset(1) + 3.0f;
+  CHECK(shell->trailerCueAt(base + 0.30f).sub == 2);
+  CHECK(shell->trailerCueAt(base + 0.40f).sub == 4);
+  CHECK(shell->trailerCueAt(base + 0.90f).ply == 4);  // rounds up into the next move
+  CHECK(shell->trailerCueAt(base + 0.90f).sub == 0);
+  // Out of range clamps rather than wandering off the trailer.
+  CHECK(shell->trailerCueAt(-5.0f).beat == 0);
+  CHECK(shell->trailerCueAt(total + 50.0f).beat == seq.size() - 1);
+}
+
+TEST_CASE("keyframe times for the timeline are in order and offset by beat",
+          "[unit][app][trailer][timeline]") {
+  auto shell = makeShell("trailer-keytimes.conf");
+  shell->startAttract(defaultAttractSequence());
+  shell->cameraTrack().set(trailerKey(1, 3, 4, 0.1f, 1.0f, "cylinder"));
+  shell->cameraTrack().set(trailerKey(0, 2, 0, 0.1f));
+  shell->cameraTrack().set(trailerKey(0, 2, 2, 0.1f));
+  // A keyframe for another variant's beat, or an ordinary-game one, is not on the
+  // timeline.
+  shell->cameraTrack().set(trailerKey(1, 3, 0, 0.1f, 1.0f, "torus"));
+  CameraKeyframe loose = trailerKey(0, 1, 0, 0.1f);
+  loose.cue.beat = 0;
+  shell->cameraTrack().set(loose);
+  const std::vector<float> times = shell->trailerKeyTimes();
+  REQUIRE(times.size() == 3);
+  CHECK(times[0] == 2.0f);
+  CHECK(times[1] == 2.25f);
+  CHECK(times[2] == shell->beatOffset(1) + 3.5f);
+}
+
+TEST_CASE("a timeline click seeks in edit mode, a frame later",
+          "[unit][app][trailer][timeline]") {
+  auto shell = makeShell("trailer-seek.conf");
+  shell->startAttract(defaultAttractSequence());
+  shell->requestTrailerSeek(2, 3, 2);  // not editing: dropped
+  CHECK_FALSE(shell->advanceAttract(1.0f / 60.0f));
+  CHECK(shell->attractStep() == 0);
+
+  shell->setTrailerEditing(true);
+  // Within the beat: same session, the move and fraction set.
+  const Session* before = shell->session();
+  shell->requestTrailerSeek(0, 6, 4);
+  CHECK(shell->session() == before);
+  CHECK(shell->advanceAttract(1.0f / 60.0f) == false);
+  CHECK(shell->session()->game().moveHistory().size() == 6);
+  CHECK(shell->trailerEditSub() == 4);
+  // Across beats: replays the chain, reports a cut.
+  shell->requestTrailerSeek(2, 3, 2);
+  CHECK(shell->advanceAttract(1.0f / 60.0f));
+  CHECK(shell->attractStep() == 2);
+  CHECK(shell->session()->game().moveHistory().size() == 3);
+  CHECK(shell->trailerEditSub() == 2);
+  CHECK(shell->trailerTime() == shell->beatOffset(2) + 3.25f);
+}

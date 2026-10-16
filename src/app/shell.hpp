@@ -107,6 +107,13 @@ using AttractSequence = std::vector<AttractStep>;
 /// piece. `Authored` holds still except where a recorded keyframe eases it.
 enum class TrailerCamera : std::uint8_t { Auto, Follow, Authored };
 
+/// A point on the trailer timeline: a beat, a move in it, and eighths through that move.
+struct TrailerCue {
+  std::size_t beat{0};
+  std::size_t ply{0};
+  std::size_t sub{0};
+};
+
 /// The pose scalars the trailer's edit mode owns while the trailer is paused: where the
 /// SHAPE / GHOST / SPREAD buttons put them, and what a keyframe then records.
 struct TrailerPose {
@@ -301,6 +308,27 @@ class Shell {
   /// The trailer's position in moves: whole beats laid end to end, plus the move, plus
   /// how far through it. The clock keyframes and the camera spline share.
   [[nodiscard]] float trailerTime() const;
+  /// The trailer's whole length in the same units (every beat's moves + 1, end to end).
+  [[nodiscard]] float trailerLength() const;
+  /// Where beat `beat` starts on the timeline.
+  [[nodiscard]] float beatOffset(std::size_t beat) const;
+  /// The beat, move and fraction at timeline position `g`, snapped to the current grid
+  /// and clamped to the trailer. `grid` 0 means the grid in use; otherwise 1, 2, 4 or 8.
+  [[nodiscard]] TrailerCue trailerCueAt(float g, int grid = 0) const;
+  /// The timeline positions of the trailer's keyframes, in order - what a timeline draws.
+  [[nodiscard]] std::vector<float> trailerKeyTimes() const;
+  /// The variant and move count of beat `beat`, for labelling the timeline.
+  [[nodiscard]] const AttractStep& attractBeat(std::size_t beat) const {
+    return attract_[beat];
+  }
+  /// Edit mode only: go to a point on the timeline. Deferred to the next `advanceAttract`
+  /// (it may replace the session the interface is holding); a request outside edit mode
+  /// is dropped. Within the current beat only the move and fraction change.
+  void requestTrailerSeek(std::size_t beat, std::size_t ply, std::size_t sub);
+  /// Re-apply the keyframe spline's value at the edit position - after a cut re-framed
+  /// the camera - so what edit mode shows is what the keyframes say. A no-op without
+  /// keyframes.
+  void refreshTrailerView();
   /// True while the trailer's camera belongs to the author (the authored mode, which edit
   /// mode implies). Nothing else may re-frame or move the camera then.
   [[nodiscard]] bool trailerOwnsCamera() const noexcept {
@@ -415,11 +443,11 @@ class Shell {
   /// The trailer's keyframes in time order, as (trailer time, keyframe); keyframes naming
   /// a beat that does not exist or that has a different variant are skipped.
   [[nodiscard]] std::vector<std::pair<float, const CameraKeyframe*>> trailerKeys() const;
-  [[nodiscard]] float beatOffset(std::size_t beat) const;
   /// Put the camera and pose where the keyframe spline says they are at trailer time `g`.
   /// `toEditPose` aims the morph scalars at the edit pose (edit mode eases to it) rather
   /// than writing the settings directly (playback).
   void applySplineAt(float g, bool toEditPose);
+  void seekNow(const TrailerCue& to);
   [[nodiscard]] bool splineDrives() const;
 
   std::vector<std::string> library_;
@@ -458,7 +486,7 @@ class Shell {
   float swayWeight_{1.0f};
   float trailerKeySpeed_{2.0f};
   TrailerPose editPose_;
-  std::optional<int> pendingJump_;
+  std::optional<TrailerCue> pendingSeek_;
   bool pendingRestart_{false};
   int trailerGrid_{1};
   std::size_t editSub_{0};

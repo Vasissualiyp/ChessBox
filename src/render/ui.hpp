@@ -235,6 +235,10 @@ class Ui {
   /// shape-mode buttons, shown above the trailer's main row while it is paused for edit.
   void buildTrailerEditRows(app::Shell& shell, app::Session& session, UiRequest& request,
                             ImFont* display, ImFont* small, bool editing);
+  /// The trailer's timeline strip (M13.9): beats as segments, keyframes as diamonds, the
+  /// playhead, and - in edit mode - click or drag to scrub. Returns the height it takes
+  /// so the controls sit above it.
+  float buildTrailerTimeline(app::Shell& shell);
   UiRequest buildPieceMoves(app::Shell& shell);
   /// The piece designer's three tabs. They share one pane, because they are three jobs
   /// on one piece and moving between them must not feel like leaving the piece behind.

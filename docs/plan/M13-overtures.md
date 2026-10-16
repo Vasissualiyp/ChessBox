@@ -1619,3 +1619,16 @@ board every frame, on top of the keyframe spline - a halfway zoom came out close
 ate manual zoom in edit mode. It now stands down while `Shell::trailerOwnsCamera()`. The
 spline itself was right: the new Shell test records 40 / 25 / 10 and reads 25 at the middle
 key. Not seen in a live window.
+
+### Feature: a keyframe timeline (2026-10-16)
+
+A strip along the bottom of the trailer (`Ui::buildTrailerTimeline`), shown whenever the
+trailer runs: one segment per beat (labelled, the current one lit, a tick per move), a
+diamond per keyframe (lit under the playhead), and the playhead at `Shell::trailerTime()`.
+In edit mode a click or drag scrubs: the pointer snaps to a keyframe when within a few
+pixels, otherwise to the grid in use, and asks `Shell::requestTrailerSeek` - deferred a
+frame like the beat jumps, since a cross-beat seek replaces the session. After a cut the
+front end calls `refreshTrailerView` so the camera shows the spline's value, not the
+re-framed default. Hover shows the beat, move and fraction. Time <-> cue mapping
+(`trailerCueAt`, `trailerLength`, `beatOffset`, `trailerKeyTimes`) is in `Shell` and
+tested (`[timeline]`); the drawing is not. Not yet: dragging a keyframe to retime it.

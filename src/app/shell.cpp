@@ -667,7 +667,30 @@ void Shell::trailerGoto(std::size_t beat, std::size_t ply) {
 }
 
 void Shell::requestTrailerJumpBeat(int delta) {
-  if (attracting() && trailerEditing_) pendingJump_ = delta;
+  if (!attracting() || !trailerEditing_) return;
+  const long n = static_cast<long>(attract_.size());
+  const long next = ((static_cast<long>(attractIndex_) + delta) % n + n) % n;
+  pendingSeek_ = TrailerCue{static_cast<std::size_t>(next), 0, 0};
+}
+
+void Shell::requestTrailerSeek(std::size_t beat, std::size_t ply, std::size_t sub) {
+  if (!attracting() || !trailerEditing_ || beat >= attract_.size()) return;
+  pendingSeek_ = TrailerCue{beat, ply, std::min<std::size_t>(sub, 7)};
+}
+
+void Shell::seekNow(const TrailerCue& to) {
+  if (!attracting() || !trailerEditing_ || to.beat >= attract_.size()) return;
+  if (to.beat != attractIndex_) {
+    trailerGoto(to.beat, to.ply);
+  } else if (session_->watching()) {
+    (void)session_->watchSeek(std::min(to.ply, session_->watchCount()));
+  }
+  editSub_ = to.sub;
+  applySplineAt(trailerTime(), true);
+}
+
+void Shell::refreshTrailerView() {
+  if (attracting() && trailerEditing_) applySplineAt(trailerTime(), true);
 }
 
 void Shell::trailerJumpBeat(int delta) {
@@ -693,7 +716,7 @@ void Shell::stopAttract() {
   attract_.clear();
   attractIndex_ = 0;
   trailerEditing_ = false;
-  pendingJump_.reset();
+  pendingSeek_.reset();
   pendingRestart_ = false;
   trailerClock_ = 0.0f;
   swayWeight_ = 1.0f;
@@ -715,7 +738,7 @@ void Shell::stopAttract() {
 
 bool Shell::advanceAttract(float dt) {
   if (attract_.empty() || session_ == nullptr) {
-    pendingJump_.reset();
+    pendingSeek_.reset();
     return false;
   }
   if (pendingRestart_) {
@@ -727,10 +750,10 @@ bool Shell::advanceAttract(float dt) {
     if (editing) setTrailerEditing(true);
     trailerCutPending_ = true;
   }
-  if (pendingJump_.has_value()) {
-    const int delta = *pendingJump_;
-    pendingJump_.reset();
-    trailerJumpBeat(delta);  // may replace the session; nothing below holds the old one
+  if (pendingSeek_.has_value()) {
+    const TrailerCue to = *pendingSeek_;
+    pendingSeek_.reset();
+    seekNow(to);  // may replace the session; nothing below holds the old one
     if (attract_.empty() || session_ == nullptr) return false;
   }
   const AttractStep& step = attract_[attractIndex_];
@@ -917,6 +940,37 @@ float Shell::beatOffset(std::size_t beat) const {
     offset += static_cast<float>(attract_[i].moves.size() + 1);
   }
   return offset;
+}
+
+float Shell::trailerLength() const {
+  return beatOffset(attract_.size());
+}
+
+TrailerCue Shell::trailerCueAt(float g, int grid) const {
+  if (attract_.empty()) return {};
+  g = std::clamp(g, 0.0f, std::max(0.0f, trailerLength() - 1e-3f));
+  std::size_t beat = 0;
+  while (beat + 1 < attract_.size() && beatOffset(beat + 1) <= g) ++beat;
+  const float local = g - beatOffset(beat);
+  const std::size_t count = attract_[beat].moves.size();
+  std::size_t ply = std::min(static_cast<std::size_t>(local), count);
+  const float frac = local - static_cast<float>(ply);
+  const int useGrid =
+      (grid == 1 || grid == 2 || grid == 4 || grid == 8) ? grid : trailerGrid_;
+  const float unit = 8.0f / static_cast<float>(useGrid);
+  std::size_t sub = static_cast<std::size_t>(
+      static_cast<float>(std::lround(frac * 8.0f / unit)) * unit);
+  if (sub >= 8) {
+    sub = 0;
+    if (ply < count) ++ply;
+  }
+  return {beat, ply, sub};
+}
+
+std::vector<float> Shell::trailerKeyTimes() const {
+  std::vector<float> times;
+  for (const auto& [time, kf] : trailerKeys()) times.push_back(time);
+  return times;
 }
 
 float Shell::trailerTime() const {
