@@ -1745,31 +1745,38 @@ TEST_CASE("the look-ahead morph sees the camera about to cross the board", "[ren
   // inner ring the chase camera's own path crosses the tube; the aligned board clears it.
   const VariantSpec& v = *new VariantSpec(test::loadVariant("torus"));
   const auto cell = [&](int f, int r) { return v.dims.toCell(Coord::of({f, r})); };
-  // A three-step rank glide that wraps toward the tube's inner side: on the unaided board
-  // the chase camera's own path crosses the tube somewhere along it. Scanning rather than
-  // pinning a `t` keeps this from riding on the glide sampler's exact arc.
-  view::MovePath path;
-  path.from = cell(1, 0);
-  path.to = cell(1, 3);
-  for (int r = 0; r < 3; ++r) {
-    path.steps.push_back(
-        {cell(1, r), cell(1, r + 1), view::StepKind::Interior, {}, 0, Side::Max});
-  }
+  // A three-step rank glide on some file: on the unaided board the chase camera's own
+  // path crosses the tube for at least one file (the inner side). Scanning files and `t`
+  // rather than pinning either keeps this from riding on the glide sampler's exact arc.
   const PlaySurface surf = PlaySurface::build(v);
   const float eye = 6.0f;
-  bool clipped = false;
-  for (float tt = 0.0f; tt <= 1.0001f; tt += 0.05f) {
-    clipped = clipped || followClips(path, surf, tt, 0.06f, eye);
+  int clippedFile = -1;
+  view::MovePath clippedPath;
+  for (int f = 0; f < 8 && clippedFile < 0; ++f) {
+    view::MovePath path;
+    path.from = cell(f, 0);
+    path.to = cell(f, 3);
+    for (int r = 0; r < 3; ++r) {
+      path.steps.push_back(
+          {cell(f, r), cell(f, r + 1), view::StepKind::Interior, {}, 0, Side::Max});
+    }
+    for (float tt = 0.0f; tt <= 1.0001f; tt += 0.05f) {
+      if (followClips(path, surf, tt, 0.06f, eye)) {
+        clippedFile = f;
+        clippedPath = path;
+        break;
+      }
+    }
   }
-  CHECK(clipped);
+  REQUIRE(clippedFile >= 0);
   // Turn the board so the followed cell presents its outer face, and the view is clear.
   const view::Vec3 travel{0.0f, 0.0f, 1.0f};
-  const SlideOffset off = alignSlideU(v, cell(1, 3), travel, eye);
+  const SlideOffset off = alignSlideU(v, cell(clippedFile, 3), travel, eye);
   SurfacePose pose;
   pose.slideU = off.u;
   pose.slideV = off.v;
   const PlaySurface turned = PlaySurface::build(v, pose);
-  CHECK_FALSE(followClips(path, turned, 1.0f, 0.0f, eye));
+  CHECK_FALSE(followClips(clippedPath, turned, 1.0f, 0.0f, eye));
 }
 
 TEST_CASE("the shape's seam rails sit on the flat view's seams", "[render]") {
@@ -2939,4 +2946,44 @@ TEST_CASE("swapping layer colours flips every second layer and nothing else",
   const Coord c = Coord::of({1, 1, 1});
   CHECK(cb::render::squareParity(c, cube, 3, true) ==
         cb::render::squareParity(c, cube, 3, false));
+}
+
+TEST_CASE(
+    "a straight step's boundary waypoint lies between the two squares, not beside them",
+    "[render][move]") {
+  // Seat centres sit at (file + 0.5, rank + 0.5) in lattice units. The waypoint a glide
+  // passes through between two seats must be taken from those same coordinates: sampling
+  // from (file, rank) put it half a cell off the line, so a rook went to a corner and
+  // then the middle of the edge.
+  for (const char* name : {"cylinder", "torus", "klein", "mobius"}) {
+    CAPTURE(name);
+    const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
+    const PlaySurface s = PlaySurface::build(v);
+    const auto seat = [&](int f, int r) -> const SurfaceSeat* {
+      for (const SurfaceSeat& st : s.seats()) {
+        if (st.file == f && st.rank == r) return &st;
+      }
+      return nullptr;
+    };
+    const SurfaceSeat* a = seat(2, 3);
+    REQUIRE(a != nullptr);
+    for (const auto& d : {std::pair{1, 0}, std::pair{0, 1}, std::pair{1, 1}}) {
+      const SurfaceSeat* b = seat(2 + d.first, 3 + d.second);
+      REQUIRE(b != nullptr);
+      cb::view::Vec3 w{};
+      REQUIRE(s.nearestBoundary(*a, *b, w));
+      // The waypoint is the surface point half-way between the two squares *in lattice
+      // coordinates*, the same coordinates the seat centres are sampled at.
+      cb::view::Vec3 want{};
+      REQUIRE(s.pointAt(
+          static_cast<float>(a->file) + 0.5f + 0.5f * static_cast<float>(d.first),
+          static_cast<float>(a->rank) + 0.5f + 0.5f * static_cast<float>(d.second),
+          want));
+      CHECK(cb::view::length(w - want) < 1e-3f);
+      cb::view::Vec3 centre{};
+      REQUIRE(s.pointAt(static_cast<float>(a->file) + 0.5f,
+                        static_cast<float>(a->rank) + 0.5f, centre));
+      CHECK(cb::view::length(centre - a->centre) < 1e-3f);
+    }
+  }
 }

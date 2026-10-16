@@ -3092,3 +3092,14 @@ so the actual `SDL_EVENT_MOUSE_BUTTON_DOWN` -> pixel -> `pick` call is covered b
 compiled call site plus the unit tests, not by a scripted click or a screenshot. A
 screenshot could not have shown what a click resolved to in any case. The ordinary-board
 part (2) is unbuilt, as recorded above.
+
+### Fix: a straight glide's waypoint sat half a cell off the line (2026-10-16)
+
+`PlaySurface::nearestBoundary` sampled the boundary between two seats from `(file, rank)`
+while seat centres are sampled at `(file + 0.5, rank + 0.5)`, so for an orthogonal step the
+waypoint landed on the start square's far edge corner-wise: a rook went to a corner, then
+the middle of the edge. Diagonals were off by the same half cell. Only glides use it, so
+knights (which arc) were unaffected; every glued shape was. The half-cell now belongs to
+the base coordinate. Test: "a straight step's boundary waypoint lies between the two
+squares" pins the convention against `pointAt`. The look-ahead morph test relied on the
+detour for its clip and now scans files for one that still clips.

@@ -228,9 +228,13 @@ bool PlaySurface::nearestBoundary(const SurfaceSeat& a, const SurfaceSeat& b,
     if (d < -e * 0.5f) d += e;
     return d;
   };
-  const float bf = static_cast<float>(a.file) +
+  // Seat centres are at (file + 0.5, rank + 0.5); the boundary is half a step on from
+  // there, so the half-cell offset belongs in the base too - without it the waypoint sat
+  // half a cell off the line of an orthogonal step (a corner, then the middle of the
+  // edge).
+  const float bf = static_cast<float>(a.file) + 0.5f +
                    shortStep(static_cast<float>(b.file - a.file), nx_) * 0.5f;
-  const float br = static_cast<float>(a.rank) +
+  const float br = static_cast<float>(a.rank) + 0.5f +
                    shortStep(static_cast<float>(b.rank - a.rank), nz_) * 0.5f;
   return pointAt(bf, br, out);
 }
