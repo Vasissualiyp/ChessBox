@@ -280,6 +280,10 @@ class Shell {
   void trailerGoto(std::size_t beat, std::size_t ply);
   /// Edit mode only: jump `delta` beats (wrapping), landing at the start of that beat.
   void trailerJumpBeat(int delta);
+  /// The same jump, deferred to the start of the next `advanceAttract`. A jump replaces
+  /// the session, and the interface keeps a reference to it for the rest of its frame -
+  /// so the interface must ask, never jump.
+  void requestTrailerJumpBeat(int delta);
 
   /// A variant's advertised difficulty, for the library's order and its colours.
   /// Resolved through the loader once and remembered; a name that will not load is
@@ -423,6 +427,7 @@ class Shell {
   float swayWeight_{1.0f};
   float trailerKeySpeed_{2.0f};
   TrailerPose editPose_;
+  std::optional<int> pendingJump_;
   std::optional<float> trailerGhost_;
   std::optional<bool> trailerFlatPieces_;
   /// The pose the last keyframe reached in this beat asked for; replaces the beat's own

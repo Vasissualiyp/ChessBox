@@ -662,6 +662,10 @@ void Shell::trailerGoto(std::size_t beat, std::size_t ply) {
   trailerCutPending_ = true;
 }
 
+void Shell::requestTrailerJumpBeat(int delta) {
+  if (attracting() && trailerEditing_) pendingJump_ = delta;
+}
+
 void Shell::trailerJumpBeat(int delta) {
   if (!attracting() || !trailerEditing_) return;
   const long n = static_cast<long>(attract_.size());
@@ -685,6 +689,7 @@ void Shell::stopAttract() {
   attract_.clear();
   attractIndex_ = 0;
   trailerEditing_ = false;
+  pendingJump_.reset();
   trailerClock_ = 0.0f;
   swayWeight_ = 1.0f;
   authoredPose_.reset();
@@ -705,7 +710,16 @@ void Shell::stopAttract() {
 }
 
 bool Shell::advanceAttract(float dt) {
-  if (attract_.empty() || session_ == nullptr) return false;
+  if (attract_.empty() || session_ == nullptr) {
+    pendingJump_.reset();
+    return false;
+  }
+  if (pendingJump_.has_value()) {
+    const int delta = *pendingJump_;
+    pendingJump_.reset();
+    trailerJumpBeat(delta);  // may replace the session; nothing below holds the old one
+    if (attract_.empty() || session_ == nullptr) return false;
+  }
   const AttractStep& step = attract_[attractIndex_];
   // The resting sway fades in and out rather than switching, so changing mode or entering
   // edit mode never jumps the view.

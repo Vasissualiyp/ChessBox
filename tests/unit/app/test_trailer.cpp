@@ -254,3 +254,30 @@ TEST_CASE("the trailer previews each move for the configured time",
   }
   CHECK(sawPreview);
 }
+
+TEST_CASE("a beat jump asked for by the interface waits for the next frame",
+          "[unit][app][trailer]") {
+  // The interface holds a reference to the session for the rest of its frame; a jump
+  // replaces the session, so doing it mid-frame left the panel on a dead one and crashed.
+  auto shell = makeShell("trailer-defer.conf");
+  shell->startAttract(defaultAttractSequence());
+  shell->setTrailerEditing(true);
+  const Session* before = shell->session();
+  shell->requestTrailerJumpBeat(+1);
+  CHECK(shell->session() == before);  // nothing happened yet
+  CHECK(shell->attractStep() == 0);
+  CHECK(shell->advanceAttract(1.0f / 60.0f));  // applied here, reported as a cut
+  CHECK(shell->attractStep() == 1);
+  shell->requestTrailerJumpBeat(-1);
+  CHECK(shell->advanceAttract(1.0f / 60.0f));
+  CHECK(shell->attractStep() == 0);
+  // Jumping backwards from the first beat wraps to the last.
+  shell->requestTrailerJumpBeat(-1);
+  CHECK(shell->advanceAttract(1.0f / 60.0f));
+  CHECK(shell->attractStep() == shell->attractCount() - 1);
+  // A request outside edit mode, or after the trailer stops, is dropped.
+  shell->setTrailerEditing(false);
+  shell->requestTrailerJumpBeat(+1);
+  shell->stopAttract();
+  CHECK_FALSE(shell->advanceAttract(1.0f / 60.0f));
+}

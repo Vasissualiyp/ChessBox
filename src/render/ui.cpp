@@ -1216,10 +1216,10 @@ void Ui::buildTrailerEditRows(app::Shell& shell, app::Session& session,
       (void)shell.trailerStep(+1);
     ImGui::SameLine();
     if (button("< BEAT", t, px(92), false, true, true, display))
-      shell.trailerJumpBeat(-1);
+      shell.requestTrailerJumpBeat(-1);
     ImGui::SameLine();
     if (button("BEAT >", t, px(92), false, true, true, display))
-      shell.trailerJumpBeat(+1);
+      shell.requestTrailerJumpBeat(+1);
     std::snprintf(text, sizeof(text), "beat %zu of %zu  -  %s  -  move %zu",
                   shell.attractStep() + 1, shell.attractCount(),
                   shell.currentVariant().c_str(), session.game().moveHistory().size());

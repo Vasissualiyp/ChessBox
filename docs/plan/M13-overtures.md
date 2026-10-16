@@ -1570,3 +1570,13 @@ Before a move plays, the piece about to move is selected and its legal squares l
 holds, then plays. Only the trailer passes a preview; "Watch a game" is unchanged. The first
 move of each beat starts at once, and edit-mode stepping bypasses the preview. Tests:
 `[preview]` in `test_watch.cpp` and `test_trailer.cpp`.
+
+### Fix: `BEAT >` / `< BEAT` crashed the app (2026-10-16)
+
+The trailer panel holds `app::Session& session` for the rest of its frame, and a beat jump
+(`trailerGoto` -> `startAttractStep` -> `startGame`) replaces `Shell::session_`; the panel
+then read the destroyed session (the "beat n of m - move k" note, and the HUD after it). The
+interface now calls `Shell::requestTrailerJumpBeat`, applied at the top of the next
+`advanceAttract`, before anything holds the old session. Rule: UI code must never call
+something that replaces the session. Test: "a beat jump asked for by the interface waits for
+the next frame". Not reproduced in a live window (no input driver here).
