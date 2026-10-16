@@ -12,6 +12,7 @@
 #include "io/fen.hpp"
 #include "io/game_file.hpp"
 #include "io/variant_toml.hpp"
+#include "view/camera.hpp"
 #include "view/morph.hpp"
 
 namespace cb::app {
@@ -588,8 +589,9 @@ Result<void> Shell::startAttractStep(std::size_t index) {
   // Per-beat camera state: a fresh session, so its follow policy is the trailer's, not
   // the player's; a keyframe pose from the previous beat does not carry over; and the
   // track's "last cue" is forgotten so the new beat's first keyframe is reached.
-  authoredPose_.reset();
   cameraTrackCue_.reset();
+  lastPly_ = static_cast<std::size_t>(-1);
+  editSub_ = 0;
   applyTrailerCamera();
   return {};
 }
@@ -634,6 +636,7 @@ bool Shell::trailerStep(int delta) {
   }
   const long target = static_cast<long>(session_->watchIndex()) + delta;
   if (target < 0 || target > static_cast<long>(session_->watchCount())) return false;
+  editSub_ = 0;
   if (delta == 1) return session_->watchStep();
   return session_->watchSeek(static_cast<std::size_t>(target)).has_value();
 }
@@ -659,6 +662,7 @@ void Shell::trailerGoto(std::size_t beat, std::size_t ply) {
   settings_.geometryGhost = step.ghostTarget;
   settings_.geometryShellSpread = step.spreadTarget;
   editPose_ = {step.formedTarget, step.ghostTarget, step.spreadTarget};
+  editSub_ = 0;
   trailerCutPending_ = true;
 }
 
@@ -690,9 +694,9 @@ void Shell::stopAttract() {
   attractIndex_ = 0;
   trailerEditing_ = false;
   pendingJump_.reset();
+  pendingRestart_ = false;
   trailerClock_ = 0.0f;
   swayWeight_ = 1.0f;
-  authoredPose_.reset();
   trailerGhost_.reset();
   trailerFlatPieces_.reset();
   if (session_ != nullptr) session_->stopWatching();
@@ -713,6 +717,15 @@ bool Shell::advanceAttract(float dt) {
   if (attract_.empty() || session_ == nullptr) {
     pendingJump_.reset();
     return false;
+  }
+  if (pendingRestart_) {
+    pendingRestart_ = false;
+    const AttractSequence seq = attract_;
+    const bool editing = trailerEditing_;
+    startAttract(seq);  // replaces the session; nothing below holds the old one
+    if (attract_.empty() || session_ == nullptr) return false;
+    if (editing) setTrailerEditing(true);
+    trailerCutPending_ = true;
   }
   if (pendingJump_.has_value()) {
     const int delta = *pendingJump_;
@@ -744,24 +757,36 @@ bool Shell::advanceAttract(float dt) {
   }
   trailerClock_ += dt;
   if (session_->watching()) session_->advanceWatching(dt);
-  // An authored keyframe's pose replaces the beat's own default once reached, so the
-  // driver does not ease it straight back.
-  const TrailerPose want =
-      (trailerCamera_ == TrailerCamera::Authored && authoredPose_.has_value())
-          ? *authoredPose_
-          : TrailerPose{step.formedTarget, trailerGhost_.value_or(step.ghostTarget),
-                        step.spreadTarget};
-  settings_.geometryFormed = view::advanceFormMorph(settings_.geometryFormed, want.formed,
-                                                    dt, settings_.geometryFormSpeed);
-  settings_.geometryGhost = view::advanceFormMorph(settings_.geometryGhost, want.ghost,
-                                                   dt, settings_.geometryFormSpeed);
-  settings_.geometryShellSpread = view::advanceFormMorph(
-      settings_.geometryShellSpread, want.shellSpread, dt, settings_.geometryFormSpeed);
-  constexpr float kSettle = 1e-3f;
-  const bool settled =
-      std::abs(settings_.geometryFormed - want.formed) <= kSettle &&
-      std::abs(settings_.geometryGhost - want.ghost) <= kSettle &&
-      std::abs(settings_.geometryShellSpread - want.shellSpread) <= kSettle;
+  // Where in the current move the trailer is, for the keyframe spline: a move starts when
+  // the one before it lands, and takes its animation, the preview and the dwell.
+  const std::size_t ply = session_->game().moveHistory().size();
+  if (ply != lastPly_) {
+    lastPly_ = ply;
+    moveElapsed_ = 0.0f;
+    const float dwell = step.dwell >= 0.0f ? step.dwell : settings_.watchDwell;
+    moveDuration_ = std::max(
+        0.25f, session_->animation().duration() + dwell + settings_.trailerMovePreview);
+  } else {
+    moveElapsed_ += dt;
+  }
+  // With keyframes in charge the spline owns the morph, so the beat's own easing stands
+  // down - and must not hold the beat open waiting for a pose the spline will never
+  // reach.
+  bool settled = true;
+  if (!splineDrives()) {
+    const TrailerPose want{step.formedTarget, trailerGhost_.value_or(step.ghostTarget),
+                           step.spreadTarget};
+    settings_.geometryFormed = view::advanceFormMorph(
+        settings_.geometryFormed, want.formed, dt, settings_.geometryFormSpeed);
+    settings_.geometryGhost = view::advanceFormMorph(settings_.geometryGhost, want.ghost,
+                                                     dt, settings_.geometryFormSpeed);
+    settings_.geometryShellSpread = view::advanceFormMorph(
+        settings_.geometryShellSpread, want.shellSpread, dt, settings_.geometryFormSpeed);
+    constexpr float kSettle = 1e-3f;
+    settled = std::abs(settings_.geometryFormed - want.formed) <= kSettle &&
+              std::abs(settings_.geometryGhost - want.ghost) <= kSettle &&
+              std::abs(settings_.geometryShellSpread - want.shellSpread) <= kSettle;
+  }
   // A beat ends only when its game has run out *and* the pose has stopped moving, so a
   // cut never lands mid-roll.
   if (session_->watching() || !settled) return false;
@@ -786,7 +811,8 @@ CameraCue Shell::currentCue() const {
   // Inside the trailer a cue also names its beat (`klein` plays twice), and is never the
   // same cue as a game the player started themselves.
   return {currentVariant_, session_->game().moveHistory().size(),
-          attracting() ? attractIndex_ + 1 : 0};
+          attracting() ? attractIndex_ + 1 : 0,
+          attracting() && trailerEditing_ ? editSub_ : 0};
 }
 
 std::filesystem::path Shell::cameraTrackPath() const {
@@ -804,20 +830,21 @@ void Shell::recordCameraKeyframe(float speed) {
   CameraKeyframe kf;
   kf.cue = currentCue();
   kf.camera = session_->camera();
-  kf.formed = settings_.geometryFormed;
-  kf.ghost = settings_.geometryGhost;
-  kf.shellSpread = settings_.geometryShellSpread;
+  // In edit mode the pose eases toward the edit buttons' targets; the keyframe records
+  // the targets, not wherever the ease happens to be this frame.
+  const bool fromEdit = attracting() && trailerEditing_;
+  kf.formed = fromEdit ? editPose_.formed : settings_.geometryFormed;
+  kf.ghost = fromEdit ? editPose_.ghost : settings_.geometryGhost;
+  kf.shellSpread = fromEdit ? editPose_.shellSpread : settings_.geometryShellSpread;
   kf.slideU = settings_.geometrySlideU;
   kf.slideV = settings_.geometrySlideV;
   kf.flatPieces = settings_.shapePieceCylinders;
   kf.invert = settings_.geometryInvert;
   kf.morphSpeed = speed;
   if (attracting()) {
-    // A keyframe only plays in the authored mode, so recording one means choosing it; and
-    // the pose just recorded is the one to hold from here on in this beat.
+    // A keyframe only plays in the authored mode, so recording one means choosing it.
     trailerCamera_ = TrailerCamera::Authored;
     applyTrailerCamera();
-    authoredPose_ = TrailerPose{kf.formed, kf.ghost, kf.shellSpread};
   }
   cameraTrack_.set(std::move(kf));
   persistCameraTrack();
@@ -835,6 +862,12 @@ void Shell::advanceCameraTrack(float dt) {
   // In the trailer only the authored camera plays keyframes; Auto and Follow own the
   // view.
   if (attracting() && trailerCamera_ != TrailerCamera::Authored) return;
+  if (attracting()) {
+    // The trailer's keyframes are one smooth spline over the whole timeline, not
+    // waypoints to ease toward; in edit mode the camera is the author's to move.
+    if (!trailerEditing_) applySplineAt(trailerTime(), false);
+    return;
+  }
   const CameraCue cue = currentCue();
   if (!cameraTrackCue_.has_value() || !(*cameraTrackCue_ == cue)) {
     cameraTrackCue_ = cue;
@@ -851,11 +884,6 @@ void Shell::advanceCameraTrack(float dt) {
       cameraTrackT_ = 0.0f;
       const CameraKeyframe* reached = cameraTrack_.find(cue);
       settings_.geometryInvert = reached->invert;
-      if (attracting()) {
-        authoredPose_ =
-            TrailerPose{reached->formed, reached->ghost, reached->shellSpread};
-        editPose_ = *authoredPose_;
-      }
     } else {
       cameraTrackT_ = 1.0f;  // nothing to ease toward at this cue - leave the view alone
     }
@@ -880,6 +908,99 @@ void Shell::advanceCameraTrack(float dt) {
   settings_.geometrySlideV =
       cameraTrackFromSlideV_ + (kf->slideV - cameraTrackFromSlideV_) * t;
   settings_.shapePieceCylinders = kf->flatPieces;
+}
+
+float Shell::beatOffset(std::size_t beat) const {
+  // A beat spans plies 0..count, so count + 1 units of trailer time.
+  float offset = 0.0f;
+  for (std::size_t i = 0; i < beat && i < attract_.size(); ++i) {
+    offset += static_cast<float>(attract_[i].moves.size() + 1);
+  }
+  return offset;
+}
+
+float Shell::trailerTime() const {
+  if (!attracting() || session_ == nullptr) return 0.0f;
+  const float frac = trailerEditing_ ? static_cast<float>(editSub_) / 8.0f
+                                     : std::min(0.999f, moveElapsed_ / moveDuration_);
+  return beatOffset(attractIndex_) +
+         static_cast<float>(session_->game().moveHistory().size()) + frac;
+}
+
+std::vector<std::pair<float, const CameraKeyframe*>> Shell::trailerKeys() const {
+  std::vector<std::pair<float, const CameraKeyframe*>> keys;
+  for (const CameraKeyframe& kf : cameraTrack_.keyframes()) {
+    const std::size_t beat = kf.cue.beat;
+    if (beat < 1 || beat > attract_.size() ||
+        attract_[beat - 1].variant != kf.cue.variant) {
+      continue;
+    }
+    keys.emplace_back(beatOffset(beat - 1) + static_cast<float>(kf.cue.ply) +
+                          static_cast<float>(kf.cue.sub) / 8.0f,
+                      &kf);
+  }
+  std::sort(keys.begin(), keys.end(),
+            [](const auto& a, const auto& b) { return a.first < b.first; });
+  return keys;
+}
+
+bool Shell::splineDrives() const {
+  return attracting() && trailerCamera_ == TrailerCamera::Authored &&
+         !trailerKeys().empty();
+}
+
+void Shell::applySplineAt(float g, bool toEditPose) {
+  const auto keys = trailerKeys();
+  if (keys.empty() || session_ == nullptr) return;
+  std::vector<view::CameraWaypoint> path;
+  std::vector<std::pair<float, float>> formed, ghost, spread, slideU, slideV;
+  const CameraKeyframe* discrete = keys.front().second;
+  for (const auto& [time, kf] : keys) {
+    path.push_back({time, kf->camera});
+    formed.emplace_back(time, kf->formed);
+    ghost.emplace_back(time, kf->ghost);
+    spread.emplace_back(time, kf->shellSpread);
+    slideU.emplace_back(time, kf->slideU);
+    slideV.emplace_back(time, kf->slideV);
+    if (time <= g) discrete = kf;  // flat pieces and invert step at their keyframe
+  }
+  session_->setOrbitCamera(view::splineCamera(path, g));
+  const float f = std::clamp(view::splineScalar(formed, g), 0.0f, 1.0f);
+  const float gh = std::clamp(view::splineScalar(ghost, g), 0.35f, 1.0f);
+  const float sp = std::clamp(view::splineScalar(spread, g), 0.0f, 1.0f);
+  if (toEditPose) {
+    editPose_ = {f, gh, sp};
+  } else {
+    settings_.geometryFormed = f;
+    settings_.geometryGhost = gh;
+    settings_.geometryShellSpread = sp;
+  }
+  settings_.geometrySlideU = view::splineScalar(slideU, g);
+  settings_.geometrySlideV = view::splineScalar(slideV, g);
+  settings_.shapePieceCylinders = discrete->flatPieces;
+  settings_.geometryInvert = discrete->invert;
+}
+
+void Shell::setTrailerGrid(int grid) noexcept {
+  if (grid == 1 || grid == 2 || grid == 4 || grid == 8) trailerGrid_ = grid;
+}
+
+bool Shell::trailerStepFraction(int dir) {
+  if (!attracting() || !trailerEditing_ || session_ == nullptr || dir == 0) return false;
+  const long units = 8 / trailerGrid_;
+  const long ply = static_cast<long>(session_->game().moveHistory().size());
+  const long total = ply * 8 + static_cast<long>(editSub_) + (dir > 0 ? units : -units);
+  if (total < 0) return false;
+  const long newPly = total / 8;
+  if (newPly != ply && !trailerStep(static_cast<int>(newPly - ply))) return false;
+  editSub_ = static_cast<std::size_t>(total % 8);
+  applySplineAt(trailerTime(),
+                true);  // preview what the spline says here, if there is one
+  return true;
+}
+
+void Shell::requestTrailerRestart() {
+  if (attracting()) pendingRestart_ = true;
 }
 
 void Shell::pause() {

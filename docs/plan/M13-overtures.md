@@ -1580,3 +1580,31 @@ interface now calls `Shell::requestTrailerJumpBeat`, applied at the top of the n
 `advanceAttract`, before anything holds the old session. Rule: UI code must never call
 something that replaces the session. Test: "a beat jump asked for by the interface waits for
 the next frame". Not reproduced in a live window (no input driver here).
+
+### Revision: a smooth camera spline, fractional keyframes, morph in keyframes, restart (2026-10-16)
+
+**Motion.** The trailer's keyframes are no longer waypoints eased toward one at a time (a
+stop-and-start leg per keyframe, which read as jagged). In the authored camera they are one
+spline over the whole trailer timeline: `view::splineCamera` - Catmull-Rom for target,
+distance and lens, *squad* (the quaternion spline) for orientation - which is C1 through
+every keyframe, turns the short way round, and follows the keys closely rather than hitting
+them exactly in between. `view::splineScalar` does the same for the pose scalars. The old
+per-cue ease remains only for keyframes recorded in an ordinary (non-trailer) game.
+
+**Timeline.** `Shell::trailerTime()` = beats laid end to end (`beatOffset`, a beat spans
+`moves + 1`) + the move + how far through it (`moveElapsed_ / moveDuration_`, a move being
+its animation + preview + dwell). Held at the first/last keyframe outside the range.
+
+**Fractional keyframes.** `CameraCue::sub` is eighths of a move (text `sub=`, written only
+when nonzero). Edit mode has `GRID 1 / 1/2 / 1/4 / 1/8` and `< STEP` / `STEP >` that move by
+one grid unit and cross into the next/previous move; REC KEY records on that point, and the
+camera previews the spline's value there.
+
+**Morph.** `formed`, `ghost`, `shellSpread`, slide are spline channels; `flatPieces` and
+`invert` step at their keyframe. While keyframes drive, the beat's own pose easing and its
+settle check stand down, so an authored morph neither fights the driver nor holds a beat
+open. Edit mode records the edit pose's targets, not the mid-ease value.
+
+**RESTART** (trailer panel, always shown): deferred a frame like a beat jump; keeps the
+camera and edit modes. Per-keyframe ease speed no longer applies in the trailer, so its
+buttons are gone. Tests: `[spline]` in `test_camera.cpp` / `test_trailer.cpp`.

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <utility>
 #include <vector>
 
 #include "view/layout.hpp"
@@ -130,5 +131,26 @@ int pickBox(const OrbitCamera::Ray& ray, const std::vector<Placement>& boxes,
 /// at `t = 1` it is `b`.
 [[nodiscard]] OrbitCamera slerpCamera(const OrbitCamera& a, const OrbitCamera& b,
                                       float t);
+
+/// One keyframe of a camera path: the camera at a moment on any monotonic clock.
+struct CameraWaypoint {
+  float time{0.0f};
+  OrbitCamera camera;
+};
+
+/// A smooth camera path through `keys` (sorted by time, strictly increasing), evaluated
+/// at `t`. Position, distance and lens go through a Catmull-Rom spline and the
+/// orientation through a squad spline - the quaternion analogue, which is C1 where a
+/// chain of slerps has a corner at every keyframe - so the motion has no jerk at a
+/// keyframe and, between them, no stop-and-start. It follows the keyframes closely rather
+/// than exactly in between. Held at the first and last keyframe outside the range; an
+/// empty list gives a default camera.
+[[nodiscard]] OrbitCamera splineCamera(const std::vector<CameraWaypoint>& keys, float t);
+
+/// A scalar through `points` (time, value; sorted by time), by cubic Hermite with
+/// Catmull-Rom tangents: the same smoothness for the pose scalars (morph, ghost ...).
+/// Held at the end values outside the range.
+[[nodiscard]] float splineScalar(const std::vector<std::pair<float, float>>& points,
+                                 float t);
 
 }  // namespace cb::view

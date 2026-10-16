@@ -284,6 +284,23 @@ class Shell {
   /// the session, and the interface keeps a reference to it for the rest of its frame -
   /// so the interface must ask, never jump.
   void requestTrailerJumpBeat(int delta);
+  /// Start the trailer over from its first beat (deferred a frame, like a jump). Keeps
+  /// the camera mode and edit mode, drops the viewer's ghost/piece overrides.
+  void requestTrailerRestart();
+  /// How finely the edit-mode step buttons divide a move: 1 (whole moves), 2, 4 or 8.
+  /// Anything else is refused.
+  [[nodiscard]] int trailerGrid() const noexcept { return trailerGrid_; }
+  void setTrailerGrid(int grid) noexcept;
+  /// Where in the current move edit mode sits, in eighths (0..7).
+  [[nodiscard]] std::size_t trailerEditSub() const noexcept { return editSub_; }
+  /// Edit mode only: step one grid unit forward or back through the trailer, crossing
+  /// into the next or previous move when it runs off the end of this one. A keyframe
+  /// recorded there lands on that fractional point, and the camera previews the spline's
+  /// value.
+  bool trailerStepFraction(int dir);
+  /// The trailer's position in moves: whole beats laid end to end, plus the move, plus
+  /// how far through it. The clock keyframes and the camera spline share.
+  [[nodiscard]] float trailerTime() const;
 
   /// A variant's advertised difficulty, for the library's order and its colours.
   /// Resolved through the loader once and remembered; a name that will not load is
@@ -390,6 +407,15 @@ class Shell {
   Result<void> startAttractStep(std::size_t index);
   /// Put the session's follow policy where `trailerCamera_` says (session only).
   void applyTrailerCamera();
+  /// The trailer's keyframes in time order, as (trailer time, keyframe); keyframes naming
+  /// a beat that does not exist or that has a different variant are skipped.
+  [[nodiscard]] std::vector<std::pair<float, const CameraKeyframe*>> trailerKeys() const;
+  [[nodiscard]] float beatOffset(std::size_t beat) const;
+  /// Put the camera and pose where the keyframe spline says they are at trailer time `g`.
+  /// `toEditPose` aims the morph scalars at the edit pose (edit mode eases to it) rather
+  /// than writing the settings directly (playback).
+  void applySplineAt(float g, bool toEditPose);
+  [[nodiscard]] bool splineDrives() const;
 
   std::vector<std::string> library_;
   std::filesystem::path settingsPath_;
@@ -428,11 +454,16 @@ class Shell {
   float trailerKeySpeed_{2.0f};
   TrailerPose editPose_;
   std::optional<int> pendingJump_;
+  bool pendingRestart_{false};
+  int trailerGrid_{1};
+  std::size_t editSub_{0};
+  /// The move the trailer last saw, and how long ago it landed, for the position within
+  /// it.
+  std::size_t lastPly_{static_cast<std::size_t>(-1)};
+  float moveElapsed_{0.0f};
+  float moveDuration_{1.0f};
   std::optional<float> trailerGhost_;
   std::optional<bool> trailerFlatPieces_;
-  /// The pose the last keyframe reached in this beat asked for; replaces the beat's own
-  /// targets in `Authored` mode so the driver does not ease it back.
-  std::optional<TrailerPose> authoredPose_;
 
   /// Where the current point in the running game is, for the camera track: the session's
   /// variant and its ply count right now.

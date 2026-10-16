@@ -278,3 +278,29 @@ TEST_CASE("the beat is written only when it is not zero", "[unit][app][trailer]"
   track.set(k);
   CHECK(cameraTrackText(track).find("beat=2") != std::string::npos);
 }
+
+TEST_CASE("a fractional cue round-trips and orders within its move",
+          "[unit][app][trailer]") {
+  CameraTrack track;
+  CameraKeyframe a = sample("torus", 3);
+  a.cue.beat = 2;
+  a.cue.sub = 4;  // half way through the move
+  CameraKeyframe b = sample("torus", 3);
+  b.cue.beat = 2;
+  b.cue.sub = 2;
+  CameraKeyframe whole = sample("torus", 3);
+  whole.cue.beat = 2;
+  track.set(a);
+  track.set(whole);
+  track.set(b);
+  REQUIRE(track.keyframes().size() == 3);
+  CHECK(track.keyframes()[0].cue.sub == 0);
+  CHECK(track.keyframes()[1].cue.sub == 2);
+  CHECK(track.keyframes()[2].cue.sub == 4);
+  const auto parsed = parseCameraTrack(cameraTrackText(track));
+  REQUIRE(parsed.has_value());
+  CHECK(parsed->find({"torus", 3, 2, 4}) != nullptr);
+  CHECK(parsed->find({"torus", 3, 2, 2}) != nullptr);
+  CHECK(parsed->find({"torus", 3, 2, 0}) != nullptr);
+  CHECK(cameraTrackText(CameraTrack{}).find("sub=") == std::string::npos);
+}

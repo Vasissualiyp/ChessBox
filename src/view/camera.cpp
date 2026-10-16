@@ -255,35 +255,33 @@ Quat slerp(Quat a, Quat b, float t) {
 
 }  // namespace
 
-OrbitCamera slerpCamera(const OrbitCamera& a, const OrbitCamera& b, float t) {
-  t = std::clamp(t, 0.0f, 1.0f);
-  Vec3 fa{}, ra{}, ua{}, fb{}, rb{}, ub{};
-  a.basis(fa, ra, ua);
-  b.basis(fb, rb, ub);
-  const Quat qa = quatFromBasis(ra, ua, fa * -1.0f);
-  const Quat qb = quatFromBasis(rb, ub, fb * -1.0f);
-  const Quat q = slerp(qa, qb, t);
+namespace {
+
+/// An orbit camera looking along the orientation `q`, from `target` at `distance`, taking
+/// everything else (lens, clip planes, projection) from `proto`. Pitch and yaw come from
+/// the eye direction and the remaining twist goes in `roll`, through the same basis the
+/// renderer uses (after the pitch clamp and with the camera's own up-hint).
+OrbitCamera orbitFromQuat(const Quat& q, const Vec3& target, float distance,
+                          const OrbitCamera& proto) {
   const Vec3 back = rotate(q, Vec3{0.0f, 0.0f, 1.0f});  // target -> eye
   const Vec3 wantUp = rotate(q, Vec3{0.0f, 1.0f, 0.0f});
   Vec3 e = back;
   if (length(e) > 1e-6f) e = normalize(e);
 
   OrbitCamera out;
-  out.fovY = a.fovY;
-  out.nearZ = a.nearZ;
-  out.farZ = a.farZ;
-  out.orthographic = a.orthographic;
-  out.distance = std::max(0.5f, a.distance + (b.distance - a.distance) * t);
+  out.fovY = proto.fovY;
+  out.nearZ = proto.nearZ;
+  out.farZ = proto.farZ;
+  out.orthographic = proto.orthographic;
+  out.distance = std::max(0.5f, distance);
   out.pitch = std::asin(std::clamp(e.z, -0.999f, 0.999f));
   out.yaw = std::atan2(e.x, -e.y);
-  // `target` is the authored, primary state everywhere else, so interpolate *it* and let
-  // `eye()` derive from it along the slerped direction - matching `OrbitCamera`'s own
+  // `target` is the authored, primary state everywhere else, so it is given, and `eye()`
+  // derives from it along the orientation's direction - matching `OrbitCamera`'s own
   // representation instead of inverting it. Interpolating the eye and back-solving a
   // target aimed the in-between camera away from both subjects whenever their targets
   // differ, which is every real caller (M17.23).
-  out.target = a.target + (b.target - a.target) * t;
-  // Roll so the constructed camera's up is the slerped up, via the same basis the
-  // renderer will use (after the pitch clamp and with the camera's own up-hint).
+  out.target = target;
   const Vec3 viewDir = e * -1.0f;
   const Vec3 r0 = normalize(cross(viewDir, out.upHint()));
   const Vec3 up0 = cross(r0, viewDir);
@@ -293,6 +291,151 @@ OrbitCamera slerpCamera(const OrbitCamera& a, const OrbitCamera& b, float t) {
     out.roll = -std::atan2(dot(cross(up0, nPerp), viewDir), dot(up0, nPerp));
   }
   return out;
+}
+
+Quat quatOfCamera(const OrbitCamera& c) {
+  Vec3 f{}, r{}, u{};
+  c.basis(f, r, u);
+  return quatFromBasis(r, u, f * -1.0f);
+}
+
+Quat mul(const Quat& a, const Quat& b) {
+  return {a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+          a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+          a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+          a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z};
+}
+
+Quat conj(const Quat& q) {
+  return {-q.x, -q.y, -q.z, q.w};
+}
+
+float dotq(const Quat& a, const Quat& b) {
+  return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+}
+
+/// Log of a unit quaternion: a pure quaternion (x, y, z, 0) of half the rotation angle.
+Quat qlog(const Quat& q) {
+  const float vlen = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z);
+  if (vlen < 1e-7f) return {0.0f, 0.0f, 0.0f, 0.0f};
+  const float k = std::atan2(vlen, q.w) / vlen;
+  return {q.x * k, q.y * k, q.z * k, 0.0f};
+}
+
+Quat qexp(const Quat& v) {
+  const float vlen = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+  if (vlen < 1e-7f) return {0.0f, 0.0f, 0.0f, 1.0f};
+  const float k = std::sin(vlen) / vlen;
+  return {v.x * k, v.y * k, v.z * k, std::cos(vlen)};
+}
+
+/// Squad's inner control point at `q`, given its neighbours (already hemisphere-aligned
+/// to `q`): the point that makes the spline's tangent continuous through `q`.
+Quat squadControl(const Quat& prev, const Quat& q, const Quat& next) {
+  const Quat qi = conj(q);
+  const Quat a = qlog(mul(qi, next));
+  const Quat b = qlog(mul(qi, prev));
+  const Quat sum{-(a.x + b.x) * 0.25f, -(a.y + b.y) * 0.25f, -(a.z + b.z) * 0.25f, 0.0f};
+  return mul(q, qexp(sum));
+}
+
+/// Cubic Hermite on [0,1] with end values `p0`,`p1` and tangents `m0`,`m1` (already
+/// scaled by the interval length).
+float hermite(float p0, float p1, float m0, float m1, float h) {
+  const float h2 = h * h;
+  const float h3 = h2 * h;
+  return (2 * h3 - 3 * h2 + 1) * p0 + (h3 - 2 * h2 + h) * m0 + (-2 * h3 + 3 * h2) * p1 +
+         (h3 - h2) * m1;
+}
+
+/// Catmull-Rom tangent (value per unit time) at index `i` of a non-uniform series.
+float tangentAt(const std::vector<float>& t, const std::vector<float>& v, std::size_t i) {
+  const std::size_t lo = i == 0 ? 0 : i - 1;
+  const std::size_t hi = i + 1 < t.size() ? i + 1 : i;
+  const float dt = t[hi] - t[lo];
+  return dt > 1e-9f ? (v[hi] - v[lo]) / dt : 0.0f;
+}
+
+/// The segment holding `t`: index `i` with `times[i] <= t < times[i+1]`, and `h` in
+/// [0,1].
+bool locate(const std::vector<float>& times, float t, std::size_t& i, float& h) {
+  if (times.size() < 2 || t <= times.front() || t >= times.back()) return false;
+  i = 0;
+  while (i + 2 < times.size() && times[i + 1] <= t) ++i;
+  h = (t - times[i]) / (times[i + 1] - times[i]);
+  return true;
+}
+
+}  // namespace
+
+OrbitCamera slerpCamera(const OrbitCamera& a, const OrbitCamera& b, float t) {
+  t = std::clamp(t, 0.0f, 1.0f);
+  const Quat q = slerp(quatOfCamera(a), quatOfCamera(b), t);
+  return orbitFromQuat(q, a.target + (b.target - a.target) * t,
+                       a.distance + (b.distance - a.distance) * t, a);
+}
+
+OrbitCamera splineCamera(const std::vector<CameraWaypoint>& keys, float t) {
+  if (keys.empty()) return OrbitCamera{};
+  std::vector<float> times;
+  times.reserve(keys.size());
+  for (const CameraWaypoint& k : keys) times.push_back(k.time);
+  std::size_t i = 0;
+  float h = 0.0f;
+  if (!locate(times, t, i, h))
+    return t <= keys.front().time ? keys.front().camera : keys.back().camera;
+
+  // Orientation: hemisphere-align the whole chain first so every neighbour is the short
+  // way round, then squad between keys i and i+1.
+  std::vector<Quat> q;
+  q.reserve(keys.size());
+  for (const CameraWaypoint& k : keys) {
+    Quat cur = quatOfCamera(k.camera);
+    if (!q.empty() && dotq(q.back(), cur) < 0.0f) cur = {-cur.x, -cur.y, -cur.z, -cur.w};
+    q.push_back(cur);
+  }
+  const auto control = [&](std::size_t k) {
+    const Quat& prev = k == 0 ? q[k] : q[k - 1];
+    const Quat& next = k + 1 < q.size() ? q[k + 1] : q[k];
+    return squadControl(prev, q[k], next);
+  };
+  const Quat s0 = control(i);
+  const Quat s1 = control(i + 1);
+  const Quat outer = slerp(q[i], q[i + 1], h);
+  const Quat inner = slerp(s0, s1, h);
+  const Quat orient = slerp(outer, inner, 2.0f * h * (1.0f - h));
+
+  // Position, distance and lens: Catmull-Rom on each component.
+  const float span = times[i + 1] - times[i];
+  const auto channel = [&](auto get) {
+    std::vector<float> v;
+    v.reserve(keys.size());
+    for (const CameraWaypoint& k : keys) v.push_back(get(k.camera));
+    return hermite(v[i], v[i + 1], tangentAt(times, v, i) * span,
+                   tangentAt(times, v, i + 1) * span, h);
+  };
+  const Vec3 target{channel([](const OrbitCamera& c) { return c.target.x; }),
+                    channel([](const OrbitCamera& c) { return c.target.y; }),
+                    channel([](const OrbitCamera& c) { return c.target.z; })};
+  const float distance = channel([](const OrbitCamera& c) { return c.distance; });
+  OrbitCamera out = orbitFromQuat(orient, target, distance, keys[i].camera);
+  out.fovY = channel([](const OrbitCamera& c) { return c.fovY; });
+  return out;
+}
+
+float splineScalar(const std::vector<std::pair<float, float>>& points, float t) {
+  if (points.empty()) return 0.0f;
+  std::vector<float> times, vals;
+  for (const auto& p : points) {
+    times.push_back(p.first);
+    vals.push_back(p.second);
+  }
+  std::size_t i = 0;
+  float h = 0.0f;
+  if (!locate(times, t, i, h)) return t <= times.front() ? vals.front() : vals.back();
+  const float span = times[i + 1] - times[i];
+  return hermite(vals[i], vals[i + 1], tangentAt(times, vals, i) * span,
+                 tangentAt(times, vals, i + 1) * span, h);
 }
 
 OrbitCamera::ScreenPoint OrbitCamera::project(const Vec3& world, float aspect,

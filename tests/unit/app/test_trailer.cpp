@@ -281,3 +281,134 @@ TEST_CASE("a beat jump asked for by the interface waits for the next frame",
   shell->stopAttract();
   CHECK_FALSE(shell->advanceAttract(1.0f / 60.0f));
 }
+
+namespace {
+
+/// A keyframe on the trailer's first beat, `ply` moves in, with a given yaw and morph.
+CameraKeyframe trailerKey(std::size_t beat, std::size_t ply, std::size_t sub, float yaw,
+                          float formed = 1.0f, const char* variant = "standard") {
+  CameraKeyframe kf;
+  kf.cue = {variant, ply, beat + 1, sub};
+  kf.camera.yaw = yaw;
+  kf.camera.pitch = 0.8f;
+  kf.camera.distance = 12.0f;
+  kf.formed = formed;
+  return kf;
+}
+
+}  // namespace
+
+TEST_CASE("between keyframes the trailer camera keeps moving smoothly",
+          "[unit][app][trailer][spline]") {
+  auto shell = makeShell("trailer-spline.conf");
+  shell->settings().watchDwell = 0.3f;
+  shell->startAttract(defaultAttractSequence());
+  shell->setTrailerCamera(TrailerCamera::Authored);
+  for (const auto& [ply, yaw] : {std::pair{1, 0.0f}, std::pair{5, 0.6f},
+                                 std::pair{9, 0.2f}, std::pair{13, 1.0f}}) {
+    shell->cameraTrack().set(trailerKey(0, static_cast<std::size_t>(ply), 0, yaw));
+  }
+  constexpr float kStep = 1.0f / 60.0f;
+  float prev = shell->session()->camera().yaw;
+  int still = 0, frames = 0;
+  float worst = 0.0f;
+  for (int i = 0; i < 60 * 40 && shell->attractStep() == 0; ++i) {
+    shell->session()->advanceAnimation(kStep);
+    shell->advanceAttract(kStep);
+    shell->advanceCameraTrack(kStep);
+    const std::size_t ply = shell->session()->game().moveHistory().size();
+    const float yaw = shell->session()->camera().yaw;
+    if (ply >= 2 && ply <= 12) {  // strictly between the first and last keyframe
+      ++frames;
+      if (std::abs(yaw - prev) < 1e-7f) ++still;
+      worst = std::max(worst, std::abs(yaw - prev));
+    }
+    prev = yaw;
+  }
+  REQUIRE(frames > 100);
+  // A chain of eased legs stops dead at every keyframe; a spline never does.
+  CHECK(still < frames / 20);
+  CHECK(worst < 0.02f);  // no jump from frame to frame
+}
+
+TEST_CASE("the 3-D morph is part of a trailer keyframe and a beat still ends",
+          "[unit][app][trailer][spline]") {
+  auto shell = makeShell("trailer-morph.conf");
+  shell->settings().watchDwell = 0.05f;
+  shell->settings().trailerMovePreview = 0.0f;
+  shell->startAttract(defaultAttractSequence());
+  shell->setTrailerCamera(TrailerCamera::Authored);
+  shell->cameraTrack().set(trailerKey(1, 1, 0, 0.3f, 0.2f, "cylinder"));
+  shell->cameraTrack().set(trailerKey(1, 9, 0, 0.3f, 0.8f, "cylinder"));
+  bool sawLow = false, sawHigh = false;
+  constexpr float kStep = 1.0f / 60.0f;
+  for (int i = 0; i < 60 * 120 && shell->attractStep() < 3; ++i) {
+    shell->session()->advanceAnimation(kStep);
+    shell->advanceAttract(kStep);
+    shell->advanceCameraTrack(kStep);
+    if (shell->attractStep() == 1) {
+      const std::size_t ply = shell->session()->game().moveHistory().size();
+      if (ply == 1)
+        sawLow = sawLow || std::abs(shell->settings().geometryFormed - 0.2f) < 0.05f;
+      if (ply == 9)
+        sawHigh = sawHigh || std::abs(shell->settings().geometryFormed - 0.8f) < 0.05f;
+    }
+  }
+  CHECK(sawLow);
+  CHECK(sawHigh);
+  CHECK(shell->attractStep() >=
+        3);  // the authored morph did not stop the beats advancing
+}
+
+TEST_CASE("fractional steps move through a move on the chosen grid",
+          "[unit][app][trailer][spline]") {
+  auto shell = makeShell("trailer-grid.conf");
+  shell->startAttract(defaultAttractSequence());
+  shell->setTrailerEditing(true);
+  CHECK(shell->trailerGrid() == 1);
+  shell->setTrailerGrid(4);
+  CHECK(shell->trailerGrid() == 4);
+  shell->setTrailerGrid(3);  // not a grid: refused
+  CHECK(shell->trailerGrid() == 4);
+  const std::size_t ply = shell->session()->game().moveHistory().size();
+  CHECK(shell->trailerEditSub() == 0);
+  CHECK(shell->trailerStepFraction(+1));
+  CHECK(shell->trailerEditSub() == 2);  // a quarter, in eighths
+  CHECK(shell->trailerStepFraction(+1));
+  CHECK(shell->trailerEditSub() == 4);
+  CHECK(shell->session()->game().moveHistory().size() == ply);
+  for (int i = 0; i < 2; ++i) CHECK(shell->trailerStepFraction(+1));
+  // Four quarters later it is the next move, back at its start.
+  CHECK(shell->trailerEditSub() == 0);
+  CHECK(shell->session()->game().moveHistory().size() == ply + 1);
+  CHECK(shell->trailerStepFraction(-1));
+  CHECK(shell->trailerEditSub() == 6);
+  CHECK(shell->session()->game().moveHistory().size() == ply);
+  // A keyframe recorded here is on the fractional cue.
+  shell->setTrailerGrid(8);
+  CHECK(shell->trailerStepFraction(-1));
+  shell->recordCameraKeyframe(2.0f);
+  CHECK(shell->cameraTrack().find({"standard", ply, 1, 5}) != nullptr);
+}
+
+TEST_CASE("restarting the trailer goes back to the first beat", "[unit][app][trailer]") {
+  auto shell = makeShell("trailer-restart.conf");
+  shell->settings().watchDwell = 0.05f;
+  shell->startAttract(defaultAttractSequence());
+  constexpr float kStep = 1.0f / 60.0f;
+  for (int i = 0; i < 60 * 60 && shell->attractStep() < 2; ++i) {
+    shell->session()->advanceAnimation(kStep);
+    shell->advanceAttract(kStep);
+  }
+  REQUIRE(shell->attractStep() >= 2);
+  shell->setTrailerCamera(TrailerCamera::Authored);
+  const Session* before = shell->session();
+  shell->requestTrailerRestart();
+  CHECK(shell->session() == before);    // deferred: the interface holds the session
+  CHECK(shell->advanceAttract(kStep));  // reported as a cut so the front end re-frames
+  CHECK(shell->attractStep() == 0);
+  CHECK(shell->currentVariant() == "standard");
+  CHECK(shell->attracting());
+  CHECK(shell->trailerCamera() == TrailerCamera::Authored);  // the mode is kept
+  CHECK(shell->session()->game().moveHistory().size() == 1);
+}

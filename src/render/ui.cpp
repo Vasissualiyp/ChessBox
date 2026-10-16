@@ -1208,27 +1208,42 @@ void Ui::buildTrailerEditRows(app::Shell& shell, app::Session& session,
   char text[128];
 
   if (editing) {
-    // Row 1 - where in the trailer the camera is being set up.
-    if (button("< PLY", t, px(78), false, true, true, display))
-      (void)shell.trailerStep(-1);
+    // Row 1 - where in the trailer the camera is being set up. STEP moves by the grid:
+    // a whole move, or a half, quarter or eighth of one, so a camera that has to circle
+    // something can be keyed several times inside a single move.
+    if (button("< STEP", t, px(92), false, true, true, display)) {
+      (void)shell.trailerStepFraction(-1);
+    }
     ImGui::SameLine();
-    if (button("PLY >", t, px(78), false, true, true, display))
-      (void)shell.trailerStep(+1);
+    if (button("STEP >", t, px(92), false, true, true, display)) {
+      (void)shell.trailerStepFraction(+1);
+    }
     ImGui::SameLine();
-    if (button("< BEAT", t, px(92), false, true, true, display))
+    char grid[16];
+    std::snprintf(grid, sizeof(grid), shell.trailerGrid() == 1 ? "GRID 1" : "GRID 1/%d",
+                  shell.trailerGrid());
+    if (button(grid, t, px(108), false, true, true, display)) {
+      const int g = shell.trailerGrid();
+      shell.setTrailerGrid(g == 1 ? 2 : g == 2 ? 4 : g == 4 ? 8 : 1);
+    }
+    ImGui::SameLine();
+    if (button("< BEAT", t, px(92), false, true, true, display)) {
       shell.requestTrailerJumpBeat(-1);
+    }
     ImGui::SameLine();
-    if (button("BEAT >", t, px(92), false, true, true, display))
+    if (button("BEAT >", t, px(92), false, true, true, display)) {
       shell.requestTrailerJumpBeat(+1);
-    std::snprintf(text, sizeof(text), "beat %zu of %zu  -  %s  -  move %zu",
+    }
+    std::snprintf(text, sizeof(text), "beat %zu of %zu  -  %s  -  move %zu + %zu/8",
                   shell.attractStep() + 1, shell.attractCount(),
-                  shell.currentVariant().c_str(), session.game().moveHistory().size());
+                  shell.currentVariant().c_str(), session.game().moveHistory().size(),
+                  shell.trailerEditSub());
     note(text);
 
     // Row 2 - keyframes. A keyframe is the view exactly as it stands, pinned to this
     // move.
     const app::CameraCue here{shell.currentVariant(), session.game().moveHistory().size(),
-                              shell.attractStep() + 1};
+                              shell.attractStep() + 1, shell.trailerEditSub()};
     const app::CameraKeyframe* key = shell.cameraTrack().find(here);
     if (button("REC KEY", t, px(100), key != nullptr, true, true, display)) {
       shell.recordCameraKeyframe(shell.trailerKeySpeed());
@@ -1237,18 +1252,9 @@ void Ui::buildTrailerEditRows(app::Shell& shell, app::Session& session,
     if (button("DEL KEY", t, px(100), false, true, key != nullptr, display)) {
       (void)shell.eraseCameraKeyframe();
     }
-    ImGui::SameLine();
-    if (button("SLOWER", t, px(92), false, true, true, display)) {
-      shell.setTrailerKeySpeed(shell.trailerKeySpeed() * 0.7f);
-    }
-    ImGui::SameLine();
-    if (button("FASTER", t, px(92), false, true, true, display)) {
-      shell.setTrailerKeySpeed(shell.trailerKeySpeed() / 0.7f);
-    }
-    std::snprintf(text, sizeof(text), "ease speed %.2f  -  %zu keys%s",
-                  static_cast<double>(shell.trailerKeySpeed()),
+    std::snprintf(text, sizeof(text), "%zu keys%s",
                   shell.cameraTrack().keyframes().size(),
-                  key != nullptr ? "  -  key on this move" : "");
+                  key != nullptr ? "  -  key on this point" : "");
     note(text);
   }
 
@@ -1579,6 +1585,12 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     buildTrailerEditRows(shell, session, request, display, small, editing);
     if (button("STOP TRAILER", t, px(180), false, true, true, display)) {
       shell.stopAttract();
+    }
+    ImGui::SameLine();
+    // Back to the first beat (deferred a frame - it replaces the session this frame
+    // holds).
+    if (button("RESTART", t, px(110), false, true, true, display)) {
+      shell.requestTrailerRestart();
     }
     ImGui::SameLine();
     // The camera mode the trailer uses (a separate mode, not the player's setting):

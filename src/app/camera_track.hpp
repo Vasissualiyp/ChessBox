@@ -24,10 +24,14 @@ struct CameraCue {
   /// alone is ambiguous inside it - and a keyframe authored for the trailer must not
   /// fire in a game the player started themselves (M13.9 revision).
   std::size_t beat{0};
+  /// How far through the move after `ply` the keyframe sits, in eighths of a move (0..7).
+  /// A whole-move cue is 0. Quarter-move keyframes use 0, 2, 4, 6; eighths use them all -
+  /// a camera that has to circle something needs several keyframes within one move.
+  std::size_t sub{0};
 };
 
 [[nodiscard]] inline bool operator==(const CameraCue& a, const CameraCue& b) noexcept {
-  return a.ply == b.ply && a.beat == b.beat && a.variant == b.variant;
+  return a.ply == b.ply && a.beat == b.beat && a.sub == b.sub && a.variant == b.variant;
 }
 
 /// One saved camera pose and shape pose, and how fast the view eases into it (M13.9 Part

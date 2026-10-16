@@ -17,7 +17,8 @@ std::string_view trim(std::string_view s) {
 bool less(const CameraCue& a, const CameraCue& b) noexcept {
   if (a.variant != b.variant) return a.variant < b.variant;
   if (a.beat != b.beat) return a.beat < b.beat;
-  return a.ply < b.ply;
+  if (a.ply != b.ply) return a.ply < b.ply;
+  return a.sub < b.sub;
 }
 
 /// Parse one `key=value` token from a whitespace-split keyframe line. `ok` is cleared on
@@ -99,10 +100,12 @@ std::string cameraTrackText(const CameraTrack& track) {
     out << "keyframe"
         << " variant=" << kf.cue.variant;
     if (kf.cue.beat != 0) out << " beat=" << kf.cue.beat;
-    out << " ply=" << kf.cue.ply << " target=" << vec3Text(kf.camera.target)
-        << " distance=" << kf.camera.distance << " yaw=" << kf.camera.yaw
-        << " pitch=" << kf.camera.pitch << " roll=" << kf.camera.roll
-        << " fov=" << kf.camera.fovY << " formed=" << kf.formed << " ghost=" << kf.ghost
+    out << " ply=" << kf.cue.ply;
+    if (kf.cue.sub != 0) out << " sub=" << kf.cue.sub;
+    out << " target=" << vec3Text(kf.camera.target) << " distance=" << kf.camera.distance
+        << " yaw=" << kf.camera.yaw << " pitch=" << kf.camera.pitch
+        << " roll=" << kf.camera.roll << " fov=" << kf.camera.fovY
+        << " formed=" << kf.formed << " ghost=" << kf.ghost
         << " shellSpread=" << kf.shellSpread << " slideU=" << kf.slideU
         << " slideV=" << kf.slideV << " flatPieces=" << (kf.flatPieces ? 1 : 0)
         << " invert=" << (kf.invert ? 1 : 0) << " speed=" << kf.morphSpeed << '\n';
@@ -152,6 +155,8 @@ Result<CameraTrack> parseCameraTrack(std::string_view text) {
         sawVariant = !value.empty();
       } else if (key == "beat") {
         kf.cue.beat = parseSize(value, ok);
+      } else if (key == "sub") {
+        kf.cue.sub = parseSize(value, ok);
       } else if (key == "ply") {
         kf.cue.ply = parseSize(value, ok);
       } else if (key == "target") {
