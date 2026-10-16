@@ -1325,7 +1325,6 @@ float Ui::buildTrailerTimeline(app::Shell& shell) {
   const float height = px(46.0f);
   const float width = std::max(px(200.0f), vp->WorkSize.x - 2.0f * margin);
   const float total = std::max(1.0f, shell.trailerLength());
-  const bool editing = shell.trailerEditing();
 
   ImGui::SetNextWindowPos(
       ImVec2(vp->WorkPos.x + margin, vp->WorkPos.y + vp->WorkSize.y - margin),
@@ -1405,15 +1404,13 @@ float Ui::buildTrailerTimeline(app::Shell& shell) {
     }
     const app::TrailerCue cue =
         snapTime >= 0.0f ? shell.trailerCueAt(snapTime, 8) : shell.trailerCueAt(g);
-    if (editing && ImGui::IsItemActive()) {
-      shell.requestTrailerSeek(cue.beat, cue.ply, cue.sub);
-    }
+    if (ImGui::IsItemActive()) shell.requestTrailerSeek(cue.beat, cue.ply, cue.sub);
     if (hovered) {
       ImGui::BeginTooltip();
       ImGui::Text("%s  -  move %zu + %zu/8%s",
                   shell.attractBeat(cue.beat).variant.c_str(), cue.ply, cue.sub,
                   snapTime >= 0.0f ? "  -  keyframe" : "");
-      if (!editing) ImGui::TextUnformatted("EDIT CAMERA to scrub");
+      ImGui::TextUnformatted("click or drag to go there");
       ImGui::EndTooltip();
     }
   }
@@ -1715,6 +1712,15 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       shell.requestTrailerRestart();
     }
     ImGui::SameLine();
+    // Pause without the edit controls; edit mode pauses too, so then it only reads.
+    {
+      const bool paused = shell.trailerPaused() || editing;
+      if (button(paused ? "PLAY" : "PAUSE", t, px(100), paused, true, !editing,
+                 display)) {
+        shell.setTrailerPaused(!shell.trailerPaused());
+      }
+    }
+    ImGui::SameLine();
     // The camera mode the trailer uses (a separate mode, not the player's setting):
     // AUTO is the calm default, FOLLOW the chase behind the piece, AUTHORED the
     // keyframes.
@@ -1738,7 +1744,8 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     ImGui::SameLine();
     ImGui::PushFont(small);
     ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
-    ImGui::Text("%s  -  Esc leaves the trailer", editing ? "paused" : "playing");
+    ImGui::Text("%s  -  Esc leaves the trailer",
+                editing || shell.trailerPaused() ? "paused" : "playing");
     ImGui::PopStyleColor();
     ImGui::PopFont();
   } else if (shell.watching()) {

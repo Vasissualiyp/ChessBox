@@ -1648,3 +1648,13 @@ morph plays until its first keyframe takes over".
 the trailer's shape morph and every piece's move animation on top of the player's own
 settings, so tuning the trailer leaves their game alone. Live sliders sit in the trailer
 panel (`MORPH SPEED`, `MOVE SPEED`) and on the settings screen. Tests: `[speed]`.
+
+### Feature: PAUSE, and click-to-seek on the timeline while playing (2026-10-16)
+
+`Shell::setTrailerPaused` freezes the trailer's clock, game and cuts without the edit
+controls (edit mode still implies it; the PAUSE/PLAY button reads only then). The timeline
+now seeks in any mode: a click or drag lands on the pointed-at beat, move and eighth (a
+deferred seek like the beat jumps), and playback carries on from there - or stays paused if
+it was. Playing seeks start part-way through the move (`seekPhase_`) and keep the beat's own
+morph start rather than snapping the pose to its end state, which edit-mode seeks still do.
+Tests: `[pause]`.

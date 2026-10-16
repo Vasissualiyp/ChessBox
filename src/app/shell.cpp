@@ -643,7 +643,7 @@ bool Shell::trailerStep(int delta) {
 }
 
 void Shell::trailerGoto(std::size_t beat, std::size_t ply) {
-  if (!attracting() || !trailerEditing_ || beat >= attract_.size()) return;
+  if (!attracting() || beat >= attract_.size()) return;
   for (std::size_t i = 0; i <= beat; ++i) {
     if (!startAttractStep(i).has_value()) {
       attract_.clear();
@@ -659,10 +659,12 @@ void Shell::trailerGoto(std::size_t beat, std::size_t ply) {
     (void)session_->watchSeek(std::min(ply, session_->watchCount()));
   }
   const AttractStep& step = attract_[beat];
-  settings_.geometryFormed = step.formedTarget;
-  settings_.geometryGhost = step.ghostTarget;
-  settings_.geometryShellSpread = step.spreadTarget;
-  editPose_ = {step.formedTarget, step.ghostTarget, step.spreadTarget};
+  if (trailerEditing_) {
+    settings_.geometryFormed = step.formedTarget;
+    settings_.geometryGhost = step.ghostTarget;
+    settings_.geometryShellSpread = step.spreadTarget;
+    editPose_ = {step.formedTarget, step.ghostTarget, step.spreadTarget};
+  }
   editSub_ = 0;
   trailerCutPending_ = true;
 }
@@ -675,19 +677,27 @@ void Shell::requestTrailerJumpBeat(int delta) {
 }
 
 void Shell::requestTrailerSeek(std::size_t beat, std::size_t ply, std::size_t sub) {
-  if (!attracting() || !trailerEditing_ || beat >= attract_.size()) return;
+  if (!attracting() || beat >= attract_.size()) return;
   pendingSeek_ = TrailerCue{beat, ply, std::min<std::size_t>(sub, 7)};
 }
 
 void Shell::seekNow(const TrailerCue& to) {
-  if (!attracting() || !trailerEditing_ || to.beat >= attract_.size()) return;
+  if (!attracting() || to.beat >= attract_.size()) return;
   if (to.beat != attractIndex_) {
     trailerGoto(to.beat, to.ply);
   } else if (session_->watching()) {
     (void)session_->watchSeek(std::min(to.ply, session_->watchCount()));
   }
-  editSub_ = to.sub;
-  applySplineAt(trailerTime(), true);
+  if (trailerEditing_) {
+    editSub_ = to.sub;
+    applySplineAt(trailerTime(), true);
+  } else {
+    // Playing (or just paused): land part-way through the move; the spline is applied
+    // every frame by `advanceCameraTrack`, so there is nothing to preview here.
+    seekPhase_ = static_cast<float>(to.sub) / 8.0f;
+    lastPly_ = static_cast<std::size_t>(-1);
+    if (session_ != nullptr) updateMovePhase(0.0f, attract_[attractIndex_]);
+  }
 }
 
 void Shell::refreshTrailerView() {
@@ -717,6 +727,8 @@ void Shell::stopAttract() {
   attract_.clear();
   attractIndex_ = 0;
   trailerEditing_ = false;
+  trailerPaused_ = false;
+  seekPhase_ = -1.0f;
   pendingSeek_.reset();
   pendingRestart_ = false;
   trailerClock_ = 0.0f;
@@ -779,20 +791,13 @@ bool Shell::advanceAttract(float dt) {
         settings_.geometryShellSpread, editPose_.shellSpread, dt, formSpeed);
     return false;
   }
+  if (trailerPaused_) {
+    updateMovePhase(0.0f, step);
+    return false;
+  }
   trailerClock_ += dt;
   if (session_->watching()) session_->advanceWatching(dt);
-  // Where in the current move the trailer is, for the keyframe spline: a move starts when
-  // the one before it lands, and takes its animation, the preview and the dwell.
-  const std::size_t ply = session_->game().moveHistory().size();
-  if (ply != lastPly_) {
-    lastPly_ = ply;
-    moveElapsed_ = 0.0f;
-    const float dwell = step.dwell >= 0.0f ? step.dwell : settings_.watchDwell;
-    moveDuration_ = std::max(
-        0.25f, session_->animation().duration() + dwell + settings_.trailerMovePreview);
-  } else {
-    moveElapsed_ += dt;
-  }
+  updateMovePhase(dt, step);
   // With keyframes in charge the spline owns the morph, so the beat's own easing stands
   // down - and must not hold the beat open waiting for a pose the spline will never
   // reach.
@@ -828,6 +833,25 @@ bool Shell::advanceAttract(float dt) {
     return false;
   }
   return true;
+}
+
+void Shell::updateMovePhase(float dt, const AttractStep& step) {
+  // Where in the current move the trailer is, for the keyframe spline: a move starts when
+  // the one before it lands, and takes its animation, the preview and the dwell.
+  const std::size_t ply = session_->game().moveHistory().size();
+  if (ply != lastPly_) {
+    lastPly_ = ply;
+    moveElapsed_ = 0.0f;
+    const float dwell = step.dwell >= 0.0f ? step.dwell : settings_.watchDwell;
+    moveDuration_ = std::max(
+        0.25f, session_->animation().duration() + dwell + settings_.trailerMovePreview);
+    if (seekPhase_ >= 0.0f) {  // a seek into the middle of a move
+      moveElapsed_ = seekPhase_ * moveDuration_;
+      seekPhase_ = -1.0f;
+    }
+  } else {
+    moveElapsed_ += dt;
+  }
 }
 
 CameraCue Shell::currentCue() const {

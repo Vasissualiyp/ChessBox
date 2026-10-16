@@ -514,13 +514,9 @@ TEST_CASE("keyframe times for the timeline are in order and offset by beat",
   CHECK(times[2] == shell->beatOffset(1) + 3.5f);
 }
 
-TEST_CASE("a timeline click seeks in edit mode, a frame later",
-          "[unit][app][trailer][timeline]") {
+TEST_CASE("a timeline click seeks a frame later", "[unit][app][trailer][timeline]") {
   auto shell = makeShell("trailer-seek.conf");
   shell->startAttract(defaultAttractSequence());
-  shell->requestTrailerSeek(2, 3, 2);  // not editing: dropped
-  CHECK_FALSE(shell->advanceAttract(1.0f / 60.0f));
-  CHECK(shell->attractStep() == 0);
 
   shell->setTrailerEditing(true);
   // Within the beat: same session, the move and fraction set.
@@ -628,4 +624,66 @@ TEST_CASE(
   const int quick = framesToForm(2.0f);
   CHECK(quick < slow);
   CHECK(quick <= slow / 2 + 2);
+}
+
+TEST_CASE("pausing freezes the trailer without entering edit mode",
+          "[unit][app][trailer][pause]") {
+  auto shell = makeShell("trailer-pause.conf");
+  shell->startAttract(defaultAttractSequence());
+  constexpr float kStep = 1.0f / 60.0f;
+  for (int i = 0; i < 90; ++i) {
+    shell->session()->advanceAnimation(kStep);
+    shell->advanceAttract(kStep);
+  }
+  shell->setTrailerPaused(true);
+  CHECK(shell->trailerPaused());
+  CHECK_FALSE(shell->trailerEditing());
+  const std::size_t beat = shell->attractStep();
+  const std::size_t index = shell->session()->watchIndex();
+  const float time = shell->trailerTime();
+  for (int i = 0; i < 60 * 300; ++i) {
+    shell->session()->advanceAnimation(kStep);
+    shell->advanceAttract(kStep);
+  }
+  CHECK(shell->attractStep() == beat);
+  CHECK(shell->session()->watchIndex() == index);
+  CHECK(shell->trailerTime() == time);
+  shell->setTrailerPaused(false);
+  for (int i = 0; i < 60 * 5; ++i) {
+    shell->session()->advanceAnimation(kStep);
+    shell->advanceAttract(kStep);
+  }
+  CHECK(shell->trailerTime() > time);
+}
+
+TEST_CASE("clicking the timeline while playing moves there and keeps playing",
+          "[unit][app][trailer][pause]") {
+  auto shell = makeShell("trailer-seekplay.conf");
+  shell->settings().watchDwell = 0.05f;
+  shell->settings().trailerMovePreview = 0.0f;
+  shell->startAttract(defaultAttractSequence());
+  constexpr float kStep = 1.0f / 60.0f;
+  shell->requestTrailerSeek(2, 4, 4);
+  CHECK(shell->advanceAttract(kStep));  // across beats: a cut
+  CHECK(shell->attractStep() == 2);
+  CHECK(shell->session()->game().moveHistory().size() == 4);
+  CHECK_FALSE(shell->trailerEditing());
+  // Half way through the move, as asked.
+  CHECK(shell->trailerTime() >= shell->beatOffset(2) + 4.45f);
+  CHECK(shell->trailerTime() < shell->beatOffset(2) + 4.6f);
+  // And it keeps playing from there.
+  for (int i = 0; i < 60 * 4; ++i) {
+    shell->session()->advanceAnimation(kStep);
+    shell->advanceAttract(kStep);
+  }
+  CHECK(shell->trailerTime() > shell->beatOffset(2) + 5.0f);
+  // Seeking while paused lands and stays paused.
+  shell->setTrailerPaused(true);
+  shell->requestTrailerSeek(0, 7, 0);
+  shell->advanceAttract(kStep);
+  CHECK(shell->attractStep() == 0);
+  CHECK(shell->session()->game().moveHistory().size() == 7);
+  const float t = shell->trailerTime();
+  for (int i = 0; i < 120; ++i) shell->advanceAttract(kStep);
+  CHECK(shell->trailerTime() == t);
 }

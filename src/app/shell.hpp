@@ -260,6 +260,10 @@ class Shell {
   /// stepping / pose controls apply. Leaving it resumes play where it stood.
   [[nodiscard]] bool trailerEditing() const noexcept { return trailerEditing_; }
   void setTrailerEditing(bool on);
+  /// Pause: the trailer's clock, the game and the cut stand still, with none of the edit
+  /// controls. Edit mode pauses it too. Seeking on the timeline still works while paused.
+  [[nodiscard]] bool trailerPaused() const noexcept { return trailerPaused_; }
+  void setTrailerPaused(bool paused) noexcept { trailerPaused_ = paused; }
   /// The pose the edit-mode buttons are driving.
   /// Viewer overrides of a beat's own look, for the buttons shown while the trailer plays
   /// (INVERT is `Settings::geometryInvert` and needs none). They hold across every beat
@@ -443,6 +447,8 @@ class Shell {
   /// The trailer's keyframes in time order, as (trailer time, keyframe); keyframes naming
   /// a beat that does not exist or that has a different variant are skipped.
   [[nodiscard]] std::vector<std::pair<float, const CameraKeyframe*>> trailerKeys() const;
+  /// Track which move the trailer is in and how far through it. `dt` 0 just refreshes.
+  void updateMovePhase(float dt, const AttractStep& step);
   /// Put the camera and pose where the keyframe spline says they are at trailer time `g`.
   /// `toEditPose` aims the morph scalars at the edit pose (edit mode eases to it) rather
   /// than writing the settings directly (playback).
@@ -490,6 +496,9 @@ class Shell {
   TrailerPose editPose_;
   std::optional<TrailerCue> pendingSeek_;
   bool pendingRestart_{false};
+  bool trailerPaused_{false};
+  /// A seek landed part-way through a move; the next phase update starts there.
+  float seekPhase_{-1.0f};
   int trailerGrid_{1};
   std::size_t editSub_{0};
   /// The move the trailer last saw, and how long ago it landed, for the position within
