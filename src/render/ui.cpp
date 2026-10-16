@@ -1254,10 +1254,13 @@ void Ui::buildTrailerEditRows(app::Shell& shell, app::Session& session,
 
   // Row 3 - the same shape-mode controls the game screen offers. The pose is what a
   // keyframe records; a button here sets the edit pose and the trailer eases to it.
-  if (hasPlaySurface(session.variant())) {
+  // Shown on every beat, flat ones too: the choices are the viewer's and carry over to
+  // the shape beats that follow, so the opener must not hide them.
+  const bool shaped = hasPlaySurface(session.variant());
+  {
     app::TrailerPose& pose = shell.editPose();
     const bool formed = pose.formed > 0.5f;
-    if (editing) {
+    if (editing && shaped) {
       if (button("SHAPE", t, px(84), formed, true, true, display)) {
         pose.formed = formed ? 0.0f : 1.0f;
       }
@@ -1279,16 +1282,17 @@ void Ui::buildTrailerEditRows(app::Shell& shell, app::Session& session,
       shell.setTrailerFlatPieces(!flat);
       request.settingsChanged = true;
     }
-    if (editing && session.variant().dims.dims() > 2) {
+    if (editing && shaped && session.variant().dims.dims() > 2) {
       ImGui::SameLine();
       const bool spread = pose.shellSpread > 0.5f;
       if (button("SPREAD", t, px(92), spread, true, true, display)) {
         pose.shellSpread = spread ? 0.0f : 1.0f;
       }
     }
-    if (editing) note("drag to orbit, middle-drag to slide, then REC KEY");
-  } else if (editing) {
-    note("drag to orbit, then REC KEY");
+    if (editing) {
+      note(shaped ? "drag to orbit, middle-drag to slide, then REC KEY"
+                  : "drag to orbit, then REC KEY");
+    }
   }
 }
 
