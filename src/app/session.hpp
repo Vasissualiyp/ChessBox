@@ -243,7 +243,12 @@ class Session {
   /// settled move for `dwellSeconds` before playing the next. Not deterministic - the
   /// caller drives it with the real interactive clock - so this is the menu's mode, not
   /// the clip exporter's.
-  Result<void> startWatching(GameFile file, float dwellSeconds);
+  ///
+  /// `previewSeconds` > 0 shows each move before it is played: once the dwell has passed,
+  /// the piece about to move is selected - so the board lights its legal squares - and
+  /// held for that long, then the move plays. The first move of a watch starts at once.
+  Result<void> startWatching(GameFile file, float dwellSeconds,
+                             float previewSeconds = 0.0f);
   [[nodiscard]] bool watching() const noexcept { return watching_; }
   /// Leave the watching mode. The game is left where it stopped; the caller decides
   /// which screen to show next.
@@ -329,6 +334,9 @@ class Session {
   bool watching_{false};
   float watchDwell_{0.0f};
   float watchClock_{0.0f};
+  float watchPreview_{0.0f};
+  float previewClock_{0.0f};
+  bool previewing_{false};
   std::string message_;
 };
 

@@ -195,6 +195,9 @@ struct Settings {
   /// begins. The same concept `--dwell` names for a clip; `kDefaultDwellSeconds` is the
   /// shared default.
   float watchDwell{kDefaultDwellSeconds};
+  /// Seconds the trailer shows a move's piece and legal squares before playing it; 0
+  /// turns the preview off. Clamped to [0, 0.5].
+  float trailerMovePreview{0.3f};
   /// The first-run welcome screen has been seen (M14.1). Persisted, so the sequence plays
   /// once.
   bool seenWelcome{false};

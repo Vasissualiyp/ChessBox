@@ -568,7 +568,8 @@ Result<void> Shell::startAttractStep(std::size_t index) {
   if (embeddedFen.has_value()) file.startFen = *embeddedFen;
   file.moves = step.moves;
   if (auto ok = session_->startWatching(
-          std::move(file), step.dwell >= 0.0f ? step.dwell : settings_.watchDwell);
+          std::move(file), step.dwell >= 0.0f ? step.dwell : settings_.watchDwell,
+          settings_.trailerMovePreview);
       !ok.has_value()) {
     message_ = ok.error().format();
     return fail(ok.error().code, ok.error().message);

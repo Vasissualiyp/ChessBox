@@ -38,6 +38,10 @@ class GameRunner {
   [[nodiscard]] std::size_t index() const noexcept { return index_; }
   [[nodiscard]] std::size_t count() const noexcept { return file_.moves.size(); }
   [[nodiscard]] const GameFile& file() const noexcept { return file_; }
+  /// The text of the move `step` would play next, or empty when none is left.
+  [[nodiscard]] std::string nextMoveText() const {
+    return done() ? std::string{} : file_.moves[index_];
+  }
 
   /// The move animation duration of the move just stepped, in seconds. Zero before the
   /// first step, or when no animation runs.

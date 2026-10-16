@@ -707,7 +707,8 @@ Result<void> Session::playMoveText(std::string_view text) {
               "'" + std::string(text) + "' is not legal in this position");
 }
 
-Result<void> Session::startWatching(GameFile file, float dwellSeconds) {
+Result<void> Session::startWatching(GameFile file, float dwellSeconds,
+                                    float previewSeconds) {
   stopWatching();  // replace any watch already running
   watchFile_ = std::make_unique<GameFile>(std::move(file));
   watchRunner_ = std::make_unique<GameRunner>(*watchFile_, *this);
@@ -716,7 +717,9 @@ Result<void> Session::startWatching(GameFile file, float dwellSeconds) {
     return ok;
   }
   watchDwell_ = std::max(0.0f, dwellSeconds);
+  watchPreview_ = std::max(0.0f, previewSeconds);
   watchClock_ = 0.0f;
+  previewing_ = false;
   selected_ = kInvalidCell;
   pending_ = PendingPromotion{};
   pendingMove_ = PendingMove{};
@@ -742,6 +745,8 @@ void Session::stopWatching() noexcept {
   watching_ = false;
   watchClock_ = 0.0f;
   watchDwell_ = 0.0f;
+  watchPreview_ = 0.0f;
+  previewing_ = false;
   watchRunner_.reset();
   watchFile_.reset();
 }
@@ -757,6 +762,26 @@ bool Session::advanceWatching(float dt) {
   }
   watchClock_ += dt;
   if (watchClock_ < watchDwell_) return true;
+  if (watchPreview_ > 0.0f && !watchRunner_->done()) {
+    if (!previewing_) {
+      // Show the move before it happens: select the piece that is about to go, so the
+      // board lights where it can go, for `watchPreview_` seconds.
+      const std::string next = watchRunner_->nextMoveText();
+      for (const Move& m : game_->legalMoves()) {
+        if (moveText(*variant_, m) == next) {
+          selected_ = m.from;
+          refreshSnapshot();
+          previewing_ = true;
+          previewClock_ = 0.0f;
+          return true;
+        }
+      }
+    } else {
+      previewClock_ += dt;
+      if (previewClock_ < watchPreview_) return true;
+      previewing_ = false;
+    }
+  }
   watchClock_ = 0.0f;
   if (watchRunner_->done()) {
     // The last move has settled and been held. Leave the mode; the caller returns to the
@@ -785,6 +810,7 @@ std::size_t Session::watchCount() const noexcept {
 
 bool Session::watchStep() {
   if (!watching_ || watchRunner_ == nullptr || watchRunner_->done()) return false;
+  previewing_ = false;
   if (auto ok = watchRunner_->step(); !ok.has_value()) {
     message_ = ok.error().format();
     return false;
@@ -801,6 +827,7 @@ Result<void> Session::watchSeek(std::size_t index) {
     return fail(ErrorCode::OutOfRange, "seek past the last move");
   }
   if (auto ok = watchRunner_->reset(); !ok.has_value()) return ok;
+  previewing_ = false;
   selected_ = kInvalidCell;
   for (std::size_t i = 0; i < index; ++i) {
     if (auto ok = watchRunner_->step(); !ok.has_value()) return ok;

@@ -131,3 +131,43 @@ TEST_CASE("stopWatching leaves the ordinary session and allows input again",
   REQUIRE(s->apply(click).has_value());
   CHECK(s->selected() == click.cell);
 }
+
+TEST_CASE(
+    "a watched move is previewed - piece selected, legal squares lit - before it is "
+    "played",
+    "[unit][app][watch][preview]") {
+  auto s = standardSession();
+  REQUIRE(
+      s->startWatching(standardGame({"e2e4", "e7e5", "g1f3"}), 0.05f, 0.3f).has_value());
+  CHECK(s->watchIndex() == 1);  // the first move still starts at once
+  // Let the first move settle and its dwell pass; the next one is previewed, not played.
+  for (int i = 0; i < 200 && s->selected() == kInvalidCell; ++i) {
+    s->advanceAnimation(0.05f);
+    s->advanceWatching(0.05f);
+  }
+  REQUIRE(s->selected() == cell(*s, "e7"));
+  CHECK(s->watchIndex() == 1);
+  CHECK(s->snapshot().highlighted().size() == 2);  // e6 and e5
+  // Held for the preview time, then played and the selection cleared.
+  float held = 0.0f;
+  while (s->watchIndex() == 1 && held < 2.0f) {
+    s->advanceWatching(0.05f);
+    held += 0.05f;
+  }
+  CHECK(held >= 0.25f);
+  CHECK(held <= 0.45f);
+  CHECK(s->watchIndex() == 2);
+  CHECK(s->selected() == kInvalidCell);
+}
+
+TEST_CASE("a preview of zero seconds plays moves straight away as before",
+          "[unit][app][watch][preview]") {
+  auto s = standardSession();
+  REQUIRE(s->startWatching(standardGame({"e2e4", "e7e5"}), 0.05f, 0.0f).has_value());
+  for (int i = 0; i < 100 && s->watchIndex() < 2; ++i) {
+    s->advanceAnimation(0.05f);
+    s->advanceWatching(0.05f);
+    CHECK(s->selected() == kInvalidCell);
+  }
+  CHECK(s->watchIndex() == 2);
+}

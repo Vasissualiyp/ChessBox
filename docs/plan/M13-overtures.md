@@ -1560,3 +1560,13 @@ every odd layer of a board with 3+ axes via `render::squareParity`, in both the 
 lattice paths. `OrbitCamera::viewProj` now floors the far plane at `2 * distance + 50`: the
 framed `farZ` was fixed at framing time, so zooming out past it put the whole shape beyond
 the far plane and it vanished.
+
+### Feature: each trailer move is previewed (2026-10-16)
+
+Before a move plays, the piece about to move is selected and its legal squares light, for
+`Settings::trailerMovePreview` seconds (default 0.3, slider 0-0.5 on the settings screen,
+0 = off). `Session::startWatching(file, dwell, preview)` owns it: once the dwell has passed
+`advanceWatching` selects the next move's `from` cell (via `GameRunner::nextMoveText`),
+holds, then plays. Only the trailer passes a preview; "Watch a game" is unchanged. The first
+move of each beat starts at once, and edit-mode stepping bypasses the preview. Tests:
+`[preview]` in `test_watch.cpp` and `test_trailer.cpp`.

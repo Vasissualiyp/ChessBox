@@ -235,3 +235,22 @@ TEST_CASE("trailer look overrides survive the beat cut and clear on stop",
   CHECK_FALSE(shell->settings().shapePieceCylinders);
   CHECK(shell->settings().geometryGhost == 1.0f);
 }
+
+TEST_CASE("the trailer previews each move for the configured time",
+          "[unit][app][trailer][preview]") {
+  auto shell = makeShell("trailer-preview.conf");
+  CHECK(shell->settings().trailerMovePreview == 0.3f);
+  shell->settings().trailerMovePreview = 9.0f;
+  shell->settings().sanitize();
+  CHECK(shell->settings().trailerMovePreview == 0.5f);
+  shell->settings().trailerMovePreview = 0.3f;
+  shell->startAttract(defaultAttractSequence());
+  bool sawPreview = false;
+  constexpr float kStep = 1.0f / 60.0f;
+  for (int i = 0; i < 600 && !sawPreview; ++i) {
+    shell->session()->advanceAnimation(kStep);
+    shell->advanceAttract(kStep);
+    sawPreview = shell->session()->selected() != kInvalidCell;
+  }
+  CHECK(sawPreview);
+}

@@ -162,6 +162,8 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.autoPromoteTo = value;
     else if (key == "last_variant")
       s.lastVariant = value;
+    else if (key == "trailer_move_preview")
+      s.trailerMovePreview = asFloat(value, s.trailerMovePreview);
     else if (key == "watch_dwell")
       s.watchDwell = asFloat(value, s.watchDwell);
     else if (key == "seen_welcome")
@@ -233,6 +235,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "auto_promote_to = " << autoPromoteTo << '\n';
   out << "last_variant = " << lastVariant << '\n';
   out << "watch_dwell = " << watchDwell << '\n';
+  out << "trailer_move_preview = " << trailerMovePreview << '\n';
   out << "seen_welcome = " << boolText(seenWelcome) << '\n';
   out << "volume_master = " << volumeMaster << '\n';
   out << "volume_music = " << volumeMusic << '\n';
@@ -268,6 +271,7 @@ void Settings::sanitize() {
   shapeMorphSpeed = std::clamp(shapeMorphSpeed, 0.25f, 4.0f);
   geometryFormSpeed = std::clamp(geometryFormSpeed, 0.25f, 4.0f);
   watchDwell = std::clamp(watchDwell, 0.0f, 10.0f);
+  trailerMovePreview = std::clamp(trailerMovePreview, 0.0f, 0.5f);
   if (cameraMode != "off" && cameraMode != "piece" && cameraMode != "route") {
     cameraMode = "off";
   }
