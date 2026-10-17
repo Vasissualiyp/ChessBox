@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "view/morph.hpp"
 #include "view/trailer_camera.hpp"
 
 using namespace cb::view;
@@ -89,4 +90,63 @@ TEST_CASE("zooming out never pushes the board past the far plane",
     CHECK(z / w >= 0.0f);
     CHECK(z / w <= 1.0f);
   }
+}
+
+// ---- the eased morph (M13.9 revision)
+// --------------------------------------------------
+
+#include "view/morph.hpp"
+
+TEST_CASE("an eased morph starts and ends gently and takes the span's time",
+          "[unit][view][morph]") {
+  using namespace cb::view;
+  EasedMorph m;
+  float v = 0.0f;
+  const float dt = 1.0f / 60.0f;
+  // 0 -> 1 at speed 1 takes 1 / kFormMorphRate = 0.5 s.
+  std::vector<float> trace;
+  for (int i = 0; i < 60 && v < 1.0f; ++i) {
+    v = advanceEasedMorph(m, v, 1.0f, dt, 1.0f);
+    trace.push_back(v);
+  }
+  REQUIRE(v == 1.0f);
+  CHECK(trace.size() >= 29);
+  CHECK(trace.size() <= 32);
+  // Gentle start: the first step is far smaller than the average speed's; monotone.
+  CHECK(trace.front() < 0.25f * dt * kFormMorphRate);
+  for (std::size_t i = 1; i < trace.size(); ++i) CHECK(trace[i] >= trace[i - 1]);
+  // Gentle end too.
+  const float lastStep = trace.back() - trace[trace.size() - 2];
+  CHECK(lastStep < 0.25f * dt * kFormMorphRate);
+  // The peak speed is the smoothstep's 1.5x average, never more.
+  float peak = 0.0f;
+  for (std::size_t i = 1; i < trace.size(); ++i)
+    peak = std::max(peak, trace[i] - trace[i - 1]);
+  CHECK(peak < 1.6f * dt * kFormMorphRate);
+}
+
+TEST_CASE("an eased morph retargets from where it is, and notices outside changes",
+          "[unit][view][morph]") {
+  using namespace cb::view;
+  EasedMorph m;
+  float v = 0.0f;
+  const float dt = 1.0f / 60.0f;
+  for (int i = 0; i < 10; ++i) v = advanceEasedMorph(m, v, 1.0f, dt, 1.0f);
+  const float mid = v;
+  REQUIRE(mid > 0.0f);
+  REQUIRE(mid < 1.0f);
+  // A new target mid-flight departs from the current value, not from the old start.
+  v = advanceEasedMorph(m, v, 0.0f, dt, 1.0f);
+  CHECK(std::abs(v - mid) < 0.02f);
+  // Someone sets the value from outside (a seek, a keyframe): the morph carries on from
+  // there instead of snapping back to its own track.
+  v = 0.8f;
+  v = advanceEasedMorph(m, v, 0.8f, dt, 1.0f);
+  CHECK(v == 0.8f);
+  v = advanceEasedMorph(m, v, 1.0f, dt, 1.0f);
+  CHECK(v > 0.79f);
+  CHECK(v < 0.9f);
+  // Nothing to do when already there.
+  EasedMorph still;
+  CHECK(advanceEasedMorph(still, 0.5f, 0.5f, dt, 1.0f) == 0.5f);
 }

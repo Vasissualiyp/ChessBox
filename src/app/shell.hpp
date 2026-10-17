@@ -14,6 +14,7 @@
 #include "app/overture.hpp"
 #include "app/session.hpp"
 #include "app/settings.hpp"
+#include "view/morph.hpp"
 #include "view/trailer_camera.hpp"
 
 namespace cb::app {
@@ -87,6 +88,9 @@ struct AttractStep {
   /// Seconds each move is held once it has landed; negative (the default) means the
   /// player's `Settings::watchDwell`. The long opener plays briskly (M13.9 revision).
   float dwell{-1.0f};
+  /// Multiplier on this beat's own shape morph (on top of the trailer's morph speed), for
+  /// a transition that should take longer - the torus bending closed - than another.
+  float morphSpeed{1.0f};
 };
 using AttractSequence = std::vector<AttractStep>;
 
@@ -333,11 +337,19 @@ class Shell {
   /// the camera - so what edit mode shows is what the keyframes say. A no-op without
   /// keyframes.
   void refreshTrailerView();
-  /// True while the trailer's camera belongs to the author (the authored mode, which edit
-  /// mode implies). Nothing else may re-frame or move the camera then.
-  [[nodiscard]] bool trailerOwnsCamera() const noexcept {
-    return attracting() && trailerCamera_ == TrailerCamera::Authored;
+  /// True while the trailer's camera belongs to the author: in edit mode, or in the
+  /// authored mode once there are keyframes for it to follow. Nothing else may move it
+  /// then.
+  [[nodiscard]] bool trailerOwnsCamera() const noexcept;
+  /// True while the front end should keep the shape framed as it changes: the trailer is
+  /// running, the camera is not the author's and not a chase. It eases the view's target
+  /// and distance toward the shape's bounds every frame, so nothing jumps at a cut.
+  [[nodiscard]] bool trailerAutoFrames() const noexcept {
+    return attracting() && !trailerOwnsCamera() &&
+           trailerCamera_ != TrailerCamera::Follow;
   }
+  /// Whether any keyframe belongs to a beat of the running trailer.
+  [[nodiscard]] bool trailerHasKeys() const noexcept;
 
   /// A variant's advertised difficulty, for the library's order and its colours.
   /// Resolved through the loader once and remembered; a name that will not load is
@@ -449,6 +461,8 @@ class Shell {
   [[nodiscard]] std::vector<std::pair<float, const CameraKeyframe*>> trailerKeys() const;
   /// Track which move the trailer is in and how far through it. `dt` 0 just refreshes.
   void updateMovePhase(float dt, const AttractStep& step);
+  /// Ease the three pose scalars one frame toward `want`.
+  void easePose(const TrailerPose& want, float dt, float formSpeed);
   /// Put the camera and pose where the keyframe spline says they are at trailer time `g`.
   /// `toEditPose` aims the morph scalars at the edit pose (edit mode eases to it) rather
   /// than writing the settings directly (playback).
@@ -486,7 +500,7 @@ class Shell {
   /// The main-menu attract sequence, empty when none is running (M13.9).
   AttractSequence attract_;
   std::size_t attractIndex_{0};
-  TrailerCamera trailerCamera_{TrailerCamera::Auto};
+  TrailerCamera trailerCamera_{TrailerCamera::Authored};
   bool trailerEditing_{false};
   /// A beat was entered outside `advanceAttract` (a jump); the next call reports it.
   bool trailerCutPending_{false};
@@ -494,6 +508,10 @@ class Shell {
   float swayWeight_{1.0f};
   float trailerKeySpeed_{2.0f};
   TrailerPose editPose_;
+  /// The eased morphs behind the pose scalars (see `view::advanceEasedMorph`).
+  view::EasedMorph formedEase_;
+  view::EasedMorph ghostEase_;
+  view::EasedMorph spreadEase_;
   std::optional<TrailerCue> pendingSeek_;
   bool pendingRestart_{false};
   bool trailerPaused_{false};

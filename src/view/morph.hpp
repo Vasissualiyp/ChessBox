@@ -2,6 +2,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 
 namespace cb::view {
 
@@ -23,6 +24,43 @@ inline constexpr float kFormMorphRate = 2.0f;
   if (formed < target) return std::min(target, formed + step);
   if (formed > target) return std::max(target, formed - step);
   return formed;
+}
+
+/// A morph that eases: slow away from its start, quick through the middle, slow into its
+/// end (smoothstep), so a shape change begins and finishes without an instant where the
+/// motion "switches on". The duration is the span over `kFormMorphRate * formSpeed`, the
+/// same time `advanceFormMorph` takes for the same distance, so speeds mean what they
+/// did.
+struct EasedMorph {
+  float from{0.0f};
+  float to{0.0f};
+  float t{1.0f};
+  float last{0.0f};
+  bool started{false};
+};
+
+/// One frame of an eased morph of `current` toward `target`. A new target, or a `current`
+/// somebody else has changed since the last call (a seek, a keyframe), restarts the ease
+/// from where the value actually is.
+[[nodiscard]] inline float advanceEasedMorph(EasedMorph& m, float current, float target,
+                                             float dt, float formSpeed) noexcept {
+  if (!m.started || target != m.to || std::abs(current - m.last) > 1e-4f) {
+    m.started = true;
+    m.from = current;
+    m.to = target;
+    m.t = 0.0f;
+  }
+  const float span = std::abs(m.to - m.from);
+  float out = m.to;
+  if (span > 1e-6f && m.t < 1.0f) {
+    m.t = std::min(1.0f, m.t + dt * kFormMorphRate * formSpeed / span);
+    out =
+        m.t >= 1.0f ? m.to : m.from + (m.to - m.from) * (m.t * m.t * (3.0f - 2.0f * m.t));
+  } else {
+    m.t = 1.0f;
+  }
+  m.last = out;
+  return out;
 }
 
 /// The shape morphs' own stage boundaries, in `formed` - one source of truth, shared by

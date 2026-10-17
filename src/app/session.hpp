@@ -73,7 +73,11 @@ class Session {
   /// pose instead of the player's own input - the one place something other than `apply`
   /// is allowed to move the camera, which is why it is spelled out rather than folded
   /// into `apply` as a new `ActionKind`: a keyframe is not a player gesture.
-  void setOrbitCamera(const view::OrbitCamera& c) noexcept { camera_ = c; }
+  void setOrbitCamera(const view::OrbitCamera& c) noexcept {
+    camera_ = c;
+    framedOnce_ = true;  // a camera somebody set is not to be re-framed away on a resize
+  }
+  [[nodiscard]] float boardAspect() const noexcept { return boardAspect_; }
 
   /// `camera()`'s own blend, against an arbitrary placement set and its bounds instead of
   /// the session's flat layout - what the geometry view passes, built from

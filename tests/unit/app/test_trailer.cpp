@@ -58,7 +58,7 @@ TEST_CASE("the trailer never follows a piece, even on a flat board with route se
   shell->settings().followStrength = 1.0f;
   shell->startAttract(defaultAttractSequence());
   REQUIRE(shell->attracting());
-  REQUIRE(shell->currentVariant() == "standard");
+  REQUIRE(shell->currentVariant() == "cylinder");  // the flat-looking opener
   CHECK_FALSE(shell->session()->followsMove());
   // The player's own preference is theirs: the trailer must not rewrite it.
   CHECK(shell->settings().cameraMode == "route");
@@ -80,6 +80,7 @@ TEST_CASE("the Auto camera sways a few degrees and Authored holds still",
           "[unit][app][trailer]") {
   auto shell = makeShell("trailer-sway.conf");
   shell->startAttract(defaultAttractSequence());
+  shell->setTrailerCamera(TrailerCamera::Auto);  // the default is the authored camera
   run(*shell, 10.0f);
   const view::OrbitCamera base = shell->session()->camera();
   const view::OrbitCamera swayed = shell->trailerView(base);
@@ -158,7 +159,7 @@ TEST_CASE("jumping to a beat replays the chain so it continues the position",
   // And a jump backwards still works.
   shell->trailerGoto(0, 0);
   CHECK(shell->attractStep() == 0);
-  CHECK(shell->currentVariant() == "standard");
+  CHECK(shell->currentVariant() == "cylinder");
   // The next advance reports the cut so the front end re-frames.
   CHECK(shell->advanceAttract(1.0f / 60.0f));
 }
@@ -201,7 +202,7 @@ TEST_CASE("the standard opener is short and the whole chain is one continuous ga
           "[unit][app][trailer]") {
   const AttractSequence seq = defaultAttractSequence();
   REQUIRE_FALSE(seq.empty());
-  CHECK(seq.front().variant == "standard");
+  CHECK(seq.front().variant == "cylinder");
   // "By move 20 people will click off": the flat board gets at most 20 plies.
   CHECK(seq.front().moves.size() <= 20);
   CHECK(seq.front().dwell >= 0.0f);  // and plays briskly
@@ -287,7 +288,7 @@ namespace {
 
 /// A keyframe on the trailer's first beat, `ply` moves in, with a given yaw and morph.
 CameraKeyframe trailerKey(std::size_t beat, std::size_t ply, std::size_t sub, float yaw,
-                          float formed = 1.0f, const char* variant = "standard") {
+                          float formed = 1.0f, const char* variant = "cylinder") {
   CameraKeyframe kf;
   kf.cue = {variant, ply, beat + 1, sub};
   kf.camera.yaw = yaw;
@@ -389,7 +390,7 @@ TEST_CASE("fractional steps move through a move on the chosen grid",
   shell->setTrailerGrid(8);
   CHECK(shell->trailerStepFraction(-1));
   shell->recordCameraKeyframe(2.0f);
-  CHECK(shell->cameraTrack().find({"standard", ply, 1, 5}) != nullptr);
+  CHECK(shell->cameraTrack().find({"cylinder", ply, 1, 5}) != nullptr);
 }
 
 TEST_CASE("restarting the trailer goes back to the first beat", "[unit][app][trailer]") {
@@ -408,7 +409,7 @@ TEST_CASE("restarting the trailer goes back to the first beat", "[unit][app][tra
   CHECK(shell->session() == before);    // deferred: the interface holds the session
   CHECK(shell->advanceAttract(kStep));  // reported as a cut so the front end re-frames
   CHECK(shell->attractStep() == 0);
-  CHECK(shell->currentVariant() == "standard");
+  CHECK(shell->currentVariant() == "cylinder");
   CHECK(shell->attracting());
   CHECK(shell->trailerCamera() == TrailerCamera::Authored);  // the mode is kept
   CHECK(shell->session()->game().moveHistory().size() == 1);
@@ -454,9 +455,15 @@ TEST_CASE("the authored camera (and so edit mode) owns the camera",
   shell->startAttract(defaultAttractSequence());
   CHECK_FALSE(shell->trailerOwnsCamera());  // Auto
   shell->setTrailerCamera(TrailerCamera::Authored);
-  CHECK(shell->trailerOwnsCamera());
+  CHECK_FALSE(
+      shell->trailerOwnsCamera());  // authored but nothing keyed: it frames itself
+  CHECK(shell->trailerAutoFrames());
+  shell->cameraTrack().set(trailerKey(0, 3, 0, 0.5f));
+  CHECK(shell->trailerOwnsCamera());  // keyframes make it the author's
+  CHECK_FALSE(shell->trailerAutoFrames());
+  shell->cameraTrack().clear();
   shell->setTrailerCamera(TrailerCamera::Auto);
-  shell->setTrailerEditing(true);  // edit mode selects Authored
+  shell->setTrailerEditing(true);  // edit mode selects Authored and owns the camera
   CHECK(shell->trailerOwnsCamera());
 }
 
@@ -562,8 +569,7 @@ TEST_CASE("a beat's own morph plays until its first keyframe takes over",
   }
   // Both beats begin part-way up their roll (the driver's `formedFrom`), not at the
   // key's 1.
-  CHECK(cylinderStart > 0.0f);
-  CHECK(cylinderStart < 0.9f);
+  CHECK(cylinderStart < 0.9f);  // the opener ended flat; the roll begins from there
   CHECK(torusStart > 0.0f);
   CHECK(torusStart < 0.9f);
 }
@@ -571,7 +577,7 @@ TEST_CASE("a beat's own morph plays until its first keyframe takes over",
 TEST_CASE("the trailer's morph and move speeds are their own settings",
           "[unit][app][trailer][speed]") {
   Settings s;
-  CHECK(s.trailerMorphSpeed == 1.0f);
+  CHECK(s.trailerMorphSpeed == 0.5f);  // calmer than the raw morph rate
   CHECK(s.trailerMoveSpeed == 1.0f);
   s.trailerMorphSpeed = 99.0f;
   s.trailerMoveSpeed = 0.0f;

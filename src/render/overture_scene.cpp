@@ -2818,8 +2818,21 @@ bool playShapeAt(const VariantSpec& v, const std::array<float, kMaxDims>& axis,
     const float dMid = 0.62f + (levelMid - 0.5f) * kLevelStep;
     const float spread = std::clamp(pose.shellSpread, 0.0f, 1.0f);
     const float shellD = dMid + (dLevel - dMid) * spread;
-    out = shellTube((axis[0] + pose.slideU) / nx, (axis[1] + pose.slideV) / nz,
-                    kTau * form, kTau * form, shellD, open);
+    const float fu = (axis[0] + pose.slideU) / nx;
+    const float fv = (axis[1] + pose.slideV) / nz;
+    out = shellTube(fu, fv, kTau * form, kTau * form, shellD, open);
+    // At `shellSpread = 0` the shape is *the plain 2-D torus*, not merely a ring of
+    // roughly its size: the shells are a different construction (a bigger ring, a fatter
+    // tube) and collapsing their levels onto one ring still left a shape three times the
+    // size of the torus Klein had just folded back into, so the cut into this beat
+    // jumped. Blending the two constructions' positions by the spread makes the beat open
+    // on the torus exactly and grow into the shells continuously. At 1 it is the shipped
+    // shells to the bit.
+    if (spread < 1.0f) {
+      const OvVec3 plain = derivedSurfaceAt(app::SurfaceKind::Torus, fu, fv, pose);
+      out = OvVec3{lerpf(plain.x, out.x, spread), lerpf(plain.y, out.y, spread),
+                   lerpf(plain.z, out.z, spread)};
+    }
     return true;
   }
   if (d.dims() == 4 && v.name == "hyper4") {

@@ -405,6 +405,21 @@ void frameBoard(app::Shell& shell) {
                               poseFrom(shell.settings(), session->variant()));
 }
 
+/// One frame of the trailer's automatic framing (M13.9): ease the camera's target and
+/// distance toward the shape's bounds as it is *now*, so a growing shape stays in view
+/// and a cut between two pictures of the same shape moves nothing. The angle is never
+/// touched. A first-order lag (about a quarter-second) rather than a snap: the framing
+/// target moves continuously, and so does the camera that follows it.
+void easeTrailerFraming(app::Shell& shell, float dt) {
+  app::Session* session = shell.session();
+  if (session == nullptr || !shell.trailerAutoFrames()) return;
+  const render::BoardOptions options = optionsFor(shell);
+  if (!options.surface) return;
+  const float k = 1.0f - std::exp(-dt * 4.0f);
+  render::easeMorphFraming(*session, options,
+                           poseFrom(shell.settings(), session->variant()), k);
+}
+
 /// Put the renderer in the attract sequence's presentation (M13.9): the shape view where
 /// there is a shape. The camera policy is the shell's (`Shell::trailerCamera`, applied to
 /// each beat's session) - this must not touch `Settings::cameraMode`, which is the
@@ -446,6 +461,14 @@ void syncMarks(render::BoardRenderer& renderer, const app::Session& session) {
 /// video from them is an external convenience, never a codec in the engine.
 /// `--trailer-edit`: a main-menu attract capture taken in the trailer's camera-edit mode.
 static bool gTrailerEditCapture = false;
+/// `--trailer-clip DIR`: render the whole trailer, one lap, frame by frame, to DIR
+/// (M13.9). The same per-frame logic as the interactive loop at a fixed step, so the
+/// render is what the trailer would show on a machine that kept up. `--user-settings`
+/// renders with the player's own settings and camera track instead of the capture
+/// defaults.
+static std::string gTrailerClipDir;
+static bool gUseUserSettings = false;
+static int gTrailerMaxFrames = 30 * 900;
 
 int captureFrame(const std::string& variantName, const std::string& path,
                  const std::string& script, const std::string& screen, float overtureT,
@@ -460,8 +483,9 @@ int captureFrame(const std::string& variantName, const std::string& path,
   // Captures use default settings, never the person's own. A screenshot that changes
   // because whoever ran it likes a larger interface is not a screenshot of the game -
   // and `ctest -R gui-` would then pass or fail by whose machine it ran on.
-  auto shell = makeShell(std::filesystem::temp_directory_path() /
-                         "chessbox-capture-defaults.conf");
+  auto shell = makeShell(gUseUserSettings ? app::Settings::defaultPath()
+                                          : std::filesystem::temp_directory_path() /
+                                                "chessbox-capture-defaults.conf");
   // M12.6: a game file names its own variant and start position, and its moves are then
   // played one at a time below rather than through the bulk `applyGameFile`.
   GameFile gameFile;
@@ -771,6 +795,69 @@ int captureFrame(const std::string& variantName, const std::string& path,
     return true;
   };
 
+  // The whole trailer as a frame sequence (M13.9): one lap, fixed step, no interface.
+  if (!gTrailerClipDir.empty()) {
+#ifdef CB_HAVE_IMGUI
+    std::filesystem::create_directories(gTrailerClipDir);
+    shell->startAttract(app::defaultAttractSequence());
+    if (!shell->attracting()) {
+      std::fprintf(stderr, "the trailer will not start\n");
+      return 1;
+    }
+    applyAttractLook(*shell);
+    renderer->setOptions(optionsFor(*shell));
+    frameBoard(*shell);
+    shell->refreshTrailerView();
+    // Two thrown-away frames settle the interface's own screen transition, as for
+    // `--clip`.
+    (void)renderFrame(1.0f / 60.0f);
+    (void)renderFrame(1.0f / 60.0f);
+    const float step = 1.0f / static_cast<float>(std::max(1, fps));
+    int written = 0;
+    bool lapped = false;
+    for (int n = 0; n < gTrailerMaxFrames && !lapped; ++n) {
+      app::Settings& st = shell->settings();
+      // The INVERT ease, exactly as the interactive loop does it.
+      const float evTarget = st.geometryInvert ? 1.0f : 0.0f;
+      st.geometryEvert = st.geometryEvert < evTarget
+                             ? std::min(evTarget, st.geometryEvert + step * 2.0f)
+                             : std::max(evTarget, st.geometryEvert - step * 2.0f);
+      if (n > 0 && shell->advanceAttract(step)) {
+        if (!shell->attracting() || shell->attractStep() == 0) {
+          lapped = true;  // round to the opener again: one lap is done
+          break;
+        }
+        applyAttractLook(*shell);
+        renderer->setOptions(optionsFor(*shell));
+        shell->refreshTrailerView();
+        std::printf("cut: beat %zu (%s) at frame %d\n", shell->attractStep(),
+                    shell->currentVariant().c_str(), written);
+      }
+      if (!shell->attracting()) break;
+      shell->advanceCameraTrack(step);
+      easeTrailerFraming(*shell, step);
+      shell->session()->advanceAnimation(step);
+      renderer->setOptions(optionsFor(*shell));
+      auto img = renderFrame(0.0f);
+      if (!img.has_value()) return 1;
+      char name[64];
+      std::snprintf(name, sizeof(name), "/frame_%05d.ppm", written);
+      if (auto ok = render::writePpm(*img, gTrailerClipDir + name); !ok.has_value()) {
+        std::fprintf(stderr, "%s\n", ok.error().format().c_str());
+        return 1;
+      }
+      ++written;
+    }
+    std::printf("wrote %d frames to %s (%.1f s at %d fps)\n", written,
+                gTrailerClipDir.c_str(),
+                static_cast<double>(written) * static_cast<double>(step), fps);
+    return 0;
+#else
+    std::fprintf(stderr, "the trailer needs the interface build\n");
+    return 1;
+#endif
+  }
+
   // M12.6: plan the whole game before rendering a frame. A move's body is its own
   // animation on a flat board, or the follow choreography's full settle on a shape; a
   // dwell is held after every move but the last. The dry pass validates the file move by
@@ -1074,6 +1161,10 @@ int main(int argc, char** argv) {
       slideV = std::strtof(argv[++i], nullptr);
     else if (arg == "--trailer-edit")
       gTrailerEditCapture = true;
+    else if (arg == "--trailer-clip" && i + 1 < argc)
+      gTrailerClipDir = argv[++i];
+    else if (arg == "--user-settings")
+      gUseUserSettings = true;
     else if (arg == "--ghost" && i + 1 < argc)
       ghost = std::strtof(argv[++i], nullptr);
     else if (arg == "--piece-cylinders")
@@ -1105,8 +1196,10 @@ int main(int argc, char** argv) {
     else if (!arg.starts_with("-"))
       variantName = arg;
   }
+  // A trailer render is footage: the board and the grade, no interface.
+  if (!gTrailerClipDir.empty()) cinema = true;
   const std::string& targetPath = !clipDir.empty() ? clipDir : shotPath;
-  if (!targetPath.empty() || benchFrames > 0) {
+  if (!targetPath.empty() || benchFrames > 0 || !gTrailerClipDir.empty()) {
     return captureFrame(
         variantName.empty() ? "standard" : variantName, targetPath, script, screen,
         overtureT, previewDims, !clipDir.empty(), clipFrames, clipT0, clipT1, cinema,
@@ -1195,7 +1288,10 @@ int main(int argc, char** argv) {
     // A board game has nothing to animate most of the time, so the loop waits for
     // input rather than spinning. While a piece is actually moving it wants frames, so
     // the wait shortens to roughly one.
-    const bool animating = shell->hasGame() && shell->session()->animation().active();
+    // The trailer moves the camera and the shape on every frame, with or without a piece
+    // in flight; waiting for events would draw it at the idle ten frames a second.
+    const bool animating = shell->hasGame() && (shell->session()->animation().active() ||
+                                                shell->attracting());
     if (!SDL_WaitEventTimeout(&e, animating ? 8 : 100)) e.type = SDL_EVENT_POLL_SENTINEL;
     do {
       if (e.type == SDL_EVENT_POLL_SENTINEL) continue;
@@ -1527,8 +1623,10 @@ int main(int argc, char** argv) {
         if (shell->advanceAttract(dt)) {
           applyAttractLook(*shell);
           renderer->setOptions(optionsFor(*shell));
-          frameBoard(*shell);
-          shell->refreshTrailerView();  // the cut re-framed; edit mode shows the keys
+          // Only the first beat of a lap is framed outright; every later cut keeps the
+          // camera it was carried over with, and `easeTrailerFraming` follows the shape.
+          if (shell->attractStep() == 0) frameBoard(*shell);
+          shell->refreshTrailerView();  // edit mode shows what the keyframes say
           wasSurface = optionsFor(*shell).surface;
         }
       } else {
@@ -1675,7 +1773,9 @@ int main(int argc, char** argv) {
       // author's (keyframes, or their hand in edit mode), and the trailer's morph value
       // never equals the SHAPE toggle's target, so this would run every frame and pull
       // the zoom to the tightest framing over whatever was set up.
-      if (morphInFlight && !shell->trailerOwnsCamera()) {
+      if (shell->attracting()) {
+        easeTrailerFraming(*shell, dt);
+      } else if (morphInFlight) {
         const app::Settings& st = shell->settings();
         render::easeMorphFraming(*shell->session(), optionsFor(*shell),
                                  poseFrom(st, shell->session()->variant()),

@@ -93,9 +93,9 @@ struct Settings {
   /// 0.25..4 so a zero cannot freeze the board mid-roll (M18.6).
   float geometryFormSpeed{1.0f};
   /// The trailer's own multipliers on the shape morph and on every piece's move animation
-  /// (1 = as the other settings say), so tuning the trailer leaves the player's own game
-  /// alone. Clamped to [0.25, 4].
-  float trailerMorphSpeed{1.0f};
+  /// (1 = as the other settings say; the morph defaults to 0.5, calmer), so tuning the
+  /// trailer leaves the player's own game alone. Clamped to [0.25, 4].
+  float trailerMorphSpeed{0.5f};
   float trailerMoveSpeed{1.0f};
   /// The live, eased spread of a D >= 3 nested-shell shape's own levels, 0 (every level
   /// on one ring) to 1 (the shipped, fully nested shells), fed to
