@@ -8,6 +8,10 @@
 // What is left here is translating platform events and deciding when to redraw, which
 // is the only part that genuinely needs a display.
 #include <SDL3/SDL.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <csignal>
+#include <ctime>
 
 #include <algorithm>
 #include <chrono>
@@ -469,6 +473,8 @@ static bool gTrailerEditCapture = false;
 static std::string gTrailerClipDir;
 static bool gUseUserSettings = false;
 static int gTrailerMaxFrames = 30 * 900;
+/// `--trailer-frames`: write numbered PPMs instead of piping into ffmpeg (for analysis).
+static bool gTrailerKeepFrames = false;
 
 int captureFrame(const std::string& variantName, const std::string& path,
                  const std::string& script, const std::string& screen, float overtureT,
@@ -797,6 +803,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
 
   // The whole trailer as a frame sequence (M13.9): one lap, fixed step, no interface.
   if (!gTrailerClipDir.empty()) {
+    std::signal(SIGPIPE, SIG_IGN);  // a dead ffmpeg is an error return, not a signal
 #ifdef CB_HAVE_IMGUI
     std::filesystem::create_directories(gTrailerClipDir);
     shell->startAttract(app::defaultAttractSequence());
@@ -813,6 +820,20 @@ int captureFrame(const std::string& variantName, const std::string& path,
     (void)renderFrame(1.0f / 60.0f);
     (void)renderFrame(1.0f / 60.0f);
     const float step = 1.0f / static_cast<float>(std::max(1, fps));
+    // One lap at 1080p is gigabytes of PPM; pipe it into ffmpeg instead when it is there.
+    FILE* videoPipe = nullptr;
+    if (!gTrailerKeepFrames && std::system("ffmpeg -version >/dev/null 2>&1") == 0) {
+      const std::string cmd =
+          "ffmpeg -y -loglevel error -f rawvideo -pix_fmt rgba -s " +
+          std::to_string(width) + "x" + std::to_string(height) + " -framerate " +
+          std::to_string(fps) +
+          " -i - -c:v libx264 -crf 14 -preset medium -pix_fmt yuv420p \"" +
+          gTrailerClipDir + "/trailer.mp4\"";
+      videoPipe = popen(cmd.c_str(), "w");
+      if (videoPipe == nullptr) {
+        std::fprintf(stderr, "no ffmpeg: writing PPM frames instead\n");
+      }
+    }
     int written = 0;
     bool lapped = false;
     for (int n = 0; n < gTrailerMaxFrames && !lapped; ++n) {
@@ -840,14 +861,27 @@ int captureFrame(const std::string& variantName, const std::string& path,
       renderer->setOptions(optionsFor(*shell));
       auto img = renderFrame(0.0f);
       if (!img.has_value()) return 1;
-      char name[64];
-      std::snprintf(name, sizeof(name), "/frame_%05d.ppm", written);
-      if (auto ok = render::writePpm(*img, gTrailerClipDir + name); !ok.has_value()) {
-        std::fprintf(stderr, "%s\n", ok.error().format().c_str());
-        return 1;
+      if (videoPipe != nullptr) {
+        if (std::fwrite(img->rgba.data(), 1, img->rgba.size(), videoPipe) !=
+            img->rgba.size()) {
+          std::fprintf(stderr, "ffmpeg closed the pipe\n");
+          return 1;
+        }
+      } else {
+        char name[64];
+        std::snprintf(name, sizeof(name), "/frame_%05d.ppm", written);
+        if (auto ok = render::writePpm(*img, gTrailerClipDir + name); !ok.has_value()) {
+          std::fprintf(stderr, "%s\n", ok.error().format().c_str());
+          return 1;
+        }
+      }
+      if (written % 10 == 0) {  // progress for whoever launched this
+        std::ofstream(gTrailerClipDir + "/progress.txt") << written;
       }
       ++written;
     }
+    if (videoPipe != nullptr) (void)pclose(videoPipe);
+    std::ofstream(gTrailerClipDir + "/progress.txt") << "done " << written;
     std::printf("wrote %d frames to %s (%.1f s at %d fps)\n", written,
                 gTrailerClipDir.c_str(),
                 static_cast<double>(written) * static_cast<double>(step), fps);
@@ -1089,7 +1123,17 @@ int main(int argc, char** argv) {
           "  g             the board as its own shape; middle drag slides it round\n"
           "  Esc           pause     u  undo     r  reset\n"
           "  k             record a camera keyframe at the current move (M13.9 Part E)\n"
-          "  j             remove the keyframe at the current move\n\n"
+          "  j             remove the keyframe at the current move\n"
+          "The trailer (Watch trailer):\n"
+          "  left / right  previous / next keyframe      shift+left/right  one grid "
+          "step\n"
+          "  Enter         add a keyframe here           Del  remove the keyframe here\n"
+          "  Space         pause / resume                orbit, zoom or slide: pause to "
+          "edit\n"
+          "  RENDER        the whole trailer to a video, frame by frame "
+          "(trailer_render/)\n"
+          "  --trailer-clip DIR [--user-settings] [--trailer-frames]  the same, "
+          "headless\n\n"
           "With no variant, the game opens on the main menu.\n"
           "--shot renders one frame to a PPM and exits, with no display required;\n"
           "--screen picks which one: menu, welcome, newgame, pause, settings, editor,\n"
@@ -1163,6 +1207,8 @@ int main(int argc, char** argv) {
       gTrailerEditCapture = true;
     else if (arg == "--trailer-clip" && i + 1 < argc)
       gTrailerClipDir = argv[++i];
+    else if (arg == "--trailer-frames")
+      gTrailerKeepFrames = true;
     else if (arg == "--user-settings")
       gUseUserSettings = true;
     else if (arg == "--ghost" && i + 1 < argc)
@@ -1280,6 +1326,11 @@ int main(int argc, char** argv) {
   /// The camera choreography for a followed move on a shape (M17.19): hold, morph,
   /// approach, travel, morph home. Inactive on the flat board and in every capture.
   render::ShapeMoveSequence shapeSeq;
+  // A trailer render running as a child process (the panel's RENDER button).
+  pid_t renderPid = -1;
+  std::filesystem::path renderDir;
+  std::string renderStatus;
+  int renderPoll = 0;
   auto lastFrame = std::chrono::steady_clock::now();
   float fps = 0.0f;
 
@@ -1375,6 +1426,11 @@ int main(int argc, char** argv) {
           }
           break;
         case SDL_EVENT_MOUSE_MOTION:
+          // Reaching for the camera in the trailer pauses it into edit mode, so the hand
+          // is not fought by keyframes or the trailer's own framing.
+          if ((sliding || panning || orbiting) && shell->hasGame()) {
+            shell->trailerUserTookCamera();
+          }
           if (sliding && shell->hasGame()) {
             // Drag the board round its own surface: left and right along the ranks, up
             // and down along the files. On a cylinder the ranks are free, so left/right
@@ -1428,6 +1484,7 @@ int main(int argc, char** argv) {
           break;
         case SDL_EVENT_MOUSE_WHEEL: {
           if (consumed || !inGame) break;
+          shell->trailerUserTookCamera();
           app::Action a;
           a.kind = app::ActionKind::Zoom;
           const float step = 0.1f * settings.zoomSensitivity;
@@ -1502,6 +1559,33 @@ int main(int argc, char** argv) {
               }
               break;
 #endif
+            // The trailer's authoring keys (M13.9): arrows step between keyframes (shift:
+            // by the grid, which pauses into edit mode), Enter records a keyframe, Delete
+            // removes the one under the playhead, Space pauses and resumes.
+            case SDLK_LEFT:
+            case SDLK_RIGHT:
+              if (inGame && shell->attracting()) {
+                const int dir = e.key.key == SDLK_RIGHT ? 1 : -1;
+                if ((e.key.mod & SDL_KMOD_SHIFT) != 0) {
+                  shell->setTrailerEditing(true);
+                  (void)shell->trailerStepFraction(dir);
+                } else {
+                  (void)shell->requestTrailerSeekKey(dir);
+                }
+              }
+              break;
+            case SDLK_RETURN:
+            case SDLK_KP_ENTER:
+              if (inGame && shell->attracting()) {
+                shell->recordCameraKeyframe(shell->trailerKeySpeed());
+              }
+              break;
+            case SDLK_DELETE:
+              if (inGame && shell->attracting()) (void)shell->eraseCameraKeyframe();
+              break;
+            case SDLK_SPACE:
+              if (inGame && shell->attracting()) shell->toggleTrailerPause();
+              break;
             case SDLK_K:
               // Record a camera keyframe (M13.9 Part E): whatever the camera and shape
               // pose look like right now, saved against the current move. The scaffold's
@@ -1646,6 +1730,25 @@ int main(int argc, char** argv) {
     // Set once the interface has built this frame: the surface view draws the board
     // itself, so the ordinary renderer stays out of the way (M17).
 #ifdef CB_HAVE_IMGUI
+    // A trailer render in another process: reap it when it ends, and tell the panel how
+    // far along it is (a progress file the child updates every few frames).
+    if (renderPid > 0) {
+      int status = 0;
+      if (waitpid(renderPid, &status, WNOHANG) == renderPid) {
+        renderPid = -1;
+        const bool ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+        renderStatus = ok ? "rendered: " + renderDir.string()
+                          : "render failed - see the terminal output";
+      } else if (++renderPoll % 20 == 1) {
+        std::ifstream in(renderDir / "progress.txt");
+        int frames = 0;
+        if (in >> frames) {
+          renderStatus = "rendering... " + std::to_string(frames) + " frames  (" +
+                         renderDir.string() + ")";
+        }
+      }
+    }
+    (*ui)->setRenderStatus(renderStatus, renderPid > 0);
     (*ui)->tick(dt);
     (*ui)->newFrame();
     const render::UiRequest request = (*ui)->build(*shell, fps);
@@ -1693,6 +1796,34 @@ int main(int argc, char** argv) {
         renderer->setOptions(optionsFor(*shell));
         frameBoard(*shell);
         wasSurface = optionsFor(*shell).surface;
+      }
+    }
+    if (request.renderTrailer && renderPid < 0) {
+      // Persist what the render must see - settings, and the keyframes were saved as they
+      // were recorded - then render in a child: this process keeps drawing, and the
+      // render is frame-by-frame, so what this machine can draw in real time does not
+      // matter to it.
+      shell->applySettings();
+      char stamp[32];
+      const std::time_t wallClock = std::time(nullptr);
+      std::strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", std::localtime(&wallClock));
+      renderDir = shell->trailerRenderDir() / stamp;
+      std::error_code ec;
+      std::filesystem::create_directories(renderDir, ec);
+      const std::string dirText = renderDir.string();
+      const pid_t pid = fork();
+      if (pid == 0) {
+        execl("/proc/self/exe", "chessbox_gui", "--trailer-clip", dirText.c_str(),
+              "--user-settings", "--fps", "30", "--width", "1920", "--height", "1080",
+              static_cast<char*>(nullptr));
+        _exit(127);
+      }
+      if (pid > 0) {
+        renderPid = pid;
+        renderPoll = 0;
+        renderStatus = "rendering... " + dirText;
+      } else {
+        renderStatus = "could not start the render";
       }
     }
     if (request.startAttract) {

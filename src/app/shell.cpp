@@ -879,9 +879,14 @@ CameraCue Shell::currentCue() const {
   if (session_ == nullptr) return {};
   // Inside the trailer a cue also names its beat (`klein` plays twice), and is never the
   // same cue as a game the player started themselves.
-  return {currentVariant_, session_->game().moveHistory().size(),
-          attracting() ? attractIndex_ + 1 : 0,
-          attracting() && trailerEditing_ ? editSub_ : 0};
+  if (attracting()) {
+    // A point on the trailer timeline, to the nearest eighth of a move: exactly where
+    // edit mode sits, and where playback is right now.
+    const TrailerCue at = trailerCueAt(trailerTime(), 8);
+    return {currentVariant_, session_->game().moveHistory().size(), attractIndex_ + 1,
+            trailerEditing_ ? editSub_ : at.sub};
+  }
+  return {currentVariant_, session_->game().moveHistory().size(), 0, 0};
 }
 
 std::filesystem::path Shell::cameraTrackPath() const {
@@ -921,7 +926,21 @@ void Shell::recordCameraKeyframe(float speed) {
 
 bool Shell::eraseCameraKeyframe() {
   if (session_ == nullptr) return false;
-  const bool removed = cameraTrack_.erase(currentCue());
+  bool removed = cameraTrack_.erase(currentCue());
+  if (!removed && attracting()) {
+    // While playing the playhead is rarely exactly on a keyframe: take the nearest one
+    // within a sixteenth of a move.
+    const float g = trailerTime();
+    const CameraKeyframe* nearest = nullptr;
+    float best = 1.0f / 16.0f + 1e-4f;
+    for (const auto& [time, kf] : trailerKeys()) {
+      if (std::abs(time - g) <= best) {
+        best = std::abs(time - g);
+        nearest = kf;
+      }
+    }
+    if (nearest != nullptr) removed = cameraTrack_.erase(nearest->cue);
+  }
   if (removed) persistCameraTrack();
   return removed;
 }
@@ -1129,6 +1148,48 @@ bool Shell::trailerStepFraction(int dir) {
   applySplineAt(trailerTime(),
                 true);  // preview what the spline says here, if there is one
   return true;
+}
+
+bool Shell::requestTrailerSeekKey(int dir) {
+  if (!attracting() || dir == 0) return false;
+  const float here = trailerTime();
+  constexpr float kEps = 1.0f / 32.0f;  // closer than a sixteenth is "where we are"
+  const float* found = nullptr;
+  const std::vector<float> times = trailerKeyTimes();
+  if (dir > 0) {
+    for (const float& t : times) {
+      if (t > here + kEps) {
+        found = &t;
+        break;
+      }
+    }
+  } else {
+    for (auto it = times.rbegin(); it != times.rend(); ++it) {
+      if (*it < here - kEps) {
+        found = &*it;
+        break;
+      }
+    }
+  }
+  if (found == nullptr) return false;
+  const TrailerCue cue = trailerCueAt(*found, 8);
+  pendingSeek_ = cue;
+  return true;
+}
+
+void Shell::toggleTrailerPause() {
+  if (!attracting()) return;
+  if (trailerEditing_) {
+    setTrailerEditing(false);
+    trailerPaused_ = false;
+  } else {
+    trailerPaused_ = !trailerPaused_;
+  }
+}
+
+void Shell::trailerUserTookCamera() {
+  if (!attracting() || trailerEditing_ || trailerCamera_ == TrailerCamera::Follow) return;
+  setTrailerEditing(true);
 }
 
 void Shell::requestTrailerRestart() {

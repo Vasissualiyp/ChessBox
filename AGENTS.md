@@ -134,6 +134,9 @@ tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID 
 ./build/dev/src/gui/chessbox_gui --shot out.ppm --screen settings   # any screen
 ./build/dev/src/gui/chessbox_gui --shot o.ppm --screen menu --t 3.0   # the main-menu attract
                                  # sequence (M13.9), 3s into its loop
+./build/dev/src/gui/chessbox_gui --trailer-clip out/ --user-settings   # the whole trailer to
+                                 # out/trailer.mp4, one lap, fixed step, no interface; add
+                                 # --trailer-frames for PPMs (diff them to find discontinuities)
 ./build/dev/src/gui/chessbox_gui --shot o.ppm --screen menu --t 14 --trailer-edit
                                  # the trailer in its camera-edit mode (PLY/BEAT, REC KEY, shape buttons)
 ./build/dev/src/gui/chessbox_gui torus --shot o.ppm --screen newgame --t 0.6  # an overture

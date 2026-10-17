@@ -728,6 +728,18 @@ InstanceSet BoardRenderer::buildInstances(
       // same vertex colour array the ghost's alpha does. A stacked D >= 3 shape has no
       // continuous ring to key off, so it gets none (M17.22).
       const bool rails = seams != nullptr && options_.showSeams && !surf.stacked();
+      // With the levels collapsed onto one ring (`shellSpread` 0) the stacked shape's
+      // levels are coincident and their transparencies multiply: four ghosts at `a` read
+      // as `1 - (1-a)^4`, much darker than the plain torus the shape has just been. Give
+      // each level the alpha that composites to `a` when they coincide, and ease back to
+      // `a` each as they spread into their own nested shells.
+      float ghostAlpha = options_.surfaceGhost;
+      if (surf.stacked() && v.dims.dims() >= 3 && ghostAlpha < 0.99f) {
+        const float levels = static_cast<float>(std::max<int>(1, v.dims.extent(2)));
+        const float single = 1.0f - std::pow(1.0f - ghostAlpha, 1.0f / levels);
+        const float spread = std::clamp(options_.surfaceShellSpread, 0.0f, 1.0f);
+        ghostAlpha = single + (ghostAlpha - single) * spread;
+      }
       const auto tinted = [&](view::Rgba base, int i, int j) {
         if (rails) {
           const SurfaceRail ru = surfaceRail(*seams, patch.cell, 0, i, j);
@@ -743,7 +755,7 @@ InstanceSet BoardRenderer::buildInstances(
         }
         // The ghost alpha rides in the vertex colour (M17.10); the pieces are separate
         // instances and stay opaque.
-        base.a *= options_.surfaceGhost;
+        base.a *= ghostAlpha;
         return base;
       };
       // The square's *sides* take the board's rim colour: that is what keeps the gap

@@ -1658,3 +1658,45 @@ deferred seek like the beat jumps), and playback carries on from there - or stay
 it was. Playing seeks start part-way through the move (`seekPhase_`) and keep the beat's own
 morph start rather than snapping the pose to its end state, which edit-mode seeks still do.
 Tests: `[pause]`.
+
+### Revision: render the trailer, find every discontinuity by diffing frames (2026-10-17)
+
+**Method.** `--trailer-clip DIR` renders one lap of the trailer, frame by frame at a fixed
+step, in cinema (no interface), through the same per-frame logic as the interactive loop;
+the RENDER button runs it in a child process with the player's own settings and keyframes,
+piping frames into ffmpeg (a 1080p lap as PPMs is ~11 GB), or `--trailer-frames` keeps
+PPMs. A script then took the mean absolute difference between consecutive frames and
+flagged any frame more than 3x its neighbours - those, and only those, were investigated.
+
+**What the diffs found, and the fixes.** The first lap flagged every cut:
+- *standard | cylinder* (diff 15 vs ~1): the opener was the flat board drawn by the flat
+  renderer, the roll the shape renderer, with a different camera and a half-rolled start.
+  The opener is now the **cylinder at `formed = 0`** - the shape renderer's flat board is
+  the standard board turned a half turn about the vertical (not a mirror), so the camera
+  is turned to put white nearest - held flat for 18 plies, then the same board rolls up.
+  The opener line was re-searched on the cylinder with every wrapping move forbidden (on a
+  board that still looks flat a wrap reads as a teleport); the later lines re-derived.
+- *every cut re-framed the camera and reset it to the new session's default angle.* The
+  camera is now carried across (`startAttractStep`), a cut no longer snaps the frame, and
+  `easeTrailerFraming` follows the shape's bounds each frame (a quarter-second lag) when
+  the camera is not the author's.
+- *morphs started at full speed* (a linear ramp: the instant the motion "switches on").
+  `view::EasedMorph` is a smoothstep with the same duration as before, and each beat has
+  a `morphSpeed` (the torus's bend is the slowest - it was the one that "wound up", in a
+  quarter of a second). `Settings::trailerMorphSpeed` now defaults to 0.5.
+- *klein -> 3-D torus* (diff 25): the shells' collapsed state was a ring three times the
+  torus's size. At `shellSpread = 0` `playShapeAt` is now the plain 2-D torus exactly and
+  blends to the shipped shells; coincident levels' ghost alphas no longer multiply.
+After these, no frame in the 1839-frame lap is above 1.2 mean difference (was 25).
+Not fixed: Klein's coloured seam rails vanish at the cut into the 3-D torus (shells have
+none), and the sculpture-to-icon piece swap on the Klein beat is still a snap.
+
+**Also.** The authored camera is the default; with no keyframes it frames the shape itself
+(`trailerAutoFrames`), with keyframes it is the author's (`trailerOwnsCamera`). Keys:
+left/right between keyframes, shift+left/right by the grid (pauses into edit), Enter adds,
+Del removes the one under the playhead, Space pauses/resumes. Orbiting, zooming or sliding
+while the trailer would take the camera back pauses into edit mode instead of fighting the
+hand (`trailerUserTookCamera`) - the likeliest cause of the "3-D mouse move discontinues"
+report: the spline or the auto-framing overwrote the drag every frame. The in-game stutter
+was the loop waiting for events (10 frames a second) whenever no piece was in flight;
+the trailer now counts as animating.

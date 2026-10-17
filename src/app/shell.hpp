@@ -302,6 +302,16 @@ class Shell {
   /// Start the trailer over from its first beat (deferred a frame, like a jump). Keeps
   /// the camera mode and edit mode, drops the viewer's ghost/piece overrides.
   void requestTrailerRestart();
+  /// Seek to the next (`dir` > 0) or previous keyframe on the timeline, deferred like any
+  /// seek. False when there is none that way.
+  bool requestTrailerSeekKey(int dir);
+  /// Space: pause or resume. In edit mode it leaves edit mode and plays.
+  void toggleTrailerPause();
+  /// The author reached for the camera (orbit, zoom, slide). While the trailer would take
+  /// the camera back - keyframes, or its own framing - that means they want to work on
+  /// it, so the trailer pauses into edit mode instead of fighting the hand. The chase
+  /// camera and anything outside the trailer are left alone.
+  void trailerUserTookCamera();
   /// How finely the edit-mode step buttons divide a move: 1 (whole moves), 2, 4 or 8.
   /// Anything else is refused.
   [[nodiscard]] int trailerGrid() const noexcept { return trailerGrid_; }
@@ -432,6 +442,10 @@ class Shell {
   /// Where the track is read from and written to: a file beside the settings file, the
   /// same convention `gamesDir()` uses.
   [[nodiscard]] std::filesystem::path cameraTrackPath() const;
+  /// Where a rendered trailer goes: a `trailer_render` folder beside the settings file.
+  [[nodiscard]] std::filesystem::path trailerRenderDir() const {
+    return settingsPath_.parent_path() / "trailer_render";
+  }
   /// Advance the track's own easing for one frame. When play has reached a cue with a
   /// keyframe different from the one last eased toward, starts a new blend from the
   /// view's *current* camera and shape pose toward it (`view::slerpCamera` for the

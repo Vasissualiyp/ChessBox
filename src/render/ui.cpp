@@ -1712,6 +1712,12 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       shell.requestTrailerRestart();
     }
     ImGui::SameLine();
+    // Render the whole trailer to a video, frame by frame, in a separate process - what
+    // plays here is as fast as this machine can draw it, what is rendered is every frame.
+    if (button("RENDER", t, px(110), renderRunning_, true, !renderRunning_, display)) {
+      request.renderTrailer = true;
+    }
+    ImGui::SameLine();
     // Pause without the edit controls; edit mode pauses too, so then it only reads.
     {
       const bool paused = shell.trailerPaused() || editing;
@@ -1744,8 +1750,12 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     ImGui::SameLine();
     ImGui::PushFont(small);
     ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
-    ImGui::Text("%s  -  Esc leaves the trailer",
-                editing || shell.trailerPaused() ? "paused" : "playing");
+    if (!renderStatus_.empty()) {
+      ImGui::TextUnformatted(renderStatus_.c_str());
+    } else {
+      ImGui::Text("%s  -  Esc leaves the trailer",
+                  editing || shell.trailerPaused() ? "paused" : "playing");
+    }
     ImGui::PopStyleColor();
     ImGui::PopFont();
   } else if (shell.watching()) {

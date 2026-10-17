@@ -693,3 +693,133 @@ TEST_CASE("clicking the timeline while playing moves there and keeps playing",
   for (int i = 0; i < 120; ++i) shell->advanceAttract(kStep);
   CHECK(shell->trailerTime() == t);
 }
+
+TEST_CASE("keys step to the next and previous keyframe", "[unit][app][trailer][keys]") {
+  auto shell = makeShell("trailer-keynav.conf");
+  shell->settings().watchDwell = 0.05f;
+  shell->startAttract(defaultAttractSequence());
+  shell->cameraTrack().set(trailerKey(0, 3, 0, 0.1f));
+  shell->cameraTrack().set(trailerKey(0, 7, 4, 0.2f));
+  shell->cameraTrack().set(trailerKey(1, 2, 0, 0.3f));  // the cylinder beat proper
+  constexpr float kStep = 1.0f / 60.0f;
+  shell->setTrailerPaused(true);
+  CHECK(shell->requestTrailerSeekKey(+1));
+  shell->advanceAttract(kStep);
+  CHECK(shell->trailerTime() == 3.0f);
+  CHECK(shell->requestTrailerSeekKey(+1));
+  shell->advanceAttract(kStep);
+  CHECK(shell->trailerTime() == 7.5f);  // a fractional keyframe is a stop too
+  CHECK(shell->requestTrailerSeekKey(+1));
+  CHECK(shell->advanceAttract(kStep));  // into the next beat: a cut
+  CHECK(shell->attractStep() == 1);
+  CHECK(shell->trailerTime() == shell->beatOffset(1) + 2.0f);
+  CHECK_FALSE(shell->requestTrailerSeekKey(+1));  // no later keyframe
+  CHECK(shell->requestTrailerSeekKey(-1));
+  shell->advanceAttract(kStep);
+  CHECK(shell->trailerTime() == 7.5f);
+  CHECK(shell->attractStep() == 0);
+  CHECK(shell->requestTrailerSeekKey(-1));
+  shell->advanceAttract(kStep);
+  CHECK(shell->trailerTime() == 3.0f);
+  CHECK_FALSE(shell->requestTrailerSeekKey(-1));
+}
+
+TEST_CASE("a keyframe added while the trailer plays lands on the nearest eighth",
+          "[unit][app][trailer][keys]") {
+  auto shell = makeShell("trailer-keyadd.conf");
+  shell->settings().watchDwell = 0.6f;
+  shell->settings().trailerMovePreview = 0.0f;
+  shell->startAttract(defaultAttractSequence());
+  constexpr float kStep = 1.0f / 60.0f;
+  for (int i = 0; i < 60 * 2; ++i) {
+    shell->session()->advanceAnimation(kStep);
+    shell->advanceAttract(kStep);
+  }
+  const float here = shell->trailerTime();
+  const TrailerCue cue = shell->trailerCueAt(here, 8);
+  shell->recordCameraKeyframe(2.0f);
+  CHECK(shell->cameraTrack().find({"cylinder", cue.ply, cue.beat + 1, cue.sub}) !=
+        nullptr);
+  CHECK(shell->trailerKeyTimes().size() == 1);
+  // Delete takes the keyframe nearest the playhead, not only one exactly on it.
+  for (int i = 0; i < 4; ++i) {
+    shell->session()->advanceAnimation(kStep);
+    shell->advanceAttract(kStep);
+  }
+  CHECK(shell->eraseCameraKeyframe());
+  CHECK(shell->cameraTrack().empty());
+  CHECK_FALSE(shell->eraseCameraKeyframe());
+}
+
+TEST_CASE("space pauses and resumes; touching the camera pauses into edit mode",
+          "[unit][app][trailer][keys]") {
+  auto shell = makeShell("trailer-space.conf");
+  shell->startAttract(defaultAttractSequence());
+  shell->toggleTrailerPause();
+  CHECK(shell->trailerPaused());
+  shell->toggleTrailerPause();
+  CHECK_FALSE(shell->trailerPaused());
+  shell->setTrailerEditing(true);
+  shell->toggleTrailerPause();  // leaves edit mode and plays
+  CHECK_FALSE(shell->trailerEditing());
+  CHECK_FALSE(shell->trailerPaused());
+
+  // Grabbing the camera while keyframes would take it back pauses into edit mode.
+  shell->cameraTrack().set(trailerKey(0, 3, 0, 0.1f));
+  shell->trailerUserTookCamera();
+  CHECK(shell->trailerEditing());
+  shell->setTrailerEditing(false);
+  // The chase camera is the player's own business: left alone.
+  shell->setTrailerCamera(TrailerCamera::Follow);
+  shell->trailerUserTookCamera();
+  CHECK_FALSE(shell->trailerEditing());
+  // And outside the trailer it does nothing at all.
+  shell->stopAttract();
+  shell->trailerUserTookCamera();
+  CHECK_FALSE(shell->trailerEditing());
+}
+
+TEST_CASE("the camera is carried across a cut, not reset to the new beat's default",
+          "[unit][app][trailer]") {
+  auto shell = makeShell("trailer-carry.conf");
+  shell->settings().watchDwell = 0.05f;
+  shell->settings().trailerMovePreview = 0.0f;
+  shell->startAttract(defaultAttractSequence());
+  Action orbit;
+  orbit.kind = ActionKind::Orbit;
+  orbit.dx = 1.1f;
+  orbit.dy = -0.3f;
+  (void)shell->session()->apply(orbit);
+  Action zoom;
+  zoom.kind = ActionKind::Zoom;
+  zoom.dx = 1.5f;
+  (void)shell->session()->apply(zoom);
+  const view::OrbitCamera before = shell->session()->camera();
+  constexpr float kStep = 1.0f / 60.0f;
+  bool cut = false;
+  for (int i = 0; i < 60 * 120 && !cut; ++i) {
+    shell->session()->advanceAnimation(kStep);
+    cut = shell->advanceAttract(kStep);
+  }
+  REQUIRE(cut);
+  REQUIRE(shell->attractStep() == 1);
+  const view::OrbitCamera after = shell->session()->camera();
+  CHECK(after.yaw == before.yaw);
+  CHECK(after.pitch == before.pitch);
+  CHECK(after.distance == before.distance);
+}
+
+TEST_CASE(
+    "the opener is the cylinder held flat, and every later beat continues one picture",
+    "[unit][app][trailer]") {
+  const AttractSequence seq = defaultAttractSequence();
+  REQUIRE(seq.size() >= 2);
+  CHECK(seq[0].variant == "cylinder");
+  CHECK(seq[0].formedFrom == 0.0f);
+  CHECK(seq[0].formedTarget == 0.0f);  // it stays a flat board for the whole opener
+  CHECK(seq[1].formedFrom < 0.0f);     // and the roll starts from that same flat board
+  CHECK(seq[1].formedTarget == 1.0f);
+  // The slow morphs are slow on purpose: the torus's bend is the one that used to wind
+  // up.
+  CHECK(seq[2].morphSpeed < seq[1].morphSpeed);
+}

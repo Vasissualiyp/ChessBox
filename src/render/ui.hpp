@@ -51,6 +51,8 @@ struct UiRequest {
   /// Start the main-menu attract trailer (M13.9 revision). One frame's request: the
   /// sequence is fixed, so there is no picker step the way a bundled "Watch" game has.
   bool startAttract{false};
+  /// Render the whole trailer to a video (one frame's request; the front end runs it).
+  bool renderTrailer{false};
 };
 
 /// Whether the camera-projected file/rank coordinate labels are drawn.
@@ -124,6 +126,12 @@ class Ui {
   void setIconStyle(IconStyle s) noexcept { iconStyle_ = s; }
   /// Cinema mode: the board is the whole frame and the interface's furniture is dropped.
   /// The one thing still drawn is the frame's own look - the grade and the vignette.
+  /// What the trailer panel says about a render in progress, and whether one is running
+  /// (so the button is not offered twice). Set each frame by the front end that runs it.
+  void setRenderStatus(std::string text, bool running) {
+    renderStatus_ = std::move(text);
+    renderRunning_ = running;
+  }
   void setCinema(bool on) noexcept { cinema_ = on; }
   /// Open the editor on a page, and the piece designer on one of its tabs. For `--shot`,
   /// so every designer is reviewable the same way every other screen is.
@@ -240,6 +248,8 @@ class Ui {
   /// so the controls sit above it.
   float buildTrailerTimeline(app::Shell& shell);
   UiRequest buildPieceMoves(app::Shell& shell);
+  std::string renderStatus_;
+  bool renderRunning_{false};
   /// The piece designer's three tabs. They share one pane, because they are three jobs
   /// on one piece and moving between them must not feel like leaving the piece behind.
   void drawMovesTab(app::Shell& shell, const std::string& piece);

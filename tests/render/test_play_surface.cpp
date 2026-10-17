@@ -2987,3 +2987,53 @@ TEST_CASE(
     }
   }
 }
+
+TEST_CASE(
+    "the 3-D torus's collapsed shells are the plain torus, and spread to the shipped "
+    "shells",
+    "[render][shells]") {
+  // The trailer cuts from the torus Klein folded back into onto this shape. At
+  // `shellSpread` 0 it must be that torus - not a ring of roughly its size - or the cut
+  // jumps; at 1 it must be the shipped shells to the bit.
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("torus3d_8x8"));
+  const float nx = static_cast<float>(v.dims.extent(0));
+  const float nz = static_cast<float>(v.dims.extent(1));
+  for (int level = 0; level < 4; ++level) {
+    for (const auto& cell : {std::pair{0, 0}, std::pair{3, 5}, std::pair{7, 2}}) {
+      std::array<float, kMaxDims> axis{};
+      axis[0] = static_cast<float>(cell.first) + 0.5f;
+      axis[1] = static_cast<float>(cell.second) + 0.5f;
+      axis[2] = static_cast<float>(level) + 0.5f;
+      SurfacePose flat;
+      flat.formed = 1.0f;
+      flat.shellSpread = 0.0f;
+      OvVec3 got{};
+      REQUIRE(playShapeAt(v, axis, got, flat));
+      const OvVec3 torus =
+          derivedSurfaceAt(app::SurfaceKind::Torus, axis[0] / nx, axis[1] / nz, flat);
+      CAPTURE(level, cell.first, cell.second);
+      CHECK(std::abs(got.x - torus.x) < 1e-4f);
+      CHECK(std::abs(got.y - torus.y) < 1e-4f);
+      CHECK(std::abs(got.z - torus.z) < 1e-4f);
+    }
+  }
+  // Collapsed, every level is the same surface; spread apart, they are not.
+  std::array<float, kMaxDims> a{};
+  a[0] = 2.5f;
+  a[1] = 2.5f;
+  OvVec3 l0{}, l3{};
+  SurfacePose collapsed;
+  collapsed.shellSpread = 0.0f;
+  a[2] = 0.5f;
+  REQUIRE(playShapeAt(v, a, l0, collapsed));
+  a[2] = 3.5f;
+  REQUIRE(playShapeAt(v, a, l3, collapsed));
+  CHECK(std::abs(l0.y - l3.y) < 1e-4f);
+  SurfacePose spread;
+  spread.shellSpread = 1.0f;
+  a[2] = 0.5f;
+  REQUIRE(playShapeAt(v, a, l0, spread));
+  a[2] = 3.5f;
+  REQUIRE(playShapeAt(v, a, l3, spread));
+  CHECK(std::abs(l0.y - l3.y) > 1.0f);
+}
