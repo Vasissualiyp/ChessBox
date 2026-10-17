@@ -506,7 +506,7 @@ AttractSequence defaultAttractSequence() {
                            "h1g1", "g8h7"},
                  .formedFrom = view::kTorusRollEnd,
                  .continuesPosition = true,
-                 .morphSpeed = 0.35f});
+                 .morphSpeed = 0.25f});
   // Klein hides its far side, so it ghosts and draws flat icon pucks throughout both of
   // its beats, not just the fold-in.
   seq.push_back({.variant = "klein",
