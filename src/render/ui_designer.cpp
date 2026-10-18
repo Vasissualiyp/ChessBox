@@ -109,6 +109,8 @@ void Ui::syncDesignAssets(app::Shell& shell) {
   const int idx = std::clamp(editorPiece_, 0, static_cast<int>(names.size()) - 1);
   const std::string& piece = names[static_cast<std::size_t>(idx)];
   if (designFor_ == piece) return;
+  // Leaving a piece keeps what was drawn on it; coming back to one restores it.
+  if (!designFor_.empty()) designs_[designFor_] = Design{designModel_, designIcon_};
 
   // Seeded from the shipped archetype for this piece, so the designer always opens on
   // something editable. The invariant the fallback exists for: a piece is never left
@@ -122,8 +124,13 @@ void Ui::syncDesignAssets(app::Shell& shell) {
     const PieceTypeId id = spec->findPiece(piece);
     if (id != kNoPiece) seed = modelNameFor(archetypeFor(spec->pieces[id]));
   }
-  designModel_ = assets::archetypeModel(seed);
-  designIcon_ = assets::iconFromProfile(designModel_);
+  if (const auto kept = designs_.find(piece); kept != designs_.end()) {
+    designModel_ = kept->second.model;
+    designIcon_ = kept->second.icon;
+  } else {
+    designModel_ = assets::archetypeModel(seed);
+    designIcon_ = assets::iconFromProfile(designModel_);
+  }
   designProfilePoint_ = -1;
   designIconPoint_ = -1;
   designIconPoly_ = 0;
@@ -341,7 +348,7 @@ void Ui::drawMovesTab(app::Shell& shell, const std::string& piece) {
       int v = a.mags[k];
       char id[24];
       std::snprintf(id, sizeof(id), "m%d", static_cast<int>(k));
-      if (stepper(id, v, 0, 9, t, scale_, px(24.0f))) {
+      if (stepper(id, v, 1, 9, t, scale_, px(24.0f))) {
         a.mags[k] = static_cast<std::int16_t>(v);
         changed = true;
       }
@@ -427,6 +434,7 @@ void Ui::drawMovesTab(app::Shell& shell, const std::string& piece) {
     changed = true;
   };
   ImGui::PushFont(small);
+  ImGui::PushID("add-a-move");
   const auto add = [&](const char* label, float w) {
     ImGui::PushStyleColor(ImGuiCol_Button, col(t.panelHi, 0.5f));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, col(t.panelHi));
@@ -449,6 +457,15 @@ void Ui::drawMovesTab(app::Shell& shell, const std::string& piece) {
     addAtom({1, 2}, 1, MoveMode::Leap, CapturePolicy::May, false);
   }
   ImGui::SameLine();
+  if (add("queen", px(72))) {
+    // Every straight line the board has: one axis, two, three... up to its dimension.
+    for (const MoveAtom& a : straightLineAtoms(
+             kUnlimited, std::max<std::size_t>(2, editor->axes().size()))) {
+      list.push_back(a);
+    }
+    changed = true;
+  }
+  ImGui::SameLine();
   if (add("king", px(66))) {
     addAtom({1}, 1, MoveMode::Slide, CapturePolicy::May, false);
     addAtom({1, 1}, 1, MoveMode::Slide, CapturePolicy::May, false);
@@ -463,9 +480,18 @@ void Ui::drawMovesTab(app::Shell& shell, const std::string& piece) {
   if (add("forward capture", px(130))) {
     addAtom({1, 1}, 1, MoveMode::Slide, CapturePolicy::Must, true);
   }
+  ImGui::PopID();
   ImGui::PopFont();
 
-  if (changed) (void)editor->setPieceAtoms(piece, list);
+  if (changed) {
+    const Result<void> ok = editor->setPieceAtoms(piece, list);
+    moveNote_ = ok.has_value() ? std::string{} : ok.error().message;
+  }
+  if (!moveNote_.empty()) {
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.blood));
+    ImGui::TextWrapped("%s", moveNote_.c_str());
+    ImGui::PopStyleColor();
+  }
 
   sectionHead("PREVIEW", t, fontSmall_, scale_);
   ImGui::PushFont(small);
@@ -512,6 +538,12 @@ void Ui::drawBodyTab(app::Shell& shell) {
   ImGui::Dummy(ImVec2(side, side));
   (void)outlineEditor("profile", gridMin, gridMax, designModel_.profile,
                       designProfilePoint_, true, "radius", "height");
+  // What the sweep makes, beside the profile it is made from, turning slowly so the
+  // facets and the placed elements both read.
+  drawRevolvePreview(ImGui::GetWindowDrawList(),
+                     ImVec2(gridMax.x + px(16.0f), gridMin.y),
+                     ImVec2(gridMax.x + px(16.0f) + side, gridMax.y), designModel_,
+                     clock_ * 0.6f);
 
   if (button("+ POINT", t, px(92), false, true, true, display)) {
     // Inserted after the selected point, halfway to the next, so an insert lands where
@@ -540,7 +572,10 @@ void Ui::drawBodyTab(app::Shell& shell) {
     }
   }
   ImGui::SameLine();
-  if (button("RESET", t, px(88), false, true, true, display)) designFor_.clear();
+  if (button("RESET", t, px(88), false, true, true, display)) {
+    designs_.erase(designFor_);
+    designFor_.clear();
+  }
 
   sectionHead("STEP 2  REVOLVE AND SYMMETRY", t, fontSmall_, scale_);
   int segs = designModel_.segments;

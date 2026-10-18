@@ -137,18 +137,16 @@ std::vector<Direction> expandAtomOriented(const SmallVec<std::int16_t, kMaxDims>
 std::uint64_t expectedDirectionCount(const SmallVec<std::int16_t, kMaxDims>& mags,
                                      std::uint8_t dims);
 
-/// The atoms of a *line* mover: `maxK` steps along one axis (a rook), or along two axes
-/// (a bishop). This is the queen with `maxK = kUnlimited` and the king with `maxK = 1`,
-/// in any number of dimensions.
+/// The atoms of a *line* mover: `maxK` steps along a line using up to `maxAxes` axes at
+/// once, one atom `[1]^r` for each r in 1..maxAxes (r > dims expands to nothing, so the
+/// same list serves every board).
 ///
-/// A line mover uses one or two axes and never three or more. On a 3-D board that is 6
-/// rook directions plus 12 face diagonals, 18 in all, and **no cube diagonal**;
-/// `[1,1,1]` is the Raumschach unicorn, a different and much stronger piece. Folding the
-/// unicorn into the queen is the mistake this function exists to prevent: it is invisible
-/// in two dimensions, where `[1,1,1]` expands to nothing, and only shows up once the
-/// board has a third axis.
+///   king   `straightLineAtoms(1)`: one or two axes - rook and bishop steps (default 2).
+///   queen  `straightLineAtoms(kUnlimited, kMaxDims)`: every straight line in every
+///          dimension, so on a cube also the triagonals, on a tesseract the
+///          quadragonals, and so on. The unicorn is the triagonal slider *alone*.
 ///
-/// Tests assert the result has no direction of support three or more at any dimension.
-[[nodiscard]] std::vector<MoveAtom> straightLineAtoms(std::uint32_t maxK);
+/// Tests assert the queen reaches every direction of support 1..dims.
+[[nodiscard]] std::vector<MoveAtom> straightLineAtoms(std::uint32_t maxK, std::size_t maxAxes = 2);
 
 }  // namespace cb

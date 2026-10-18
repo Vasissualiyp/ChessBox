@@ -11,6 +11,8 @@
 
 #include "assets/piece_model.hpp"
 #include "render/piece_icon.hpp"
+#include "render/piece_mesh.hpp"
+#include "support/variants.hpp"
 #include "render/ui_widgets.hpp"
 
 using namespace cb;
@@ -208,6 +210,25 @@ TEST_CASE("a valley in an outline stays a valley", "[render]") {
     }
   }
 
+  SECTION("every body profile the designer draws fills without overlap") {
+    // The designer fills the profile with this triangulator on a y-up screen mapping. A
+    // fill that conserves area has no overlapping triangles, which is what showed up as
+    // dark wedges across the rook's profile.
+    for (const char* name : {"dome", "tower", "wedge", "spire", "crown", "monolith", "horn"}) {
+      const assets::PieceModel m = assets::archetypeModel(name);
+      std::vector<ImVec2> pts;
+      for (const assets::ModelPoint& q : m.profile.points) {
+        pts.push_back(ImVec2(static_cast<float>(q.x) * 0.22f,
+                             220.0f - static_cast<float>(q.y) * 0.22f));
+      }
+      std::vector<int> idx;
+      widgets::triangulate(pts.data(), static_cast<int>(pts.size()), idx);
+      INFO(name);
+      REQUIRE(idx.size() == (pts.size() - 2) * 3);
+      CHECK(std::abs(triArea(pts, idx) - area(pts)) < 1.0f);
+    }
+  }
+
   SECTION("an outline that is not a shape is caught before it is drawn") {
     // Not by the filler - ear clipping fills, it does not validate, and on four points
     // it will happily halve a bow tie. Whether an outline crosses itself is a question
@@ -219,3 +240,17 @@ TEST_CASE("a valley in an outline stays a valley", "[render]") {
 }
 
 #endif
+
+TEST_CASE("a queen with triagonals is still a queen, and only a unicorn is a horn",
+          "[render]") {
+  // The queen rides every straight line, cube diagonals included, so her atoms contain
+  // the unicorn's. Classifying by "has a triagonal" turned every queen on a 3-D board
+  // into a unicorn; what makes a unicorn a unicorn is having nothing else.
+  for (const char* name : {"cube5", "hyper4_8x8", "torus3d_8x8"}) {
+    const VariantSpec v = test::loadVariant(name);
+    INFO(name);
+    CHECK(archetypeFor(v.pieces[v.findPiece("queen")]) == Archetype::Crown);
+  }
+  const VariantSpec cube = test::loadVariant("cube5");
+  CHECK(archetypeFor(cube.pieces[cube.findPiece("unicorn")]) == Archetype::Horn);
+}

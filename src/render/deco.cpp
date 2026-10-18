@@ -88,6 +88,18 @@ void icon(ImDrawList* dl, IconStyle style, Archetype shape, ImVec2 centre, float
     dl->_Path = path;
     dl->PathStroke(line, ImDrawFlags_Closed, std::max(1.0f, size * 0.022f));
   }
+  // The cut-outs - a rook's crenellation gaps, a knight's eye. Without them the faceted
+  // crown is a solid slab. They are painted in the outline colour, which is the token or
+  // tile the figure stands on, so the gap reads as the thing behind the piece.
+  for (const IconPoly& poly : art.cuts) {
+    if (poly.size() < 3) continue;
+    dl->PathClear();
+    for (const IconPoint& p : poly) {
+      dl->PathLineTo(ImVec2(centre.x + (p.x - 50.0f) * k, centre.y + (p.y - 50.0f) * k));
+    }
+    widgets::fillPolygon(dl, dl->_Path.Data, dl->_Path.Size, line);
+    dl->PathClear();
+  }
 }
 
 const Archetype kPieceShapes[]{Archetype::Tower, Archetype::Wedge, Archetype::Crown,

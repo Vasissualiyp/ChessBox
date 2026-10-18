@@ -107,8 +107,7 @@ symbol = "R"
 name = "queen"
 symbol = "Q"
 
-  # A line mover: one axis (rook) or two (bishop), sliding. No [1,1,1]: the cube
-  # diagonal is the unicorn's, not the queen's.
+  # Every straight line: one axis (rook), two (bishop) or three (the cube diagonals).
   [[piece.move]]
   vector = [1]
   max = "inf"
@@ -116,6 +115,11 @@ symbol = "Q"
 
   [[piece.move]]
   vector = [1, 1]
+  max = "inf"
+  mode = "slide"
+
+  [[piece.move]]
+  vector = [1, 1, 1]
   max = "inf"
   mode = "slide"
 

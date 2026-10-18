@@ -488,6 +488,10 @@ static bool gTrailerEditCapture = false;
 /// defaults.
 static std::string gTrailerClipDir;
 static bool gUseUserSettings = false;
+/// `--piece NAME`: the piece the designer capture opens on.
+static std::string gPieceName;
+/// `--ui-click "x,y;x,y"`: pointer clicks (in pixels) replayed before the capture.
+static std::string gUiClicks;
 static int gTrailerMaxFrames = 30 * 900;
 /// `--trailer-frames`: write numbered PPMs instead of piping into ffmpeg (for analysis).
 static bool gTrailerKeepFrames = false;
@@ -699,6 +703,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
   }
   // Which page of the editor a designer capture wants. Set here rather than inside the
   // loop: it is where the review is pointed, not something a frame decides.
+  if (!gPieceName.empty()) (*ui)->openEditorPiece(gPieceName);
   if (screen == "designer") (*ui)->openEditorPage(1, 0);
   if (screen == "body") (*ui)->openEditorPage(1, 1);
   if (screen == "flat") (*ui)->openEditorPage(1, 2);
@@ -985,6 +990,23 @@ int captureFrame(const std::string& variantName, const std::string& path,
   if (!renderFrame(0.0f).has_value()) return 1;
   if (!renderFrame(1.0f).has_value()) return 1;
 
+  // Pointer clicks, one per ';': move, press, release on three frames, so a button sees a
+  // real click and the capture shows what the program does with it.
+  {
+    std::size_t at = 0;
+    while (at < gUiClicks.size()) {
+      const std::size_t end = std::min(gUiClicks.find(';', at), gUiClicks.size());
+      float x = 0.0f, y = 0.0f;
+      if (std::sscanf(gUiClicks.substr(at, end - at).c_str(), "%f,%f", &x, &y) == 2) {
+        for (const bool down : {false, true, false}) {
+          (*ui)->injectMouse(x, y, down);
+          if (!renderFrame(0.0f).has_value()) return 1;
+        }
+      }
+      at = end + 1;
+    }
+  }
+
   if (benchFrames > 0) {
     // A frame-time benchmark with no display: the same offscreen path `--shot` uses, run
     // N times. It measures the CPU recording plus the GPU wait, which is the per-frame
@@ -1184,6 +1206,8 @@ int main(int argc, char** argv) {
           "the reviewable screens include it; --screen watch is the bundled-game "
           "picker.\n"
           "--width W --height H set the capture/window resolution (default 1920x1080).\n"
+          "--ui-click \"x,y;x,y\" replays pointer clicks (pixels) before the capture.\n"
+          "--piece NAME opens the designer captures on that piece.\n"
           "--dims 2..4 is how many dimensions the designer's move preview shows.\n");
       return 0;
     }
@@ -1254,6 +1278,10 @@ int main(int argc, char** argv) {
       moveT = std::strtof(argv[++i], nullptr);
     else if (arg == "--bench-frame" && i + 1 < argc)
       benchFrames = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
+    else if (arg == "--ui-click" && i + 1 < argc)
+      gUiClicks = argv[++i];
+    else if (arg == "--piece" && i + 1 < argc)
+      gPieceName = argv[++i];
     else if (arg == "--dims" && i + 1 < argc)
       previewDims = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
     else if (!arg.starts_with("-"))

@@ -271,6 +271,11 @@ void fillPolygon(ImDrawList* dl, const ImVec2* pts, int n, ImU32 col) {
   // points would change under the loop that is reading them, which shows up as vertices
   // in the 1e33 range rather than as anything that looks like a drawing bug.
   const std::vector<ImVec2> p(pts, pts + n);
+  // And cleared: `AddTriangleFilled` *appends* to the pending path, so with the caller's
+  // polygon still in it the first triangle was filled as the convex hull of the whole
+  // outline - which is what closed a rook's notches over and drew wedges across the
+  // designer's profile. Callers that keep their points save a copy first.
+  dl->PathClear();
   std::vector<int> idx;
   triangulate(p.data(), n, idx);
   if (idx.empty()) return;

@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -142,6 +143,15 @@ class Ui {
   /// How many dimensions the move preview shows. For `--shot`, so a 4-D preview is
   /// reviewable without a mouse.
   void setPreviewDims(int dims) noexcept { previewDims_ = dims; }
+  /// The piece the designer opens on, by name. For `--shot --piece`.
+  /// Drive the pointer without a display, for `--shot --ui-click`: where it is and whether
+  /// the left button is down on the next frame.
+  void injectMouse(float x, float y, bool down) noexcept {
+    inject_ = true;
+    injectPos_ = ImVec2(x, y);
+    injectDown_ = down;
+  }
+  void openEditorPiece(std::string name) { pendingPiece_ = std::move(name); }
 
   /// Point the library at a variant, for a capture that names one - the same forcing the
   /// overture player gets from `jumpTo`. No effect once the player has picked.
@@ -318,6 +328,19 @@ class Ui {
   /// is stored is always the finished outline, so an icon stays as dumb as the shipped
   /// tables.
   bool designIconMirror_{false};
+  /// Bodies and icons authored this session, by piece name, so moving to another piece
+  /// and back (or between the three tabs) does not throw the work away.
+  struct Design {
+    assets::PieceModel model;
+    assets::IconModel icon;
+  };
+  std::map<std::string, Design> designs_;
+  /// A note from the last move edit that did not take, shown in red under the list.
+  std::string moveNote_;
+  std::string pendingPiece_;
+  bool inject_{false};
+  bool injectDown_{false};
+  ImVec2 injectPos_{0, 0};
   /// Which of the piece designer's three tabs is showing.
   int designTab_{0};
   /// How many dimensions the move preview board has, and how wide it is. A piece is

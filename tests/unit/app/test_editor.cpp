@@ -105,3 +105,25 @@ TEST_CASE("the editor saves to a file and reopens it", "[unit][app]") {
   std::error_code ec;
   std::filesystem::remove(path, ec);
 }
+
+TEST_CASE("PROBE rook added to every piece of every variant still loads", "[probe]") {
+  for (const char* name : {"standard","cube5","torus","klein","torus3d_8x8","hyper4_8x8","5d","t6","mobius","cylinder"}) {
+    auto editor = app::Editor::open(readFile(test::variantPath(name)), name);
+    REQUIRE(editor.has_value());
+    for (const auto& piece : editor->pieceNames()) {
+      auto atoms = editor->pieceAtoms(piece);
+      REQUIRE(atoms.has_value());
+      MoveAtom a;
+      a.mags.push(1);
+      a.maxK = kUnlimited;
+      a.mode = MoveMode::Slide;
+      atoms->push_back(a);
+      REQUIRE(editor->setPieceAtoms(piece, *atoms).has_value());
+      auto loaded = loadVariantToml(editor->serialize(), name);
+      INFO(name << " / " << piece);
+      CHECK(loaded.has_value());
+      if (!loaded.has_value()) WARN(name << "/" << piece << ": " << loaded.error().format());
+      editor->undo();
+    }
+  }
+}

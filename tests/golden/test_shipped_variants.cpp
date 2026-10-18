@@ -92,7 +92,7 @@ TEST_CASE("shipped variant node counts", "[golden][variants]") {
   const Expect cases[] = {
       {"standard", 20, 400},       {"cylinder", 20, 392},  {"torus", 54, 2535},
       {"mobius", 69, 4003},        {"klein", 48, 1977},    {"torus3d", 34, 1028},
-      {"torus3d_twist", 42, 1616}, {"mirrorbox", 20, 396}, {"cube5", 52, 2665},
+      {"torus3d_twist", 42, 1616}, {"mirrorbox", 20, 396}, {"cube5", 56, 3095},
       {"hyper4", 39, 1380},        {"t6", 41, 2216},
   };
   for (const Expect& c : cases) {
@@ -105,24 +105,18 @@ TEST_CASE("shipped variant node counts", "[golden][variants]") {
   }
 }
 
-TEST_CASE("queen and king are straight-line movers in every shipped variant",
+TEST_CASE("the queen moves along every straight line, the king one or two axes",
           "[golden][variants]") {
-  // `straightLineAtoms` is the single definition of a line mover, and this is the
-  // check that the data agrees with it. A queen that also declared [1,1,1] would be
-  // the Raumschach unicorn wearing the queen's name: on a 3-D board a different
-  // piece, on a 2-D one invisibly identical - which is exactly why it needs a test.
+  // `straightLineAtoms` is the single definition, and this checks the data agrees with
+  // it: the queen has a slider [1]^r for every r up to the board's dimension, so on a
+  // cube she also rides the triagonals and on a tesseract the quadragonals.
   for (const std::string& name : shippedVariantNames()) {
     CAPTURE(name);
     const auto loaded = loadVariantFile(test::variantPath(name));
     REQUIRE(loaded.has_value());
     for (const PieceTypeDef& p : loaded->pieces) {
-      if (p.name == "queen") CHECK(p.atoms == straightLineAtoms(kUnlimited));
+      if (p.name == "queen") CHECK(p.atoms == straightLineAtoms(kUnlimited, loaded->dims.dims()));
       if (p.name == "king") CHECK(p.atoms == straightLineAtoms(1));
-      // And no piece anywhere claims a three-axis *step* as its own line: the
-      // unicorn may be a triagonal slider, but it is not named king or queen.
-      if (p.name == "queen" || p.name == "king") {
-        for (const MoveAtom& a : p.atoms) CHECK(a.mags.size() <= 2);
-      }
     }
   }
 }

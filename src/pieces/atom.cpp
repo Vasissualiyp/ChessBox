@@ -138,20 +138,19 @@ std::vector<Direction> expandAtomOriented(const SmallVec<std::int16_t, kMaxDims>
   return out;
 }
 
-std::vector<MoveAtom> straightLineAtoms(std::uint32_t maxK) {
+std::vector<MoveAtom> straightLineAtoms(std::uint32_t maxK, std::size_t maxAxes) {
   // One step wants a leap, more than one wants a slide so the path must be clear. A
   // single-step slide would behave identically but reads as a line it is not.
   const MoveMode mode = maxK <= 1 ? MoveMode::Leap : MoveMode::Slide;
-  MoveAtom axis;
-  axis.mags.push(1);
-  axis.maxK = maxK;
-  axis.mode = mode;
-  MoveAtom diagonal;
-  diagonal.mags.push(1);
-  diagonal.mags.push(1);
-  diagonal.maxK = maxK;
-  diagonal.mode = mode;
-  return {axis, diagonal};
+  std::vector<MoveAtom> out;
+  for (std::size_t r = 1; r <= maxAxes && r <= kMaxDims; ++r) {
+    MoveAtom a;
+    for (std::size_t i = 0; i < r; ++i) a.mags.push(1);
+    a.maxK = maxK;
+    a.mode = mode;
+    out.push_back(a);
+  }
+  return out;
 }
 
 std::uint64_t expectedDirectionCount(const SmallVec<std::int16_t, kMaxDims>& mags,

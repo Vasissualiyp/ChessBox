@@ -78,6 +78,11 @@ symbol = "Q"
   max = "inf"
   mode = "slide"
 
+  [[piece.move]]
+  vector = [1, 1, 1]
+  max = "inf"
+  mode = "slide"
+
 [[piece]]
 name = "king"
 symbol = "K"

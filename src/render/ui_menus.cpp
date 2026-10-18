@@ -801,7 +801,8 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
         "number of dimensions.");
     ImGui::Spacing();
     ImGui::TextUnformatted(
-        "Build a piece by adding moves. A rook plus a bishop is a queen on a flat board. "
+        "Build a piece by adding moves. A rook plus a bishop is a queen on a flat board; "
+        "the queen button adds every straight line - triagonals and beyond in more dimensions. "
         "The board on the left shows the piece in white at the centre and where it can "
         "go: green for a quiet move, red for a capture. Click the board to place black "
         "and white pieces - a pawn's capture only lights up when there is something to "
@@ -960,11 +961,21 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   if (names.empty()) {
     ImGui::TextUnformatted("This variant declares no pieces.");
   } else {
+    if (!pendingPiece_.empty()) {
+      for (int i = 0; i < static_cast<int>(names.size()); ++i) {
+        if (names[static_cast<std::size_t>(i)] == pendingPiece_) editorPiece_ = i;
+      }
+      pendingPiece_.clear();
+    }
     if (editorPiece_ < 0 || editorPiece_ >= static_cast<int>(names.size())) {
       editorPiece_ = 0;
     }
     sectionHead("PIECE", t, fontSmall_, scale_);
     ImGui::PushFont(small);
+    // The names here and the "add a move" bundles below are both called rook, bishop,
+    // knight and king; without a scope of their own they share an ImGui ID, and the
+    // second row answers the first one's clicks.
+    ImGui::PushID("piece-chips");
     for (int i = 0; i < static_cast<int>(names.size()); ++i) {
       if (i != 0) ImGui::SameLine();
       const bool selected = i == editorPiece_;
@@ -975,6 +986,7 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
       }
       ImGui::PopStyleColor(2);
     }
+    ImGui::PopID();
     ImGui::PopFont();
 
     // Three jobs on one piece - how it moves, what its body is, what its flat outline

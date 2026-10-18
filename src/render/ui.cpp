@@ -573,6 +573,11 @@ void Ui::tick(float dt) {
 void Ui::newFrame() {
   ImGui_ImplVulkan_NewFrame();
   ImGui_ImplSDL3_NewFrame();
+  if (inject_) {
+    ImGuiIO& io = ImGui::GetIO();
+    io.AddMousePosEvent(injectPos_.x, injectPos_.y);
+    io.AddMouseButtonEvent(0, injectDown_);
+  }
   ImGui::NewFrame();
 }
 

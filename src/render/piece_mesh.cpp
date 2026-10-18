@@ -679,8 +679,10 @@ Archetype archetypeFor(const PieceTypeDef& piece) {
   bool oriented = false;
   std::size_t maxOrder = 0;
   std::size_t maxDiagonalOrder = 0;
+  bool axisLine = false;  // a rook's family: a slide along one axis
   for (const MoveAtom& a : piece.atoms) {
     maxOrder = std::max(maxOrder, a.mags.size());
+    if (a.mags.size() == 1 && a.mode == MoveMode::Slide && a.maxK > 1) axisLine = true;
     if (a.oriented) oriented = true;
     if (a.mode == MoveMode::Slide && a.maxK > 1) slides = true;
     if (a.mode == MoveMode::Leap || a.maxK == 1) leaps = true;
@@ -693,7 +695,9 @@ Archetype archetypeFor(const PieceTypeDef& piece) {
   }
 
   if (oriented) return Archetype::Dome;                   // moves only forward: a pawn
-  if (maxDiagonalOrder >= 3) return Archetype::Horn;      // needs three axes at once
+  // Three axes at once *and nothing else* is a unicorn. A queen rides the triagonals too,
+  // but she also rides the axes, and that family is what makes her a queen.
+  if (maxDiagonalOrder >= 3 && !axisLine) return Archetype::Horn;
   if (!slides && maxOrder >= 2) return Archetype::Wedge;  // a leaper with an offset
   if (slides && piece.atoms.size() >= 2)
     return Archetype::Crown;  // several sliding families

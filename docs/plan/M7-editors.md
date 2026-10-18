@@ -466,3 +466,25 @@ the surface a human needs to replace the placeholder models every clip currently
 M7.1/M7.2 (movement, then fields/rules) already have their first cut and complete the
 editor around it; the board and gamemode editors (M7.5) are not part of Wave 1 and stay in
 Wave 2.
+
+
+## Revision 2026-10-18 - piece designer fixes
+
+- **Red box on "rook".** The piece-name chips and the "add a move" bundles are both
+  labelled rook / bishop / knight / king, so they shared an ImGui ID and Dear ImGui drew
+  its "conflicting ID" error over the editor. Each row now has its own `PushID` scope.
+  Reproduced headlessly with the new `--ui-click "x,y;..."` and `--piece NAME` capture
+  flags (pointer events injected before the shot), which is how the designer is reviewed.
+- **`fillPolygon` filled the convex hull.** It copied the caller's points but left them
+  in `dl->_Path`, and `AddTriangleFilled` appends to the pending path, so the first
+  triangle was the hull of the whole outline: the wedges across the profile editor and
+  the closed-over crenellations. It now clears the path first.
+- **Menu animations ignored cut-outs.** `overture_scene.cpp` and `deco.cpp` drew only an
+  icon's `fills`, so a faceted rook's crown was a solid rectangle. They now paint `cuts`.
+- **Queen = every straight line.** A queen is `straightLineAtoms(kUnlimited, dims)`;
+  `archetypeFor` calls a piece a unicorn (Horn) only when it has no one-axis slider.
+- Body tab: the live revolve preview that its text promised is now drawn; bodies and
+  icons authored in a session are kept per piece; move steps cannot be 0; a failed edit
+  shows its message in red; the add-a-move row has a "queen" bundle.
+- Still open: bodies and icons are not yet written into the variant file or used by the
+  renderer (M7.3.4 onward), and there is no element-placement tool.

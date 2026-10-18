@@ -25,9 +25,8 @@ TEST_CASE("cube5 - a 5x5x5 board with unicorns", "[golden][dims]") {
 
   // Direction counts follow from the atoms alone, and are what a reader can check:
   // rook 6, bishop 12 (planar diagonals), unicorn 8 (triagonals), knight 24. The
-  // queen and king are line movers - one axis or two, never three - so 6+12 = 18,
-  // and specifically *not* the 26 they would have if they also rode the unicorn's
-  // triagonals. See straightLineAtoms.
+  // queen rides every straight line, 6+12+8 = 26; the king is a one-or-two-axis stepper
+  // (18). See straightLineAtoms.
   const PieceTypeId rook = v.findPiece("rook");
   const PieceTypeId bishop = v.findPiece("bishop");
   const PieceTypeId unicorn = v.findPiece("unicorn");
@@ -38,6 +37,7 @@ TEST_CASE("cube5 - a 5x5x5 board with unicorns", "[golden][dims]") {
   REQUIRE(v.pieces[knight].atoms[0].dirCount(Color::White) == 24);
   REQUIRE(v.pieces[v.findPiece("queen")].atoms[0].dirCount(Color::White) == 6);
   REQUIRE(v.pieces[v.findPiece("queen")].atoms[1].dirCount(Color::White) == 12);
+  REQUIRE(v.pieces[v.findPiece("queen")].atoms[2].dirCount(Color::White) == 8);
   REQUIRE(v.pieces[v.findPiece("king")].atoms[0].dirCount(Color::White) == 6);
   REQUIRE(v.pieces[v.findPiece("king")].atoms[1].dirCount(Color::White) == 12);
 
@@ -50,11 +50,11 @@ TEST_CASE("cube5 - a 5x5x5 board with unicorns", "[golden][dims]") {
 
   Position p = Position::startPosition(v);
   const MoveGen gen(v);
-  // Hand-derived: 10 pawn pushes, 12 knight, 12 bishop, 8 unicorn, 10 queen; both
+  // Hand-derived: 10 pawn pushes, 12 knight, 12 bishop, 8 unicorn, 14 queen (10 plus four triagonal); both
   // rooks and the king are completely blocked by their own army. The queen lost the
   // four triagonal moves she used to have when she stopped being part unicorn.
-  REQUIRE(gen.perft(p, 1) == 52);
-  REQUIRE(gen.perft(p, 2) == 2665);
+  REQUIRE(gen.perft(p, 1) == 56);
+  REQUIRE(gen.perft(p, 2) == 3095);
 }
 
 TEST_CASE("hyper4 - a 4x4x4x4 board", "[golden][dims]") {
