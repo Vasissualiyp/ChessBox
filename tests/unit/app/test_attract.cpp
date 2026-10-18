@@ -57,21 +57,19 @@ TEST_CASE("every attract beat is a real, legal game for its variant",
   // Six beats on five shapes: Klein appears twice - fold in, then ease back out to the
   // same ring waypoint it folded in from, before the cut into the 3-D torus (M13.9
   // revision).
-  const std::vector<std::string> expected{"cylinder", "cylinder", "torus",
+  const std::vector<std::string> expected{"standard", "cylinder", "torus",
                                           "klein",    "klein",    "torus3d_8x8"};
   REQUIRE(seq.size() == expected.size());
   for (std::size_t i = 0; i < expected.size(); ++i) {
     CAPTURE(i);
     CHECK(seq[i].variant == expected[i]);
   }
-  // The opener is the cylinder at `formed = 0` - the board still flat, drawn by the same
-  // renderer as the roll that follows - so there is no cut into the shape, only the one
-  // board curling up.
-  REQUIRE(seq.front().variant == "cylinder");
-  REQUIRE(seq.front().formedFrom == 0.0f);
-  REQUIRE(seq.front().formedTarget == 0.0f);
+  // The opener is the real standard board; the cylinder beat then starts flat
+  // (`formedFrom = 0`) and the camera takes the shape renderer's half turn, so the cut is
+  // the same picture and the roll-up is the first thing that moves.
+  REQUIRE(seq.front().variant == "standard");
   REQUIRE(seq[1].variant == "cylinder");
-  REQUIRE(seq[1].formedFrom < 0.0f);  // inherits the flat board the opener ended on
+  REQUIRE(seq[1].formedFrom == 0.0f);
   // `continuesPosition` beats are not legal from their own variant's start - they are a
   // legal continuation of whatever the previous beat's game ended on, carried across
   // through `embedOnto` exactly as `Shell::startAttractStep` carries it (M13.9 Part F).
@@ -131,7 +129,7 @@ TEST_CASE("the attract sequence plays every shape and loops back forever",
   // continuous"): every later beat continues the position right before it, all the way
   // back to `standard`'s own canonical start, so a lap has to replay that start too, not
   // skip straight to the shape beats.
-  CHECK(seen.back() == "cylinder");
+  CHECK(seen.back() == "standard");
   CHECK(seen.back() == seq[0].variant);
   CHECK(shell->attracting());
   CHECK(shell->attractStep() == 0);
@@ -231,8 +229,8 @@ TEST_CASE("the attract cut switches the pieces to the flat icon style",
   REQUIRE(runTo(5));  // 3-D torus: icon pucks on
   CHECK(shell->currentVariant() == "torus3d_8x8");
   CHECK(shell->settings().shapePieceCylinders);
-  REQUIRE(runTo(0));  // the loop wraps all the way back to the opener: sculptural again
-  CHECK(shell->currentVariant() == "cylinder");
+  REQUIRE(runTo(0));  // the loop wraps all the way back to standard: sculptural again
+  CHECK(shell->currentVariant() == "standard");
   CHECK_FALSE(shell->settings().shapePieceCylinders);
   REQUIRE(runTo(1));  // and on into cylinder, same as the first lap
   CHECK(shell->currentVariant() == "cylinder");
@@ -258,7 +256,7 @@ TEST_CASE("every cut in the sequence lands on the previous shape's own end-of-st
   // beat directly - and ends fully formed (an open tube); torus starts at its own
   // open-tube waypoint - the same picture, bit-for-bit, by construction of the two
   // morphs.
-  CHECK(cylinder.formedFrom < 0.0f);  // continues the opener's flat board
+  CHECK(cylinder.formedFrom == 0.0f);  // rolls up from flat
   CHECK(cylinder.formedTarget == 1.0f);
   CHECK(torus.formedFrom == view::kTorusRollEnd);
   CHECK(torus.formedTarget == 1.0f);
@@ -302,7 +300,6 @@ TEST_CASE("every cut in the sequence lands on the previous shape's own end-of-st
   CHECK(shells.continuesPosition);
 
   // Standard has nothing to morph from - the sequence's own cold open.
-  CHECK(standard.variant == "cylinder");
-  CHECK(standard.formedFrom == 0.0f);
-  CHECK(standard.formedTarget == 0.0f);
+  CHECK(standard.variant == "standard");
+  CHECK(standard.formedFrom == 1.0f);
 }

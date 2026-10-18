@@ -455,6 +455,12 @@ class Shell {
   /// player's own orbit, or wherever the last keyframe left them. A no-op with no session
   /// or an empty track.
   void advanceCameraTrack(float dt);
+  /// Where the shape on screen is centred right now (the renderer's bounds centre; the
+  /// flat board's centre where there is no shape). A keyframe's target is stored relative
+  /// to the standard board's centre and applied relative to this, so a camera authored
+  /// on one shape stays on the middle of the next one instead of on the edge of it.
+  [[nodiscard]] float flatBoardYaw() const;
+  void setTrailerShapeCentre(const view::Vec3& centre) noexcept { shapeCentre_ = centre; }
 
   void pause();
   void resume();
@@ -513,12 +519,16 @@ class Shell {
   std::vector<WatchGame> bundled_;
   /// The main-menu attract sequence, empty when none is running (M13.9).
   AttractSequence attract_;
+  view::Vec3 shapeCentre_{3.5f, 3.5f, 0.7f};
   std::size_t attractIndex_{0};
   TrailerCamera trailerCamera_{TrailerCamera::Authored};
   bool trailerEditing_{false};
   /// A beat was entered outside `advanceAttract` (a jump); the next call reports it.
   bool trailerCutPending_{false};
   float trailerClock_{0.0f};
+  /// Added to the trailer timeline position so it stays continuous across a cut (a beat's
+  /// first move starts at once, which would otherwise skip the clock ahead); it decays to 0.
+  float trailerShift_{0.0f};
   float swayWeight_{1.0f};
   float trailerKeySpeed_{2.0f};
   TrailerPose editPose_;

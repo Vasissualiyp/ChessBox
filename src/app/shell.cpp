@@ -461,57 +461,63 @@ void Shell::advanceWatching(float dt) {
   if (!session_->advanceWatching(dt)) go(Screen::MainMenu);
 }
 
+namespace {
+/// The standard board's centre: what a recorded keyframe's target is measured from.
+const view::Vec3 kBoardCentre{3.5f, 3.5f, 0.7f};
+}  // namespace
+
 AttractSequence defaultAttractSequence() {
-  // Cylinder (flat) -> cylinder (rolling up) -> torus -> Klein bottle -> (Klein eases
-  // back to a torus) -> the 8x8x4 3-D torus, then round again. Every line is real, legal
-  // play, verified through the engine's own legality: `startWatching` replays it move by
-  // move and a bad move fails the load.
+  // Standard -> cylinder -> torus -> Klein bottle -> (Klein eases back to a torus) -> the
+  // 8x8x4 3-D torus, then round again. Every line is real, legal play, verified through
+  // the engine's own legality: `startWatching` replays it move by move and a bad move
+  // fails the load.
   //
-  // It is one continuous game and one continuous picture (M13.9). Every beat but the
-  // first continues the position right before it through `embedOnto`, and every cut is
-  // invisible because the two sides are the same picture: the opener is the cylinder at
-  // `formed = 0`
-  // - the board still flat, drawn by the same renderer as everything after it - so the
-  // roll that follows is the *same* board curling up, not a cut from a different
-  // renderer. Cylinder's end state is the torus morph's `kTorusRollEnd` waypoint, the
-  // torus's end state is Klein's `kKleinRingEnd`, Klein eases back to that waypoint
-  // before the 3-D torus, which opens with its levels collapsed onto that ring and
-  // spreads them apart. The camera is carried across every cut by `startAttractStep`,
-  // never reset.
+  // It is one continuous game (M13.9 Part F): every beat but the first continues the
+  // position right before it through `embedOnto`, and every cut between shapes is a real
+  // geometry morph (cylinder's end state is the torus morph's `kTorusRollEnd` waypoint,
+  // the torus's end state is Klein's `kKleinRingEnd`, Klein eases back to that waypoint
+  // before the 3-D torus, which opens with its levels collapsed onto one ring and spreads
+  // them apart over the beat).
   //
-  // The opener is 18 plies (9 moves) - short on purpose, because a viewer gone by move 20
-  // never sees a shape. Klein fields no bishop or queen at all (a bishop or queen gives
-  // check from almost anywhere once a surface has no two-colouring), so the opener spends
-  // its 18 plies trading exactly those: both bishop pairs and both queens come off, and
-  // both rooks and all four knights stay. None of its moves wraps: the board looks flat,
-  // so a piece sliding off one edge to the other would read as a teleport. The later
-  // lines were found by a search over the engine's own legal moves (material-safe at two
-  // plies, no shuffling, at least one wrapped step per shape beat, at most one capture),
-  // so each is quiet, varied and shows the seam. The loop wraps back to the opener.
+  // `standard` is 18 plies (9 moves) - short on purpose, because a viewer gone by move 20
+  // never sees a shape (M13.9 revision, "the standard game is too long"). Klein fields no
+  // bishop or queen at all (a bishop or queen gives check from almost anywhere once a
+  // surface has no two-colouring), so the opener spends its 18 plies trading exactly
+  // those: both bishop pairs and both queens come off, and nothing else of value does.
+  // Bxh6 gxh6 and Bxa6 bxa6 take a bishop each for a pawn; the black bishop on c8 trades
+  // itself and the queens off on g4/d7; the last black bishop goes on e5 to dxe5. Both
+  // sides keep every rook and knight to the 3-D torus; only pawns drop at the Klein cut,
+  // by `embedOnto`'s ordinary rule for a piece type the target does not declare.
+  //
+  // The shape beats' ten-ply lines were found by a search over the engine's own legal
+  // moves (material-safe at two plies, no shuffling, at least one wrapped step across a
+  // seam, at most one capture), so each is quiet, varied and shows the seam. The loop
+  // wraps back to `standard`, because every later beat continues the one before it.
+  //
   AttractSequence seq;
   seq.push_back(
-      {.variant = "cylinder",
-       .moves = {"b2b4", "e7e5", "h2h3", "d8g5", "c1g5", "f8e7", "g5e7", "g8e7", "e2e3",
-                 "b7b5", "d1g4", "c8g4", "f1c4", "b5c4", "h3g4", "b8c6", "h1h6", "d7d6"},
-       .formedTarget = 0.0f,
-       .formedFrom = 0.0f,
+      {.variant = "standard",
+       .moves = {"d2d4", "d7d6", "c1h6", "g7h6", "e2e4", "c8g4", "d1g4", "d8d7", "g4d7",
+                 "e8d7", "f1a6", "b7a6", "g1f3", "f8g7", "e1f1", "g7e5", "d4e5", "c7c6"},
+       .formedFrom = 1.0f,
        .dwell = 0.22f});
   seq.push_back({.variant = "cylinder",
-                 .moves = {"h6h1", "e8f8", "b1h2", "a8c8", "h2a4", "f8g8", "a1c1", "h8a8",
-                           "a4g5", "g8h8"},
+                 .moves = {"f3g1", "d7c7", "b1c3", "b8d7", "a1d1", "a8f8", "h1a1", "f8a8",
+                           "g1h3", "c7b8"},
+                 .formedFrom = 0.0f,
                  .continuesPosition = true,
                  .morphSpeed = 0.7f});
   seq.push_back({.variant = "torus",
-                 .moves = {"g1e8", "h8g8", "h1g1", "g8h8", "g5a6", "h7a6", "g1h1", "h8g8",
-                           "h1g1", "g8h7"},
+                 .moves = {"d1d8", "b8b7", "a1b1", "d7b8", "f1f8", "g8a1", "f8g1", "a1g8",
+                           "h3b4", "b7c7"},
                  .formedFrom = view::kTorusRollEnd,
                  .continuesPosition = true,
                  .morphSpeed = 0.25f});
   // Klein hides its far side, so it ghosts and draws flat icon pucks throughout both of
-  // its beats, not just the fold-in.
+  // its beats (M13.9 revision, Part H), not just the fold-in.
   seq.push_back({.variant = "klein",
-                 .moves = {"e1d1", "e7c1", "e8c2", "h7a7", "g1b2", "c1h8", "c2a1", "a7h6",
-                           "b2b6", "h8a6"},
+                 .moves = {"d8d3", "g8a7", "g1f1", "b8h2", "f1e2", "h8c8", "b1g7", "c8f7",
+                           "c3b5", "c7c8"},
                  .ghostTarget = 0.35f,
                  .formedFrom = view::kKleinRingEnd,
                  .flatPieces = true,
@@ -525,10 +531,10 @@ AttractSequence defaultAttractSequence() {
                  .continuesPosition = true,
                  .morphSpeed = 0.5f});
   seq.push_back({.variant = "torus3d_8x8",
-                 .moves = {"(0,0,0)-(7,0,2)", "(0,7,0)-(3,7,0)", "(3,0,0)-(3,1,1)",
-                           "(7,5,0)-(0,4,0)", "(1,5,0)-(1,0,0)", "(0,5,0)-(6,4,0)",
-                           "(7,0,2)-(6,6,2)", "(6,4,0)-(0,3,0)", "(1,0,0)-(6,0,0)",
-                           "(0,4,0)-(7,4,1)"},
+                 .moves = {"(1,4,0)-(3,5,0)", "(2,7,0)-(1,0,0)", "(6,6,0)-(5,6,0)",
+                           "(0,6,0)-(6,6,1)", "(1,3,0)-(7,2,0)", "(7,1,0)-(7,7,1)",
+                           "(5,6,0)-(5,1,0)", "(7,7,1)-(1,0,1)", "(7,2,0)-(1,2,3)",
+                           "(1,0,0)-(1,7,1)"},
                  .ghostTarget = 0.35f,
                  .formedFrom = 1.0f,
                  .flatPieces = true,
@@ -569,20 +575,19 @@ Result<void> Shell::startAttractStep(std::size_t index) {
   // from the beat before (never for the opener, which sets its own).
   std::optional<view::OrbitCamera> carried;
   float carriedAspect = 0.0f;
+  bool fromFlatBoard = false;
   if (index > 0 && session_ != nullptr) {
     carried = session_->playerCamera();
     carriedAspect = session_->boardAspect();
+    fromFlatBoard = attract_[attractIndex_].variant == "standard";
   }
   if (auto ok = startGame(step.variant); !ok.has_value()) return ok;
   if (carried.has_value()) {
     if (carriedAspect > 0.0f) session_->setBoardAspect(carriedAspect);
-    session_->setOrbitCamera(*carried);
-  } else if (index == 0) {
-    // The opener is the shape renderer's own flat board, which sits a half turn about the
-    // vertical from the ordinary flat board; turn the view back so white is nearest, as
-    // on the board a player knows.
-    view::OrbitCamera c = session_->camera();
-    c.yaw += 3.14159265f;
+    view::OrbitCamera c = *carried;
+    // The shape renderer's flat board sits a half turn about the vertical from the
+    // ordinary board; turning the view with it keeps the picture identical across the cut.
+    if (fromFlatBoard && step.formedFrom == 0.0f) c.yaw += 3.14159265f;
     session_->setOrbitCamera(c);
   }
   // Build the game file from the session's own started position, so its FEN always
@@ -601,6 +606,12 @@ Result<void> Shell::startAttractStep(std::size_t index) {
   // one left, so the shape cuts rather than re-rolling every time.
   if (step.formedFrom >= 0.0f) settings_.geometryFormed = step.formedFrom;
   if (step.spreadFrom >= 0.0f) settings_.geometryShellSpread = step.spreadFrom;
+  // The flat board has no slide to carry (it is the ordinary board); every other cut
+  // keeps the slide, so the shape does not turn under the camera.
+  if (step.formedFrom == 0.0f) {
+    settings_.geometrySlideU = 0.0f;
+    settings_.geometrySlideV = 0.0f;
+  }
   // The piece style is a discrete per-beat choice, so it snaps at the cut rather than
   // easing like the pose (M13.9 revision, Part H).
   settings_.shapePieceCylinders = trailerFlatPieces_.value_or(step.flatPieces);
@@ -613,6 +624,8 @@ Result<void> Shell::startAttractStep(std::size_t index) {
   // track's "last cue" is forgotten so the new beat's first keyframe is reached.
   cameraTrackCue_.reset();
   lastPly_ = static_cast<std::size_t>(-1);
+  moveElapsed_ = 0.0f;
+  trailerShift_ = 0.0f;
   editSub_ = 0;
   applyTrailerCamera();
   return {};
@@ -638,6 +651,7 @@ void Shell::setTrailerKeySpeed(float s) noexcept {
 void Shell::setTrailerEditing(bool on) {
   if (!attracting() || on == trailerEditing_) return;
   trailerEditing_ = on;
+  if (on) trailerShift_ = 0.0f;
   if (on) {
     trailerCamera_ = TrailerCamera::Authored;
     applyTrailerCamera();
@@ -813,6 +827,7 @@ bool Shell::advanceAttract(float dt) {
     return false;
   }
   trailerClock_ += dt;
+  trailerShift_ -= std::clamp(trailerShift_, -dt * 0.8f, dt * 0.8f);
   if (session_->watching()) session_->advanceWatching(dt);
   updateMovePhase(dt, step);
   // With keyframes in charge the spline owns the morph, so the beat's own easing stands
@@ -840,10 +855,13 @@ bool Shell::advanceAttract(float dt) {
   // board (see `defaultAttractSequence`'s own comment) - replaying them fresh from a
   // *shape* beat's own start, to skip the opener on a loop, is not a safe substitute.
   const std::size_t next = attractIndex_ + 1 < attract_.size() ? attractIndex_ + 1 : 0;
+  const float before = trailerTime();
   if (auto ok = startAttractStep(next); !ok.has_value()) {
     attract_.clear();
     return false;
   }
+  // Keep the timeline position continuous through the cut; the loop's wrap is a hard cut.
+  if (next != 0) trailerShift_ = before - trailerTime();
   return true;
 }
 
@@ -904,6 +922,8 @@ void Shell::recordCameraKeyframe(float speed) {
   CameraKeyframe kf;
   kf.cue = currentCue();
   kf.camera = session_->camera();
+  kf.camera.target = kf.camera.target - shapeCentre_ + kBoardCentre;
+  if (attracting()) kf.camera.yaw -= flatBoardYaw();
   // In edit mode the pose eases toward the edit buttons' targets; the keyframe records
   // the targets, not wherever the ease happens to be this frame.
   const bool fromEdit = attracting() && trailerEditing_;
@@ -1060,7 +1080,7 @@ float Shell::trailerTime() const {
   const float frac = trailerEditing_ ? static_cast<float>(editSub_) / 8.0f
                                      : std::min(0.999f, moveElapsed_ / moveDuration_);
   return beatOffset(attractIndex_) +
-         static_cast<float>(session_->game().moveHistory().size()) + frac;
+         static_cast<float>(session_->game().moveHistory().size()) + frac + trailerShift_;
 }
 
 std::vector<std::pair<float, const CameraKeyframe*>> Shell::trailerKeys() const {
@@ -1082,7 +1102,7 @@ std::vector<std::pair<float, const CameraKeyframe*>> Shell::trailerKeys() const 
 
 bool Shell::splinePoseActive() const {
   if (!attracting() || trailerCamera_ != TrailerCamera::Authored) return false;
-  return poseKeysFrom(trailerCueAt(trailerTime(), 8).beat) <= trailerTime();
+  return poseKeysFrom(attractIndex_) <= trailerTime() - trailerShift_;
 }
 
 float Shell::poseKeysFrom(std::size_t beat) const {
@@ -1112,10 +1132,44 @@ void Shell::applySplineAt(float g, bool toEditPose) {
     slideV.emplace_back(time, kf->slideV);
     if (time <= g) discrete = kf;  // flat pieces and invert step at their keyframe
   }
-  session_->setOrbitCamera(view::splineCamera(path, g));
-  // The pose (morph, ghost, slide, piece style, invert) is only the keyframes' once this
-  // beat's first keyframe is reached; before that the beat's own morph plays.
-  if (poseKeysFrom(trailerCueAt(g, 8).beat) > g) return;
+  view::OrbitCamera cam = view::splineCamera(path, g);
+  cam.target = cam.target - kBoardCentre + shapeCentre_;
+  cam.yaw += flatBoardYaw();
+  session_->setOrbitCamera(cam);
+  // The slide follows the spline all the way, never stepping in at the first keyframe; on
+  // a beat that rises from the flat board it comes in with the roll (the flat board has no
+  // slide to carry).
+  float slideRamp = 1.0f;
+  const float firstKey = poseKeysFrom(attractIndex_);
+  if (attract_[attractIndex_].formedFrom == 0.0f && std::isfinite(firstKey)) {
+    // A beat's first move starts at once, so its clock begins one unit in.
+    const float start = beatOffset(attractIndex_) + 1.0f;
+    const float t = std::clamp((g - trailerShift_ - start) / std::max(0.25f, firstKey - start),
+                               0.0f, 1.0f);
+    slideRamp = t * t * (3.0f - 2.0f * t);  // smoothstep, arriving exactly at the key
+  }
+  // A slide only matters modulo one lap round the tube, so only the remainder is eased in:
+  // easing the whole of a slide of several laps would spin the board round and round.
+  const float lap = static_cast<float>(session_->variant().dims.extent(0));
+  const float rawU = view::splineScalar(slideU, g);
+  // The laps are taken from the beat's first keyframe, once, so the remainder never flips
+  // sign as the spline passes a half-lap.
+  float anchorU = rawU;
+  for (const auto& [time, kf] : keys) {
+    if (kf->cue.beat == attractIndex_ + 1) {
+      anchorU = kf->slideU;
+      break;
+    }
+  }
+  const float wholeLaps = lap > 0.0f ? std::round(anchorU / lap) * lap : 0.0f;
+  // Whole laps are the same picture only once the tube has closed; on the rolling sheet
+  // they would be a translation.
+  const bool closed = attract_[attractIndex_].formedFrom != 0.0f || settings_.geometryFormed >= 0.9999f;
+  settings_.geometrySlideU = (rawU - wholeLaps) * slideRamp + (closed ? wholeLaps : 0.0f);
+  settings_.geometrySlideV = view::splineScalar(slideV, g) * slideRamp;
+  // The rest of the pose (morph, ghost, piece style, invert) is only the keyframes' once
+  // this beat's first keyframe is reached; before that the beat's own morph plays.
+  if (poseKeysFrom(attractIndex_) > g - trailerShift_) return;
   const float f = std::clamp(view::splineScalar(formed, g), 0.0f, 1.0f);
   const float gh = std::clamp(view::splineScalar(ghost, g), 0.35f, 1.0f);
   const float sp = std::clamp(view::splineScalar(spread, g), 0.0f, 1.0f);
@@ -1126,10 +1180,18 @@ void Shell::applySplineAt(float g, bool toEditPose) {
     settings_.geometryGhost = gh;
     settings_.geometryShellSpread = sp;
   }
-  settings_.geometrySlideU = view::splineScalar(slideU, g);
-  settings_.geometrySlideV = view::splineScalar(slideV, g);
   settings_.shapePieceCylinders = discrete->flatPieces;
   settings_.geometryInvert = discrete->invert;
+}
+
+float Shell::flatBoardYaw() const {
+  // The shape renderer's flat board is the ordinary board turned a half turn about the
+  // vertical, so a keyframe's yaw means the same picture on both only with this turn added
+  // on the ordinary board's beat - which is what makes the cut into the cylinder seamless.
+  return attracting() && attractIndex_ < attract_.size() &&
+                 attract_[attractIndex_].variant == "standard"
+             ? 3.14159265f
+             : 0.0f;
 }
 
 void Shell::setTrailerGrid(int grid) noexcept {

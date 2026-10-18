@@ -292,7 +292,11 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
   // compensation below makes the *rendered* pattern never depend on the slide amount in
   // the first place, so there is no longer a longer period to protect against. Reverted
   // to the plain two laps every other warp already uses.
-  const float sv = slidesAlongRanks(v) ? wrapSlide(pose.slideV, 2.0f * fnz) / fnz : 0.0f;
+  float sv = slidesAlongRanks(v) ? wrapSlide(pose.slideV, 2.0f * fnz) / fnz : 0.0f;
+  // A rank slide moves the board along the tube - which is open, and so has nowhere to go -
+  // until the bend closes it into a ring. It comes in with the bend, or the first bent
+  // frame would carry the whole board away from where the open tube left it.
+  if (kind == app::SurfaceKind::Torus) sv *= stageForm(form, view::kTorusRollEnd, 1.0f);
   // A nonzero square shift only lines the rank seam up at `sv == 0` by itself:
   // `kleinSurf` samples `lemniscateAngle(u + collapsePhase * v)`, and the seam's true
   // partner of `(u, rank 0)` is `(1 - u - collapsePhase * (v_lo + v_hi), rank nz - 1)`

@@ -414,6 +414,22 @@ void frameBoard(app::Shell& shell) {
 /// and a cut between two pictures of the same shape moves nothing. The angle is never
 /// touched. A first-order lag (about a quarter-second) rather than a snap: the framing
 /// target moves continuously, and so does the camera that follows it.
+void syncShapeCentre(app::Shell& shell) {
+  app::Session* session = shell.session();
+  if (session == nullptr) return;
+  const render::BoardOptions options = optionsFor(shell);
+  if (!options.surface) {
+    shell.setTrailerShapeCentre({3.5f, 3.5f, 0.7f});
+    return;
+  }
+  const render::PlaySurface surf =
+      render::PlaySurface::build(session->variant(), poseFrom(shell.settings(), session->variant()));
+  if (surf.empty()) return;
+  const view::Bounds b = surf.bounds();
+  // The ordinary board is looked at 0.7 above its plane; keep that lift over the shape.
+  shell.setTrailerShapeCentre({b.centerX(), b.centerY(), b.centerZ() + 0.7f});
+}
+
 void easeTrailerFraming(app::Shell& shell, float dt) {
   app::Session* session = shell.session();
   if (session == nullptr || !shell.trailerAutoFrames()) return;
@@ -855,6 +871,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
                     shell->currentVariant().c_str(), written);
       }
       if (!shell->attracting()) break;
+      syncShapeCentre(*shell);
       shell->advanceCameraTrack(step);
       easeTrailerFraming(*shell, step);
       shell->session()->advanceAnimation(step);
@@ -1725,7 +1742,10 @@ int main(int argc, char** argv) {
     // attract sequence or a watched/played game lasts - not just during the trailer, the
     // same way a track could be recorded over an ordinary game too. A no-op with no
     // session or no track, so this costs nothing when the scaffold is unused.
-    if (shell->hasGame()) shell->advanceCameraTrack(dt);
+    if (shell->hasGame()) {
+      syncShapeCentre(*shell);
+      shell->advanceCameraTrack(dt);
+    }
 
     // Set once the interface has built this frame: the surface view draws the board
     // itself, so the ordinary renderer stays out of the way (M17).

@@ -1700,3 +1700,33 @@ hand (`trailerUserTookCamera`) - the likeliest cause of the "3-D mouse move disc
 report: the spline or the auto-framing overwrote the drag every frame. The in-game stutter
 was the loop waiting for events (10 frames a second) whenever no piece was in flight;
 the trailer now counts as animating.
+
+### Revision 2026-10-17 (b): the standard opener is back, and every cut re-checked frame by frame
+
+The cylinder opener of the previous revision was a mistake: the trailer opens on the real
+`standard` board again, and the cylinder beat starts flat (`formedFrom = 0`), so the roll
+is the first thing that moves. Keyframes are pinned to (variant, beat), which is why the
+variant swap made the standard beat's keyframes look deleted - the track file was never
+touched.
+
+Found by rendering a lap with the author's own settings and keyframes (`--trailer-clip DIR
+--user-settings --trailer-frames`) and diffing consecutive frames:
+
+- **Keyframe targets are relative to the shape's centre** (`Shell::setTrailerShapeCentre`):
+  a recorded target is measured from the standard board's centre and applied relative to
+  the shape's bounds centre, so a camera authored on one shape stays on the middle of the
+  next instead of staring at empty space beside it.
+- **The standard beat's camera takes the shape renderer's half turn** (`flatBoardYaw`),
+  and the 0.7 lift above the board is kept over the shape, so the cut is the same picture.
+- **The trailer clock is continuous across a cut** (`trailerShift_`): a beat's first move
+  starts at once, which skipped the timeline ~1.5 moves ahead in one frame and made the
+  camera spline lurch; the shift decays at 0.8 units/s.
+- **The player's thickness, width and rank slide no longer pop in** on the first rolled
+  frame: thickness (Tube, Torus, and now the Klein ring) and the torus's width ramp in
+  with the roll, the torus's rank slide with the bend; the keyframe slide eases in over the
+  stretch before a beat's first keyframe, as a remainder modulo one lap.
+
+Remaining by measurement (diff against a ~1.0 median): the standard-to-cylinder cut ~10
+(the two renderers shade differently: slab, colours), the Klein cut ~5 (icon pucks swap in),
+the 3-D torus cut ~6, and ~13-17 where the rolling cylinder fills the frame under the
+author's close-up keyframes.

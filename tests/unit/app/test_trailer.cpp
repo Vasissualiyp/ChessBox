@@ -58,7 +58,7 @@ TEST_CASE("the trailer never follows a piece, even on a flat board with route se
   shell->settings().followStrength = 1.0f;
   shell->startAttract(defaultAttractSequence());
   REQUIRE(shell->attracting());
-  REQUIRE(shell->currentVariant() == "cylinder");  // the flat-looking opener
+  REQUIRE(shell->currentVariant() == "standard");
   CHECK_FALSE(shell->session()->followsMove());
   // The player's own preference is theirs: the trailer must not rewrite it.
   CHECK(shell->settings().cameraMode == "route");
@@ -159,7 +159,7 @@ TEST_CASE("jumping to a beat replays the chain so it continues the position",
   // And a jump backwards still works.
   shell->trailerGoto(0, 0);
   CHECK(shell->attractStep() == 0);
-  CHECK(shell->currentVariant() == "cylinder");
+  CHECK(shell->currentVariant() == "standard");
   // The next advance reports the cut so the front end re-frames.
   CHECK(shell->advanceAttract(1.0f / 60.0f));
 }
@@ -202,7 +202,7 @@ TEST_CASE("the standard opener is short and the whole chain is one continuous ga
           "[unit][app][trailer]") {
   const AttractSequence seq = defaultAttractSequence();
   REQUIRE_FALSE(seq.empty());
-  CHECK(seq.front().variant == "cylinder");
+  CHECK(seq.front().variant == "standard");
   // "By move 20 people will click off": the flat board gets at most 20 plies.
   CHECK(seq.front().moves.size() <= 20);
   CHECK(seq.front().dwell >= 0.0f);  // and plays briskly
@@ -288,7 +288,7 @@ namespace {
 
 /// A keyframe on the trailer's first beat, `ply` moves in, with a given yaw and morph.
 CameraKeyframe trailerKey(std::size_t beat, std::size_t ply, std::size_t sub, float yaw,
-                          float formed = 1.0f, const char* variant = "cylinder") {
+                          float formed = 1.0f, const char* variant = "standard") {
   CameraKeyframe kf;
   kf.cue = {variant, ply, beat + 1, sub};
   kf.camera.yaw = yaw;
@@ -390,7 +390,7 @@ TEST_CASE("fractional steps move through a move on the chosen grid",
   shell->setTrailerGrid(8);
   CHECK(shell->trailerStepFraction(-1));
   shell->recordCameraKeyframe(2.0f);
-  CHECK(shell->cameraTrack().find({"cylinder", ply, 1, 5}) != nullptr);
+  CHECK(shell->cameraTrack().find({"standard", ply, 1, 5}) != nullptr);
 }
 
 TEST_CASE("restarting the trailer goes back to the first beat", "[unit][app][trailer]") {
@@ -409,7 +409,7 @@ TEST_CASE("restarting the trailer goes back to the first beat", "[unit][app][tra
   CHECK(shell->session() == before);    // deferred: the interface holds the session
   CHECK(shell->advanceAttract(kStep));  // reported as a cut so the front end re-frames
   CHECK(shell->attractStep() == 0);
-  CHECK(shell->currentVariant() == "cylinder");
+  CHECK(shell->currentVariant() == "standard");
   CHECK(shell->attracting());
   CHECK(shell->trailerCamera() == TrailerCamera::Authored);  // the mode is kept
   CHECK(shell->session()->game().moveHistory().size() == 1);
@@ -700,7 +700,7 @@ TEST_CASE("keys step to the next and previous keyframe", "[unit][app][trailer][k
   shell->startAttract(defaultAttractSequence());
   shell->cameraTrack().set(trailerKey(0, 3, 0, 0.1f));
   shell->cameraTrack().set(trailerKey(0, 7, 4, 0.2f));
-  shell->cameraTrack().set(trailerKey(1, 2, 0, 0.3f));  // the cylinder beat proper
+  shell->cameraTrack().set(trailerKey(1, 2, 0, 0.3f, 1.0f, "cylinder"));  // the cylinder beat
   constexpr float kStep = 1.0f / 60.0f;
   shell->setTrailerPaused(true);
   CHECK(shell->requestTrailerSeekKey(+1));
@@ -738,11 +738,11 @@ TEST_CASE("a keyframe added while the trailer plays lands on the nearest eighth"
   const float here = shell->trailerTime();
   const TrailerCue cue = shell->trailerCueAt(here, 8);
   shell->recordCameraKeyframe(2.0f);
-  CHECK(shell->cameraTrack().find({"cylinder", cue.ply, cue.beat + 1, cue.sub}) !=
+  CHECK(shell->cameraTrack().find({"standard", cue.ply, cue.beat + 1, cue.sub}) !=
         nullptr);
   CHECK(shell->trailerKeyTimes().size() == 1);
   // Delete takes the keyframe nearest the playhead, not only one exactly on it.
-  for (int i = 0; i < 4; ++i) {
+  for (int i = 0; i < 1; ++i) {
     shell->session()->advanceAnimation(kStep);
     shell->advanceAttract(kStep);
   }
@@ -804,20 +804,20 @@ TEST_CASE("the camera is carried across a cut, not reset to the new beat's defau
   REQUIRE(cut);
   REQUIRE(shell->attractStep() == 1);
   const view::OrbitCamera after = shell->session()->camera();
-  CHECK(after.yaw == before.yaw);
+  // The cut from the ordinary board to the shape renderer's flat board is a half turn,
+  // so the picture stays the same.
+  CHECK(after.yaw == Catch::Approx(before.yaw + 3.14159265f));
   CHECK(after.pitch == before.pitch);
   CHECK(after.distance == before.distance);
 }
 
-TEST_CASE(
-    "the opener is the cylinder held flat, and every later beat continues one picture",
-    "[unit][app][trailer]") {
+TEST_CASE("the standard opener hands a flat cylinder beat the same picture",
+          "[unit][app][trailer]") {
   const AttractSequence seq = defaultAttractSequence();
   REQUIRE(seq.size() >= 2);
-  CHECK(seq[0].variant == "cylinder");
-  CHECK(seq[0].formedFrom == 0.0f);
-  CHECK(seq[0].formedTarget == 0.0f);  // it stays a flat board for the whole opener
-  CHECK(seq[1].formedFrom < 0.0f);     // and the roll starts from that same flat board
+  CHECK(seq[0].variant == "standard");
+  CHECK(seq[1].variant == "cylinder");
+  CHECK(seq[1].formedFrom == 0.0f);  // the roll starts from the same flat board
   CHECK(seq[1].formedTarget == 1.0f);
   // The slow morphs are slow on purpose: the torus's bend is the one that used to wind
   // up.

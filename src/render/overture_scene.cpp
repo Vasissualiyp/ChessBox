@@ -296,13 +296,17 @@ float lemniscateAngle(float u) {
 /// (-sin a, -sin 2a) = (sin -a, sin -2a), which is exactly a -> -a: the file reversed.
 /// So the cross-section pinches first, and then both seams close to machine precision.
 OvVec3 kleinSurf(float u, float v, float th, float pinch, float ph, float tau, float open,
-                 float evert = 0.0f, float phase = 0.0f, float thickness = 1.0f) {
-  const float xl = (u - 0.5f) * kW;
+                 float evert = 0.0f, float phase = 0.0f, float thickness = 1.0f,
+                 float ringThickness = 1.0f) {
+  // The ring's own cross-section carries the thickness setting too, so the ring is the
+  // same size as the torus's (it is the same picture at the cut); ramped in from the flat
+  // board by the caller. 1 changes nothing.
+  const float xl = (u - 0.5f) * kW * ringThickness;
   const float zl = (v - 0.5f) * kH;
   float cr = xl;
   float ca = 0.0f;
   if (th > 1e-4f) {
-    const float R = kW / th;
+    const float R = kW * ringThickness / th;
     const float a = xl / R;
     cr = R * std::sin(a);
     ca = R * std::cos(a) - R * sinc(th * 0.5f);
@@ -2674,7 +2678,10 @@ OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v, SurfacePose pos
     case app::SurfaceKind::Tube: {
       TubeOpt o;
       o.th = kTau * form;
-      o.thickness = pose.thickness;
+      // The flat board has no thickness to apply, so the tube's own radius multiplier
+      // comes in with the roll rather than on the first frame of it (a 1.8x pop at the
+      // cut otherwise, for a player who set it).
+      o.thickness = 1.0f + (pose.thickness - 1.0f) * stageForm(form, 0.0f, 0.25f);
       o.evert = e;
       return tube(u, v, o);
     }
@@ -2704,8 +2711,14 @@ OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v, SurfacePose pos
       const auto rampOn = [](float t, float hi) {
         return t >= 1.0f ? hi : 1.0f + (hi - 1.0f) * t;
       };
-      o.open = pose.openness * rampOn(close, 2.2f);
-      o.thickness = pose.thickness;
+      // The open tube has no ring radius, so the player's own width setting comes in with
+      // the bend too - at the waypoint the tube must equal the cylinder's, which has none.
+      const float width =
+          close >= 1.0f ? pose.openness : 1.0f + (pose.openness - 1.0f) * close;
+      o.open = width * rampOn(close, 2.2f);
+      // Full by the open-tube waypoint, so the cut from the cylinder is unchanged; from
+      // flat it comes in with the roll.
+      o.thickness = 1.0f + (pose.thickness - 1.0f) * stageForm(form, 0.0f, kTorusRollEnd);
       o.evert = e;
       return tube(u, v, o);
     }
@@ -2735,8 +2748,10 @@ OvVec3 derivedSurfaceAt(app::SurfaceKind kind, float u, float v, SurfacePose pos
       const float afterRing = stageForm(form, kKleinRingEnd, 1.0f);
       const float openShaped = form < kKleinRingEnd ? 1.0f + (2.2f - 1.0f) * ring
                                                     : 2.2f + (2.05f - 2.2f) * afterRing;
+      const float ringThick =
+          1.0f + (pose.thickness - 1.0f) * stageForm(form, 0.0f, kKleinRingEnd);
       return kleinSurf(u, v, k.th, k.pinch, k.ph, k.tau, pose.openness * openShaped, e,
-                       pose.collapsePhase, pose.thickness);
+                       pose.collapsePhase, pose.thickness, ringThick);
     }
     case app::SurfaceKind::FlatGrid:
     case app::SurfaceKind::MirrorBox:

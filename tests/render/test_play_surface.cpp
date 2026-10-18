@@ -3037,3 +3037,61 @@ TEST_CASE(
   REQUIRE(playShapeAt(v, a, l3, spread));
   CHECK(std::abs(l0.y - l3.y) > 1.0f);
 }
+
+namespace {
+// Where the first seat sits and how wide the shape is, at a given pose.
+std::pair<view::Vec3, view::Vec3> firstSeatAndSpan(const char* name, SurfacePose pose) {
+  const VariantSpec& v = *new VariantSpec(test::loadVariant(name));
+  const PlaySurface s = PlaySurface::build(v, pose);
+  const view::Bounds b = s.bounds();
+  return {s.seats()[0].centre, {b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ}};
+}
+float gap(const view::Vec3& a, const view::Vec3& b) {
+  return std::max({std::abs(a.x - b.x), std::abs(a.y - b.y), std::abs(a.z - b.z)});
+}
+}  // namespace
+
+TEST_CASE("the morph is continuous from the flat board for any thickness, width and slide",
+          "[render][morph]") {
+  // The trailer's cuts hide behind this: the flat board ignores the player's thickness,
+  // width and rank slide, so a shape that applied them on its first rolled frame jumped.
+  SurfacePose flat;
+  flat.formed = 0.0f;
+  flat.thickness = 1.81f;
+  flat.openness = 3.0f;
+  flat.slideU = -27.0f;
+  flat.slideV = 125.5f;
+  SurfacePose nudged = flat;
+  nudged.formed = 0.004f;
+  SurfacePose rolled = flat;
+  rolled.formed = view::kTorusRollEnd;
+  SurfacePose tubeEnd = flat;
+  tubeEnd.formed = 1.0f;
+  // The cylinder's flat start does not jump on the first rolled frame (the slide is the
+  // trailer's to ease in, `Shell::applySplineAt`, so it is left out here) ...
+  {
+    SurfacePose a0 = flat;
+    SurfacePose b0 = nudged;
+    a0.slideU = a0.slideV = b0.slideU = b0.slideV = 0.0f;
+    const auto a = firstSeatAndSpan("cylinder", a0);
+    const auto b = firstSeatAndSpan("cylinder", b0);
+    CHECK(gap(a.second, b.second) < 0.25f);
+  }
+  // ... and the torus, at its open-tube waypoint, is the cylinder at its own end.
+  {
+    const auto cyl = firstSeatAndSpan("cylinder", tubeEnd);
+    const auto tor = firstSeatAndSpan("torus", rolled);
+    CHECK(gap(cyl.first, tor.first) < 1e-3f);
+    CHECK(gap(cyl.second, tor.second) < 1e-3f);
+  }
+  // The Klein ring is the torus at its end.
+  {
+    SurfacePose torusEnd = flat;
+    torusEnd.formed = 1.0f;
+    SurfacePose ring = flat;
+    ring.formed = view::kKleinRingEnd;
+    const auto tor = firstSeatAndSpan("torus", torusEnd);
+    const auto kl = firstSeatAndSpan("klein", ring);
+    CHECK(gap(tor.second, kl.second) < 1e-3f);
+  }
+}
