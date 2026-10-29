@@ -1,3 +1,6 @@
+# ATTENTION! THE REPO MOVED!
+We are now EndspielZero: https://github.com/Vasissualiyp/EndspielZero
+
 # ChessBox
 
 A FOSS sandbox for chess-like games of essentially arbitrary shape.
